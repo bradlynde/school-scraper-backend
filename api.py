@@ -134,7 +134,7 @@ def health():
 
 @app.route("/run-pipeline", methods=["POST", "OPTIONS"])
 def run_pipeline():
-    """Run the full pipeline and return summary"""
+    """Run the full pipeline and return summary with CSV data"""
     if request.method == "OPTIONS":
         # Handle CORS preflight
         response = jsonify({})
@@ -149,6 +149,14 @@ def run_pipeline():
         
         # Run pipeline (this will take 2-5 minutes)
         summary = run_pipeline_steps(max_schools=max_schools)
+        
+        # Read the final CSV file and include it in response
+        csv_data = None
+        if summary.get("status") == "success" and os.path.exists("step5_final_contacts.csv"):
+            with open("step5_final_contacts.csv", "r", encoding="utf-8") as f:
+                csv_data = f.read()
+            summary["csvData"] = csv_data
+            summary["csvFilename"] = f"school_contacts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         
         # Add CORS headers to response
         response = jsonify(summary)

@@ -12,6 +12,8 @@ type PipelineSummary = {
   steps: StepSummary[];
   totalContacts: number;
   runId: string;
+  csvData?: string;
+  csvFilename?: string;
 };
 
 export default function Home() {
@@ -19,6 +21,27 @@ export default function Home() {
   const [summary, setSummary] = useState<PipelineSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  function downloadCSV(csvContent: string, filename: string) {
+    // Create a blob with the CSV content
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    
+    // Create a download link
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    
+    // Trigger download
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    // Clean up
+    URL.revokeObjectURL(url);
+  }
 
   async function runPipeline() {
     setStatus("Starting pipeline...");
@@ -101,9 +124,19 @@ export default function Home() {
 
         {summary && (
           <section className="w-full mt-6 p-6 bg-gray-50 dark:bg-gray-900 rounded-lg">
-            <h2 className="text-2xl font-semibold mb-4 text-black dark:text-zinc-50">
-              Latest Run Summary
-            </h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-semibold text-black dark:text-zinc-50">
+                Latest Run Summary
+              </h2>
+              {summary.csvData && (
+                <button
+                  onClick={() => downloadCSV(summary.csvData, summary.csvFilename || "school_contacts.csv")}
+                  className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+                >
+                  Download CSV
+                </button>
+              )}
+            </div>
             <div className="space-y-2 mb-4">
               <p className="text-gray-700 dark:text-gray-300">
                 <strong>Run ID:</strong> {summary.runId}
