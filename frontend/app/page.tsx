@@ -130,9 +130,9 @@ export default function Home() {
               <h2 className="text-2xl font-semibold text-black dark:text-zinc-50">
                 Latest Run Summary
               </h2>
-              {summary.csvData && (
+              {summary.csvData && summary.csvFilename && (
                 <button
-                  onClick={() => downloadCSV(summary.csvData, summary.csvFilename || "school_contacts.csv")}
+                  onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
                   className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
                 >
                   Download CSV
