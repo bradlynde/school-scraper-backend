@@ -13,14 +13,8 @@ import pandas as pd
 
 app = Flask(__name__)
 
-# Enable CORS - update with your Vercel domain
-CORS(app, resources={
-    r"/run-pipeline": {
-        "origins": ["https://*.vercel.app", "http://localhost:3000"],
-        "methods": ["POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
-    }
-})
+# Enable CORS - allow all origins for now (restrict in production)
+CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type"]}})
 
 def run_pipeline_steps(max_schools=5):
     """
@@ -142,20 +136,31 @@ def health():
 def run_pipeline():
     """Run the full pipeline and return summary"""
     if request.method == "OPTIONS":
-        return "", 200
+        # Handle CORS preflight
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
     
     try:
         data = request.get_json() or {}
         max_schools = data.get("maxSchools", 5)
         
+        # Run pipeline (this will take 2-5 minutes)
         summary = run_pipeline_steps(max_schools=max_schools)
         
-        return jsonify(summary), 200
+        # Add CORS headers to response
+        response = jsonify(summary)
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
     except Exception as e:
-        return jsonify({
+        error_response = jsonify({
             "status": "error",
             "error": str(e)
-        }), 500
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
