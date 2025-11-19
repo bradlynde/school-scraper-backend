@@ -72,7 +72,7 @@ export default function Home() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ maxSchools: 5 }),
+        body: JSON.stringify({ maxSchools: 100 }),
       });
 
       if (!response.ok) {

@@ -38,7 +38,7 @@ def run_pipeline_steps(max_schools=100):
             "--state", "Texas",
             "--multiple-random-counties", str(max_schools),
             "--max-search-terms", "5",  # More search terms per county for better coverage
-            "--max-api-calls", "200",  # Increased API call limit for 100 schools
+            "--max-api-calls", "500",  # Increased API call limit for 100 schools (20 counties × 5 terms × 5 = 500 max)
             "--output", "step1_schools.csv"
         ], check=True, capture_output=True)
         
