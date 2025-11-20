@@ -193,7 +193,7 @@ class SchoolSearcher:
         
         start_time = time.time()
         counties_searched = []
-        max_counties_to_search = min(20, len(counties))  # Search up to 20 counties max
+        max_counties_to_search = min(100, len(counties))  # Search up to 100 counties max to reach target
         
         # Shuffle counties for randomness
         shuffled_counties = counties.copy()
