@@ -51,11 +51,27 @@ def run_pipeline_steps(batch_size=50):
             "schoolsFound": schools_found
         })
         
+        # Step 1.5: Filter Schools (Churches, Camps, etc.)
+        print("Running Step 1.5: Filtering Schools...")
+        subprocess.run([
+            "python3", "step1.5.py",
+            "--input", "step1_schools.csv",
+            "--output", "step1.5_schools_filtered.csv"
+        ], check=True, capture_output=True, timeout=1800)  # 30 minute timeout
+        
+        df1_5 = pd.read_csv("step1.5_schools_filtered.csv")
+        schools_filtered = len(df1_5)
+        summary["schoolsFound"] = schools_filtered  # Update with filtered count
+        summary["steps"].append({
+            "name": "Step 1.5: Filter Schools",
+            "schoolsFiltered": schools_filtered
+        })
+        
         # Step 2: Page Discovery - MAX 3 PAGES PER SCHOOL
         print("Running Step 2: Page Discovery (MAX 3 PAGES PER SCHOOL)...")
         subprocess.run([
             "python3", "step2.py",
-            "--input", "step1_schools.csv",
+            "--input", "step1.5_schools_filtered.csv",  # Use filtered schools
             "--output", "step2_pages.csv",
             "--max-pages-per-school", "3",  # Max 3 staff pages per school
             "--top-pages-limit", "3",  # Max 3 pages per school
