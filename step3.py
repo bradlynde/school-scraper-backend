@@ -283,7 +283,7 @@ class PageDiscoverer:
                 
                 # Store page info (we'll filter by threshold later)
                 page_info = {
-                'school_name': school_name,
+                    'school_name': school_name,
                     'url': current_url,
                     'title': title_text,
                     'priority_score': priority,
@@ -310,7 +310,7 @@ class PageDiscoverer:
                 
                 time.sleep(0.5)  # Polite crawling delay
             
-        except Exception as e:
+            except Exception as e:
                 print(f"    Error crawling {current_url}: {e}")
                 continue
         
