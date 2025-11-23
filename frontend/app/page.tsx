@@ -163,10 +163,11 @@ export default function Home() {
           setPollingInterval(null);
         }
         
-        setError(data.error || "Pipeline failed");
-        setStatus("Pipeline failed");
+        setError(data.error || data.statusMessage || "Pipeline failed");
+        setStatus("Pipeline failed - see error below");
         setIsRunning(false);
-        setViewState("start");
+        setSummary(data);
+        // Stay in progress view to show the error
       } else if (data.status === "running") {
         // Update progress
         setSummary(data);
@@ -521,10 +522,26 @@ export default function Home() {
             </div>
 
             {error && (
-              <div className="mt-6 p-4 bg-red-900/30 border border-red-800 rounded-lg">
-                <p className="text-red-300">
-                  <strong>Error:</strong> {error}
-                </p>
+              <div className="mt-6 p-6 bg-red-900/50 border-2 border-red-600 rounded-lg">
+                <div className="flex items-start">
+                  <div className="flex-shrink-0">
+                    <svg className="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div className="ml-3 flex-1">
+                    <h3 className="text-lg font-semibold text-red-300 mb-2">Pipeline Error</h3>
+                    <p className="text-red-200 text-sm whitespace-pre-wrap">{error}</p>
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <button
+                    onClick={resetToStart}
+                    className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
+                  >
+                    Return to Start
+                  </button>
+                </div>
               </div>
             )}
           </div>

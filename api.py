@@ -276,40 +276,54 @@ def run_streaming_pipeline(state: str, run_id: str):
     Initialize the pipeline and start processing the first county.
     Each county will trigger the next one via HTTP request.
     """
+    # Initialize progress tracking FIRST, before any operations that might fail
+    pipeline_runs[run_id] = {
+        "status": "running",
+        "progress": 0,
+        "currentStep": 1,
+        "totalSteps": 7,
+        "statusMessage": f"Starting pipeline for {state}...",
+        "steps": [],
+        "totalContacts": 0,
+        "totalContactsNoEmails": 0,
+        "schoolsFound": 0,
+        "csvData": None,
+        "csvFilename": None,
+        "csvNoEmailsData": None,
+        "csvNoEmailsFilename": None,
+        "error": None,
+        "countiesProcessed": 0,
+        "totalCounties": 0,
+        "currentCounty": None,
+        "currentCountyIndex": 0,
+    }
+    
     try:
         # Load counties for state
         counties = load_counties_from_state(state)
         total_counties = len(counties)
         
-        # Initialize progress tracking
-        pipeline_runs[run_id] = {
-            "status": "running",
-            "progress": 0,
-            "currentStep": 1,
-            "totalSteps": 7,
-            "statusMessage": f"Starting pipeline for {state} ({total_counties} counties)...",
-            "steps": [],
-            "totalContacts": 0,
-            "totalContactsNoEmails": 0,
-            "schoolsFound": 0,
-            "csvData": None,
-            "csvFilename": None,
-            "csvNoEmailsData": None,
-            "csvNoEmailsFilename": None,
-            "error": None,
-            "countiesProcessed": 0,
-            "totalCounties": total_counties,
-            "currentCounty": None,
-            "currentCountyIndex": 0,
-        }
+        # Update progress tracking with county info
+        pipeline_runs[run_id]["totalCounties"] = total_counties
+        pipeline_runs[run_id]["statusMessage"] = f"Starting pipeline for {state} ({total_counties} counties)..."
         
         # Start processing first county
         process_next_county(state, run_id, 0)
         
-    except Exception as e:
+    except FileNotFoundError as e:
+        # State file not found
+        error_msg = f"State file not found. Please ensure data/states/{state.lower().replace(' ', '_')}.txt exists in the repository."
         pipeline_runs[run_id]["status"] = "error"
-        pipeline_runs[run_id]["error"] = str(e)
-        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {str(e)}"
+        pipeline_runs[run_id]["error"] = error_msg
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+        import traceback
+        traceback.print_exc()
+    except Exception as e:
+        # Any other error
+        error_msg = str(e)[:500]  # Limit error message length
+        pipeline_runs[run_id]["status"] = "error"
+        pipeline_runs[run_id]["error"] = error_msg
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
         import traceback
         traceback.print_exc()
 
