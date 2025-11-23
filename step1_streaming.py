@@ -485,42 +485,7 @@ class SchoolSearcher:
         print("="*70)
 
 
-# Load Texas counties list (keeping same as original)
-TEXAS_COUNTIES = [
-    'Harris', 'Dallas', 'Tarrant', 'Bexar', 'Travis', 'Collin', 'Denton',
-    'Fort Bend', 'Hidalgo', 'Montgomery', 'El Paso', 'Williamson', 'Cameron',
-    'Brazoria', 'Galveston', 'Jefferson', 'Bell', 'Brazos', 'Webb', 'McLennan',
-    'Hays', 'Smith', 'Guadalupe', 'Nueces', 'Ellis', 'Johnson', 'Rockwall',
-    'Parker', 'Kaufman', 'Grayson', 'Bastrop', 'Bowie', 'Tom Green', 'Wichita',
-    'Comal', 'Victoria', 'Taylor', 'Hunt', 'Liberty', 'Gregg', 'Orange',
-    'Hardin', 'Ector', 'Midland', 'Potter', 'Randall', 'Amarillo', 'Angelina',
-    'Calhoun', 'Chambers', 'Coryell', 'Fayette', 'Harrison', 'Jackson', 'Kerr',
-    'Lamar', 'Matagorda', 'Medina', 'Navarro', 'Polk', 'San Patricio', 'Titus',
-    'Van Zandt', 'Walker', 'Wharton', 'Wilson', 'Wise', 'Atascosa', 'Bastrop',
-    'Bosque', 'Burleson', 'Caldwell', 'Cherokee', 'Crockett', 'DeWitt', 'Falls',
-    'Fannin', 'Franklin', 'Grimes', 'Hopkins', 'Houston', 'Jasper', 'Lavaca',
-    'Leon', 'Limestone', 'Live Oak', 'Mason', 'Milam', 'Morris', 'Nacogdoches',
-    'Panola', 'Red River', 'Rusk', 'Sabine', 'San Augustine', 'Shelby', 'Upshur',
-    'Wood', 'Zapata'
-]
-
-# Load Texas cities list
-TEXAS_CITIES = [
-    'Houston', 'San Antonio', 'Dallas', 'Austin', 'Fort Worth',
-    'El Paso', 'Arlington', 'Corpus Christi', 'Plano', 'Laredo',
-    'Lubbock', 'Garland', 'Irving', 'Amarillo', 'Grand Prairie',
-    'McAllen', 'Frisco', 'Brownsville', 'Pasadena', 'Killeen',
-    'Mesquite', 'McKinney', 'Carrollton', 'Midland', 'Denton',
-    'Abilene', 'Beaumont', 'Round Rock', 'Odessa', 'Waco',
-    'Richardson', 'Lewisville', 'Tyler', 'Wichita Falls', 'College Station',
-    'Pearland', 'San Angelo', 'Edinburg', 'Conroe', 'Sugar Land',
-    'Victoria', 'League City', 'Longview', 'Missouri City', 'Bryan',
-    'Pharr', 'Baytown', 'Temple', 'Georgetown', 'Harlingen',
-    'Rowlett', 'Euless', 'Pflugerville', 'DeSoto', 'Grapevine',
-    'Galveston', 'Rockwall', 'Bedford', 'Wylie', 'Keller',
-    'Sherman', 'Huntsville', 'Texarkana', 'Burleson', 'Friendswood',
-    'Coppell', 'Haltom City', 'Mansfield', 'La Porte', 'New Braunfels',
-    'Cedar Park', 'Port Arthur', 'Mission', 'Flower Mound', 'Atascocita'
-]
+# County and city lists have been moved to data/states/{state}.txt files
+# Use load_counties_from_state() function in streaming_pipeline.py to load them
 
 

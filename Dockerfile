@@ -22,8 +22,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the app
+# Copy the rest of the app (including data/states directory)
 COPY . .
+
+# Verify data/states directory exists
+RUN ls -la data/states/ | head -5 || echo "Warning: data/states directory not found"
 
 # Cloud Run listens on port 8080
 ENV PORT=8080

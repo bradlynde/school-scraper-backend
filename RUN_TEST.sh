@@ -35,6 +35,7 @@ cd "$(dirname "$0")"
 python3 streaming_pipeline.py \
   --google-api-key "$GOOGLE_PLACES_API_KEY" \
   --openai-api-key "$OPENAI_API_KEY" \
+  --state texas \
   --global-max-api-calls 100 \
   --max-pages-per-school 3 \
   --batch-size 0 \

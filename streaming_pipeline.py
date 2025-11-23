@@ -15,14 +15,55 @@ import argparse
 import time
 from typing import List, Iterator, Optional, Dict
 from datetime import datetime
+from pathlib import Path
 import traceback
 
 # Import shared models
 from shared.models import School, Page, PageContent, Contact
 
 # Import streaming steps
-from step1_streaming import SchoolSearcher, TEXAS_COUNTIES, TEXAS_CITIES
+from step1_streaming import SchoolSearcher
 from step2_streaming import filter_school
+
+
+def load_counties_from_state(state: str) -> List[str]:
+    """
+    Load counties for a given state from data/states/{state}.txt
+    
+    Args:
+        state: State name (e.g., 'texas', 'Texas', 'TEXAS')
+        
+    Returns:
+        List of county names
+        
+    Raises:
+        FileNotFoundError: If state file doesn't exist
+    """
+    # Normalize state name: lowercase, replace spaces with underscores
+    state_normalized = state.lower().replace(' ', '_')
+    
+    # Get the directory where this script is located
+    script_dir = Path(__file__).parent
+    state_file = script_dir / 'data' / 'states' / f'{state_normalized}.txt'
+    
+    if not state_file.exists():
+        raise FileNotFoundError(
+            f"State file not found: {state_file}\n"
+            f"Please create data/states/{state_normalized}.txt with one county per line"
+        )
+    
+    counties = []
+    with open(state_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            county = line.strip()
+            # Skip empty lines and comments
+            if county and not county.startswith('#'):
+                counties.append(county)
+    
+    if not counties:
+        raise ValueError(f"No counties found in {state_file}")
+    
+    return counties
 
 # Import step classes (will need to refactor these to support streaming)
 # For now, we'll import the existing classes and wrap them
@@ -41,12 +82,14 @@ class StreamingPipeline:
         google_api_key: str,
         openai_api_key: str,
         global_max_api_calls: int = 25,
-        max_pages_per_school: int = 3
+        max_pages_per_school: int = 3,
+        state: str = 'Texas'
     ):
         self.google_api_key = google_api_key
         self.openai_api_key = openai_api_key
         self.global_max_api_calls = global_max_api_calls
         self.max_pages_per_school = max_pages_per_school
+        self._state = state
         
         # Initialize step processors
         self.school_searcher = SchoolSearcher(google_api_key, global_max_api_calls)
@@ -337,14 +380,26 @@ class StreamingPipeline:
             )
         else:
             # Use counties - limit search terms per county to manage API calls
-            # With 100 API calls: ~2 search terms per county allows ~50 counties
-            # (accounting for Place Details calls for each school found)
-            from step1_streaming import TEXAS_COUNTIES
-            counties_to_use = counties or TEXAS_COUNTIES
-            max_search_terms_per_county = 2  # Limit to 2 search terms per county to manage API calls efficiently
+            # Load counties from state file if not provided
+            if not counties:
+                if not hasattr(self, '_state') or not self._state:
+                    raise ValueError("--state parameter is required when using county-based search")
+                counties = load_counties_from_state(self._state)
+                state_file_name = self._state.lower().replace(' ', '_')
+                print(f"Loaded {len(counties)} counties from data/states/{state_file_name}.txt")
+            
+            # For full state runs (no API limit), use more search terms per county
+            # For limited runs, use fewer search terms to manage API calls
+            if self.global_max_api_calls is None:
+                max_search_terms_per_county = 5  # More thorough search when no API limit
+                print("No API call limit - using 5 search terms per county for thorough search")
+            else:
+                max_search_terms_per_county = 2  # Limit to 2 search terms per county to manage API calls efficiently
+                print(f"API call limit: {self.global_max_api_calls} - using 2 search terms per county")
+            
             school_generator = self.school_searcher.discover_schools(
-                counties=counties_to_use,
-                state='Texas',
+                counties=counties,
+                state=self._state or 'Texas',
                 batch_size=batch_size,
                 max_search_terms=max_search_terms_per_county
             )
@@ -435,8 +490,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Streaming Pipeline - One Lead Through Entire System')
     parser.add_argument('--google-api-key', required=True, help='Google Places API key (legacy)')
     parser.add_argument('--openai-api-key', required=True, help='OpenAI API key')
-    parser.add_argument('--global-max-api-calls', type=int, default=25, help='Global API call cap (default: 25)')
-    parser.add_argument('--batch-size', type=int, default=0, help='Number of counties to search (0 = all)')
+    parser.add_argument('--state', required=True, help='State to search (e.g., texas, california) - loads counties from data/states/{state}.txt')
+    parser.add_argument('--global-max-api-calls', type=int, default=None, help='Global API call cap (None = no limit, for full state runs)')
+    parser.add_argument('--batch-size', type=int, default=0, help='Number of counties to search (0 = all counties in state)')
     parser.add_argument('--max-pages-per-school', type=int, default=3, help='Max pages per school (default: 3)')
     parser.add_argument('--output', default='final_contacts.csv', help='Output CSV (with emails)')
     parser.add_argument('--output-no-emails', default='final_contacts_no_emails.csv', help='Output CSV (no emails)')
@@ -448,7 +504,8 @@ if __name__ == "__main__":
         google_api_key=args.google_api_key,
         openai_api_key=args.openai_api_key,
         global_max_api_calls=args.global_max_api_calls,
-        max_pages_per_school=args.max_pages_per_school
+        max_pages_per_school=args.max_pages_per_school,
+        state=args.state
     )
     
     # Run pipeline
