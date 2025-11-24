@@ -60,15 +60,18 @@ def process_single_county(state: str, county: str, run_id: str, gcs_helper: Clou
     
     try:
         # Update progress for this county
+        print(f"[{run_id}] Starting processing for {county} County ({county_index + 1}/{total_counties})")
         pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
         pipeline_runs[run_id]["currentCounty"] = county
         pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
+        pipeline_runs[run_id]["currentStep"] = 1
         
         # Create temporary output files
         output_csv = f"/tmp/final_contacts_{county_run_id}.csv"
         output_no_emails_csv = f"/tmp/final_contacts_no_emails_{county_run_id}.csv"
         
         # Initialize pipeline for this county
+        print(f"[{run_id}] Initializing pipeline for {county} County...")
         pipeline = StreamingPipeline(
             google_api_key=os.getenv("GOOGLE_PLACES_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -78,6 +81,7 @@ def process_single_county(state: str, county: str, run_id: str, gcs_helper: Clou
         )
         
         # Run pipeline for this single county
+        print(f"[{run_id}] Running pipeline for {county} County (this may take 15-30 minutes)...")
         pipeline.run(
             counties=[county],  # Process only this county
             cities=None,
@@ -85,6 +89,7 @@ def process_single_county(state: str, county: str, run_id: str, gcs_helper: Clou
             output_csv=output_csv,
             output_no_emails_csv=output_no_emails_csv
         )
+        print(f"[{run_id}] Pipeline completed for {county} County")
         
         # Read results
         results = {
@@ -158,27 +163,40 @@ def process_next_county(state: str, run_id: str, county_index: int):
             print(f"County {county} failed: {result.get('error', 'Unknown error')}")
             pipeline_runs[run_id]["statusMessage"] = f"Warning: {county} County failed, continuing..."
         
+        # Update progress after county completion
+        pipeline_runs[run_id]["countiesProcessed"] = county_index + 1
+        pipeline_runs[run_id]["schoolsFound"] = pipeline_runs[run_id].get("schoolsFound", 0) + result.get('schools', 0)
+        
         # Trigger next county via HTTP request to ourselves
         # This ensures each county is a separate request (avoids timeout)
-        # Get Cloud Run URL from environment (set automatically by Cloud Run)
-        service_url = os.getenv("CLOUD_RUN_SERVICE_URL")
+        # Get Cloud Run URL - try multiple environment variables
+        service_url = os.getenv("SERVICE_URL")
         if not service_url:
-            # Fallback: try to construct from known patterns or use localhost for testing
-            service_url = os.getenv("SERVICE_URL", "http://localhost:8080")
+            # Try Cloud Run's automatic environment variable
+            service_url = os.getenv("CLOUD_RUN_SERVICE_URL")
+        if not service_url:
+            # Try to get from Cloud Run metadata or construct from known pattern
+            project_id = os.getenv("GOOGLE_CLOUD_PROJECT", "school-scraper-479121")
+            region = os.getenv("GOOGLE_CLOUD_REGION", "us-central1")
+            service_name = os.getenv("K_SERVICE", "school-scraper")
+            service_url = f"https://{service_name}-200036585956.{region}.run.app"
+            print(f"[{run_id}] Constructed service URL: {service_url}")
         
         next_url = f"{service_url}/process-county"
+        print(f"[{run_id}] Triggering next county ({county_index + 1}) via {next_url}")
         
         try:
             # Make async request to process next county
-            requests.post(next_url, json={
+            response = requests.post(next_url, json={
                 "state": state,
                 "run_id": run_id,
                 "county_index": county_index + 1
-            }, timeout=2)  # Fire and forget
+            }, timeout=5)  # Fire and forget
+            print(f"[{run_id}] Next county request sent, status: {response.status_code}")
         except Exception as e:
             # If self-request fails, continue in background thread as fallback
             # This handles cases where we can't make HTTP requests to ourselves
-            print(f"Self-request failed, using background thread: {e}")
+            print(f"[{run_id}] Self-request failed ({e}), using background thread as fallback")
             thread = threading.Thread(target=process_next_county, args=(state, run_id, county_index + 1))
             thread.daemon = True
             thread.start()
