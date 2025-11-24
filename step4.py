@@ -112,9 +112,9 @@ class ContentCollector:
     def safe_get(self, url: str) -> requests.Response:
         """Make HTTP request with retry logic"""
         for attempt in range(self.max_retries):
-        try:
-            response = requests.get(url, headers=self.headers, timeout=self.timeout)
-            response.raise_for_status()
+            try:
+                response = requests.get(url, headers=self.headers, timeout=self.timeout)
+                response.raise_for_status()
                 return response
             except requests.exceptions.Timeout:
                 if attempt < self.max_retries - 1:
@@ -126,7 +126,7 @@ class ContentCollector:
                     time.sleep(2 ** attempt)
                 else:
                     raise
-            return None
+        return None
     
     def fetch_with_selenium(self, url: str, interact: bool = True) -> Optional[str]:
         """
