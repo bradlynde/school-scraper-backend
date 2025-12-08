@@ -1,0 +1,55 @@
+# Top 50 Texas Counties by Population (2024)
+# Covers ~85% of Texas population
+# Use this for faster processing to reach 1000+ leads target
+
+Harris
+Dallas
+Tarrant
+Bexar
+Travis
+Collin
+Denton
+Fort Bend
+Hidalgo
+El Paso
+Montgomery
+Williamson
+Cameron
+Brazoria
+Bell
+Galveston
+Nueces
+Lubbock
+Hays
+Webb
+McLennan
+Smith
+Brazos
+Johnson
+Ellis
+Guadalupe
+Comal
+Parker
+Taylor
+Randall
+Grayson
+Kaufman
+Ector
+Midland
+Gregg
+Tom Green
+Potter
+Rockwall
+Victoria
+Bastrop
+Angelina
+Orange
+Henderson
+Coryell
+Hunt
+Walker
+Wise
+San Patricio
+Navarro
+Waller
+
