@@ -420,13 +420,13 @@ class StreamingPipeline:
         print("STEP 1: Discovering schools (New Places API Essentials tier)...")
         schools_discovered = 0
         
-            # Load counties from state file if not provided
-            if not counties:
-                if not hasattr(self, '_state') or not self._state:
+        # Load counties from state file if not provided
+        if not counties:
+            if not hasattr(self, '_state') or not self._state:
                 raise ValueError("--state parameter is required for county-based search")
-                counties = load_counties_from_state(self._state)
-                state_file_name = self._state.lower().replace(' ', '_')
-                print(f"Loaded {len(counties)} counties from assets/data/state_counties/{state_file_name}.txt")
+            counties = load_counties_from_state(self._state)
+            state_file_name = self._state.lower().replace(' ', '_')
+            print(f"Loaded {len(counties)} counties from assets/data/state_counties/{state_file_name}.txt")
             
         # Use 5 search terms per county (optimized from 10)
         max_search_terms_per_county = 5
