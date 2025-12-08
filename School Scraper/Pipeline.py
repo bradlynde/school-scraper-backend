@@ -427,12 +427,12 @@ class StreamingPipeline:
             counties = load_counties_from_state(self._state)
             state_file_name = self._state.lower().replace(' ', '_')
             print(f"Loaded {len(counties)} counties from assets/data/state_counties/{state_file_name}.txt")
-            
+        
         # Use 5 search terms per county (optimized from 10)
         max_search_terms_per_county = 5
         print(f"Using 5 search terms per county (Christian, Catholic, private, academy, prep)")
-            
-            school_generator = self.school_searcher.discover_schools(
+        
+        school_generator = self.school_searcher.discover_schools(
                 counties=counties,
                 state=self._state or 'Texas',
                 batch_size=batch_size,
