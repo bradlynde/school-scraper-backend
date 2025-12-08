@@ -466,8 +466,8 @@ class StreamingPipeline:
                       f"{self.stats['schools_processed']} processed | "
                       f"{unique_contacts} unique contacts ({total_contacts} total, +{new_unique_count} new)")
             else:
-            print(f"\nProgress: {schools_discovered} schools discovered | "
-                  f"{self.stats['schools_processed']} processed | "
+                print(f"\nProgress: {schools_discovered} schools discovered | "
+                      f"{self.stats['schools_processed']} processed | "
                       f"{unique_contacts} unique contacts ({total_contacts} total)")
         
         # Flush any pending LLM filter batches
