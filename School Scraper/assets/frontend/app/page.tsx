@@ -255,7 +255,7 @@ export default function Home() {
         // Start polling for status updates
         const interval = setInterval(() => {
           checkPipelineStatus(data.runId);
-        }, 60000); // Poll every 1 minute
+        }, 15000); // Poll every 15 seconds
         setPollingInterval(interval);
         
         // Initial status check

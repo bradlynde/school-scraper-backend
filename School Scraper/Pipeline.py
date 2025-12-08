@@ -494,6 +494,10 @@ class StreamingPipeline:
         else:
             print(f"No contacts to write to {output_csv}")
         
+        # Calculate contacts with and without emails
+        contacts_with_emails = [c for c in self.all_contacts if c.email and c.email.strip()]
+        contacts_without_emails = [c for c in self.all_contacts if not c.email or not c.email.strip()]
+        
         # Update stats
         self.stats['contacts_extracted'] = len(self.all_contacts)
         self.stats['unique_contacts'] = len(self.unique_contacts_set)
