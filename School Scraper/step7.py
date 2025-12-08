@@ -82,7 +82,8 @@ class LLMParser:
         """
         self.api_key = api_key
         self.model = model
-        self.client = OpenAI(api_key=api_key, timeout=15.0)  # 15 second timeout for all requests
+        # Note: timeout removed to avoid "signal only works in main thread" error when running in background threads
+        self.client = OpenAI(api_key=api_key)
     
     def parse_with_llm(self, html_chunk: str, school_name: str, url: str, max_retries: int = 1) -> str:
         """
