@@ -113,7 +113,7 @@ class HTMLReducer:
                 if parent and parent.name in ['ul', 'ol'] and len(parent.get_text(strip=True)) < 5000:
                     contact_sections.append(str(parent))
                 else:
-                contact_sections.append(str(li))
+                    contact_sections.append(str(li))
         
         # Strategy 2: Look for table rows (<tr>) that contain contact info
         # Staff directories often use tables
@@ -134,7 +134,7 @@ class HTMLReducer:
                 if parent and parent.name == 'table' and len(parent.get_text(strip=True)) < 10000:
                     contact_sections.append(str(parent))
                 else:
-                contact_sections.append(str(tr))
+                    contact_sections.append(str(tr))
         
         # Strategy 2b: Look for table cells with contact info (nested structures)
         for td in soup.find_all('td'):
