@@ -300,41 +300,41 @@ class SchoolSearcher:
                     
                     # New API returns 'places' array directly
                     results = data.get('places', [])
-                        
+                    
                     # Yield each school found (check school limit)
-                        for result in results:
+                    for result in results:
                         if self.max_schools is not None and self.stats['total_schools_found'] >= self.max_schools:
                             break
                         school = self._parse_new_result(result, county, query)
-                            if school:
-                                yield school
+                        if school:
+                            yield school
                         # Check again after yielding (in case limit was reached)
                         if self.max_schools is not None and self.stats['total_schools_found'] >= self.max_schools:
                             break
-                        
-                        # Check for next page token (pagination)
+                    
+                    # Check for next page token (pagination)
                     next_page_token = data.get('nextPageToken')
-                        while next_page_token and not self._hit_global_limit():
-                            # Wait 2 seconds before next page (Google requirement)
-                            time.sleep(2)
-                            self.stats['total_api_calls'] += 1
-                            
+                    while next_page_token and not self._hit_global_limit():
+                        # Wait 2 seconds before next page (Google requirement)
+                        time.sleep(2)
+                        self.stats['total_api_calls'] += 1
+                        
                         # Pagination request
                         pagination_body = {
                             'pageToken': next_page_token
-                            }
-                            
+                        }
+                        
                         response_page = requests.post(self.text_search_url, headers=headers, json=pagination_body, timeout=60)
-                            if response_page.status_code == 200:
-                                page_data = response_page.json()
+                        if response_page.status_code == 200:
+                            page_data = response_page.json()
                             page_results = page_data.get('places', [])
                             if page_results:
                                 for result in page_results:
                                     if self.max_schools is not None and self.stats['total_schools_found'] >= self.max_schools:
                                         break
                                     school = self._parse_new_result(result, county, query)
-                                        if school:
-                                            yield school
+                                    if school:
+                                        yield school
                                     # Check again after yielding (in case limit was reached)
                                     if self.max_schools is not None and self.stats['total_schools_found'] >= self.max_schools:
                                         break
@@ -342,8 +342,8 @@ class SchoolSearcher:
                                 if self.max_schools is not None and self.stats['total_schools_found'] >= self.max_schools:
                                     break
                             next_page_token = page_data.get('nextPageToken')
-                            else:
-                                break
+                        else:
+                            break
                     else:
                         break
                 
