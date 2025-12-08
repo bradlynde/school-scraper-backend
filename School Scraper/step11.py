@@ -391,7 +391,7 @@ class FinalCompiler:
             result = df_with_email.reset_index(drop=True)
         elif not df_no_email.empty:
             result = df_no_email.reset_index(drop=True)
-                else:
+        else:
             result = df.reset_index(drop=True)
         
         # Remove temporary normalization columns
@@ -527,7 +527,7 @@ class FinalCompiler:
         
         # Save all contacts to single file
         if not final_df.empty:
-        final_df.to_csv(output_csv, index=False)
+            final_df.to_csv(output_csv, index=False)
             self._copy_to_downloads(output_csv)
             print(f"\n✓ Saved {len(final_df)} total contacts to: {output_csv}")
             print(f"  - With emails: {len(df_with_emails)}")
@@ -535,7 +535,7 @@ class FinalCompiler:
         else:
             # Create empty CSV with headers if no contacts
             pd.DataFrame(columns=final_df.columns).to_csv(output_csv, index=False)
-        self._copy_to_downloads(output_csv)
+            self._copy_to_downloads(output_csv)
             print(f"\n⚠️  No contacts found")
         
         # Print summary (using combined data)
