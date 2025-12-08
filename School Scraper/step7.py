@@ -98,15 +98,6 @@ class LLMParser:
         Returns:
             CSV text from LLM (or empty string on error)
         """
-        import signal
-        
-        # Timeout handler
-        class TimeoutError(Exception):
-            pass
-        
-        def timeout_handler(signum, frame):
-            raise TimeoutError("LLM request timed out")
-        
         for attempt in range(max_retries):
             try:
                 # Build user message with metadata and HTML chunk only
@@ -135,35 +126,23 @@ HTML CONTENT:
                 else:
                     max_tokens = 8000
                 
-                # Set timeout: 15 seconds per request
-                # Use signal-based timeout as fallback if client timeout doesn't work
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(15)  # 15 second timeout
-                
-                try:
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": CONTACT_EXTRACTION_PROMPT},
-                            {"role": "user", "content": user_message}
-                        ],
-                        temperature=0.0,
-                        max_tokens=max_tokens
-                    )
-                finally:
-                    signal.alarm(0)  # Cancel timeout
+                # Note: Removed signal-based timeout as it doesn't work in background threads
+                # The OpenAI library will handle timeouts internally if needed
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": CONTACT_EXTRACTION_PROMPT},
+                        {"role": "user", "content": user_message}
+                    ],
+                    temperature=0.0,
+                    max_tokens=max_tokens
+                )
                 
                 # Extract response text
                 response_text = response.choices[0].message.content.strip()
                 
                 return response_text
                 
-            except TimeoutError:
-                print(f"      ⚠️  Request timed out after 15s (attempt {attempt + 1}/{max_retries})")
-                if attempt < max_retries - 1:
-                    time.sleep(1.0)
-                    continue
-                return ""
             except Exception as e:
                 error_str = str(e)
                 
