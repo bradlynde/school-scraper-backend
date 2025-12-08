@@ -19,11 +19,11 @@ ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 WORKDIR /app
 
 # Install Python dependencies
-COPY School\ Scraper/docs/requirements.txt ./requirements.txt
+COPY ["School Scraper/docs/requirements.txt", "./requirements.txt"]
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Copy the School Scraper directory
-COPY School\ Scraper/ ./
+# Copy the School Scraper directory contents
+COPY ["School Scraper/", "./"]
 
 # Verify assets/data/state_counties directory exists
 RUN ls -la assets/data/state_counties/ | head -5 || echo "Warning: assets/data/state_counties directory not found"
