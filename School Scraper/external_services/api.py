@@ -213,14 +213,50 @@ def aggregate_final_results(run_id: str, state: str):
         # Combine all results
         if all_dataframes:
             final_df = pd.concat(all_dataframes, ignore_index=True)
-            final_df = final_df.drop_duplicates(
-                subset=['First Name', 'Last Name', 'School Name'],
-                keep='first'
-            )
+            
+            # Check which columns exist for deduplication
+            # Try different possible column name variations
+            dedup_cols = []
+            for col_name in ['First Name', 'first_name', 'First_Name']:
+                if col_name in final_df.columns:
+                    dedup_cols.append(col_name)
+                    break
+            
+            for col_name in ['Last Name', 'last_name', 'Last_Name']:
+                if col_name in final_df.columns:
+                    dedup_cols.append(col_name)
+                    break
+            
+            for col_name in ['School Name', 'school_name', 'School_Name']:
+                if col_name in final_df.columns:
+                    dedup_cols.append(col_name)
+                    break
+            
+            # Only drop duplicates if we found the required columns
+            if len(dedup_cols) == 3:
+                final_df = final_df.drop_duplicates(subset=dedup_cols, keep='first')
+            elif len(dedup_cols) > 0:
+                # If we have at least some columns, use what we have
+                final_df = final_df.drop_duplicates(subset=dedup_cols, keep='first')
+            else:
+                # Fallback: drop duplicates on all columns
+                final_df = final_df.drop_duplicates(keep='first')
             
             # Count contacts with and without emails
-            contacts_with_emails = final_df[final_df['Email'].notna() & (final_df['Email'] != '') & (final_df['Email'].str.strip() != '')]
-            contacts_without_emails = final_df[final_df['Email'].isna() | (final_df['Email'] == '') | (final_df['Email'].str.strip() == '')]
+            # Check for Email column (try different variations)
+            email_col = None
+            for col_name in ['Email', 'email', 'EMAIL']:
+                if col_name in final_df.columns:
+                    email_col = col_name
+                    break
+            
+            if email_col:
+                contacts_with_emails = final_df[final_df[email_col].notna() & (final_df[email_col] != '') & (final_df[email_col].str.strip() != '')]
+                contacts_without_emails = final_df[final_df[email_col].isna() | (final_df[email_col] == '') | (final_df[email_col].str.strip() == '')]
+            else:
+                # No email column found
+                contacts_with_emails = pd.DataFrame()
+                contacts_without_emails = final_df
             
             pipeline_runs[run_id]["totalContacts"] = len(final_df)
             pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails)
