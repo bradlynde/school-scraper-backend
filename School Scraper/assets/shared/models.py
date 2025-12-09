@@ -150,7 +150,6 @@ class Contact:
     phone: Optional[str] = None
     school_name: str = ""
     source_url: str = ""
-    confidence_score: Optional[float] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for CSV export"""
@@ -162,7 +161,6 @@ class Contact:
             'phone': self.phone or '',
             'school_name': self.school_name,
             'source_url': self.source_url,
-            'confidence_score': self.confidence_score or ''
         }
     
     @classmethod
@@ -175,8 +173,7 @@ class Contact:
             email=data.get('email'),
             phone=data.get('phone'),
             school_name=data.get('school_name', ''),
-            source_url=data.get('source_url', ''),
-            confidence_score=float(data['confidence_score']) if data.get('confidence_score') else None
+            source_url=data.get('source_url', '')
         )
     
     def has_email(self) -> bool:

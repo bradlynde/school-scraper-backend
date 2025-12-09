@@ -237,36 +237,6 @@ class FinalCompiler:
             # If more than 2 parts, assume first is first name, rest is last name
             return (parts[0], ' '.join(parts[1:]))
     
-    def calculate_confidence_score(self, row: pd.Series) -> int:
-        """
-        Calculate confidence score for a contact (0-100)
-        Based on completeness and quality of data
-        NO TITLE FILTERING - just data completeness
-        """
-        score = 0
-        
-        # Email presence (optional) - 20 points if present and valid
-        email = row.get('email', '')
-        if email and not pd.isna(email) and str(email).strip():
-            if self.is_valid_email(email):
-                score += 20
-        
-        # Name completeness - 30 points
-        if row.get('first_name') and row.get('last_name'):
-            score += 30
-        elif row.get('first_name') or row.get('last_name'):
-            score += 15
-        
-        # Title presence - 20 points (no quality judgment, just presence)
-        if row.get('title') and not pd.isna(row.get('title')):
-            score += 20
-        
-        # Phone presence - 20 points
-        if row.get('phone') and not pd.isna(row.get('phone')) and str(row.get('phone')).strip():
-            score += 20
-        
-        return min(score, 100)
-    
     def _fuzzy_name_match(self, name1: str, name2: str, threshold: float = 0.85) -> bool:
         """
         Check if two names are similar using fuzzy matching.
@@ -313,94 +283,34 @@ class FinalCompiler:
     
     def deduplicate_contacts(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Remove duplicate contacts using first_name + last_name + school_name.
-        Also deduplicates by email as a secondary check.
-        Uses fuzzy matching to catch similar name variations.
-        Keeps the contact with the highest confidence score.
+        Remove duplicate contacts without using confidence scores.
+        Deduplicate by:
+        1) Email (exact match) when present
+        2) First name + last name + school_name
         """
-        # Sort by confidence score (descending) so we keep the best version
-        df = df.sort_values('confidence_score', ascending=False)
+        if len(df) == 0:
+            return df
         
         # Normalize names and school names for comparison (lowercase, strip whitespace)
         df['first_name_normalized'] = df['first_name'].fillna('').astype(str).str.lower().str.strip()
         df['last_name_normalized'] = df['last_name'].fillna('').astype(str).str.lower().str.strip()
         df['school_name_normalized'] = df['school_name'].fillna('').astype(str).str.lower().str.strip()
         
-        # Primary deduplication: first_name + last_name + school_name (exact match)
-        # This catches duplicates even if emails differ or are missing
+        # Deduplicate by email if email exists
+        if 'email' in df.columns:
+            df = df.sort_values(by=['email']).drop_duplicates(subset=['email'], keep='first')
+        
+        # Deduplicate by name + school
+        df = df.sort_values(by=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'])
         df = df.drop_duplicates(
             subset=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'],
             keep='first'
         )
         
-        # Fuzzy deduplication: catch similar name variations at the same school
-        # This helps recover contacts that were incorrectly marked as duplicates due to name variations
-        print("  Applying fuzzy name matching for similar contacts...")
-        indices_to_remove = set()
-        
-        # Group by school for efficient comparison
-        for school in df['school_name_normalized'].unique():
-            school_contacts = df[df['school_name_normalized'] == school].copy()
-            if len(school_contacts) <= 1:
-                continue
-            
-            # Compare each pair of contacts at the same school
-            for i, row1 in school_contacts.iterrows():
-                if i in indices_to_remove:
-                    continue
-                
-                for j, row2 in school_contacts.iterrows():
-                    if i >= j or j in indices_to_remove:
-                        continue
-                    
-                    # Check if names are similar
-                    first_match = self._fuzzy_name_match(
-                        row1['first_name_normalized'], 
-                        row2['first_name_normalized']
-                    )
-                    last_match = self._fuzzy_name_match(
-                        row1['last_name_normalized'], 
-                        row2['last_name_normalized']
-                    )
-                    
-                    # If both first and last names are similar, consider them duplicates
-                    # Keep the one with higher confidence score
-                    if first_match and last_match:
-                        # Keep the one with higher confidence, remove the other
-                        if row1['confidence_score'] >= row2['confidence_score']:
-                            indices_to_remove.add(j)
-                        else:
-                            indices_to_remove.add(i)
-                            break  # This row is being removed, no need to check more
-        
-        if indices_to_remove:
-            print(f"  Removed {len(indices_to_remove)} fuzzy duplicates")
-            df = df.drop(index=indices_to_remove)
-        
-        # Secondary deduplication: email (if present)
-        # This catches cases where same email appears with different name variations
-        df_with_email = df[df['email'].notna() & (df['email'] != '') & (df['email'].str.strip() != '')].copy()
-        df_no_email = df[df['email'].isna() | (df['email'] == '') | (df['email'].str.strip() == '')].copy()
-        
-        if not df_with_email.empty:
-            # Dedupe by email, keeping highest confidence score
-            df_with_email = df_with_email.sort_values('confidence_score', ascending=False)
-            df_with_email = df_with_email.drop_duplicates(subset=['email'], keep='first')
-        
-        # Combine back
-        if not df_with_email.empty and not df_no_email.empty:
-            result = pd.concat([df_with_email, df_no_email]).reset_index(drop=True)
-        elif not df_with_email.empty:
-            result = df_with_email.reset_index(drop=True)
-        elif not df_no_email.empty:
-            result = df_no_email.reset_index(drop=True)
-        else:
-            result = df.reset_index(drop=True)
-        
         # Remove temporary normalization columns
-        result = result.drop(columns=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'], errors='ignore')
+        df = df.drop(columns=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'], errors='ignore')
         
-        return result
+        return df.reset_index(drop=True)
     
     def compile_contacts_to_csv(
         self,
@@ -471,20 +381,12 @@ class FinalCompiler:
         if 'phone' in df.columns:
             df['phone'] = df['phone'].apply(self.format_phone)
         
-        # Calculate confidence scores
-        if 'confidence_score' not in df.columns:
-            df['confidence_score'] = df.apply(self.calculate_confidence_score, axis=1)
-        
         # Deduplicate
         print(f"\nBefore deduplication: {len(df)}")
         df = self.deduplicate_contacts(df)
         print(f"After deduplication: {len(df)}")
         
-        # Sort by confidence score (descending) for internal ordering
-        if 'confidence_score' in df.columns:
-            df = df.sort_values('confidence_score', ascending=False)
-        
-        # Create final structure (exclude confidence_score from output)
+        # Create final structure
         final_df = pd.DataFrame({
             'first_name': df['first_name'],
             'last_name': df['last_name'],
@@ -603,9 +505,6 @@ class FinalCompiler:
         # Format phones
         df['phone'] = df['phone'].apply(self.format_phone)
         
-        # Calculate confidence scores
-        df['confidence_score'] = df.apply(self.calculate_confidence_score, axis=1)
-        
         # Deduplicate
         print(f"\nBefore deduplication: {len(df)}")
         df = self.deduplicate_contacts(df)
@@ -619,12 +518,8 @@ class FinalCompiler:
             'Title': df['title'],
             'Email': df['email'],
             'Phone': df['phone'],
-            'Source URL': df['source_url'],
-            'Confidence Score': df['confidence_score']
+            'Source URL': df['source_url']
         })
-            
-        # Sort by confidence score (descending)
-        final_df = final_df.sort_values('Confidence Score', ascending=False)
         
         # Add metadata columns
         final_df['Date Collected'] = datetime.now().strftime('%Y-%m-%d')
