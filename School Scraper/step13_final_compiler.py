@@ -283,87 +283,34 @@ class FinalCompiler:
     
     def deduplicate_contacts(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Remove duplicate contacts.
-        Dedup rules:
-        1) Email (exact match) when present.
-        2) First + last + school_name (case-insensitive).
-        If multiple rows collapse, merge distinct titles with " / ".
+        Remove duplicate contacts without using confidence scores.
+        Deduplicate by:
+        1) Email (exact match) when present
+        2) First name + last name + school_name
         """
         if len(df) == 0:
             return df
         
-        # Normalize for comparison
+        # Normalize names and school names for comparison (lowercase, strip whitespace)
         df['first_name_normalized'] = df['first_name'].fillna('').astype(str).str.lower().str.strip()
         df['last_name_normalized'] = df['last_name'].fillna('').astype(str).str.lower().str.strip()
         df['school_name_normalized'] = df['school_name'].fillna('').astype(str).str.lower().str.strip()
-        df['email_normalized'] = df['email'].fillna('').astype(str).str.lower().str.strip()
         
-        def merge_titles(group):
-            titles = [t for t in group if isinstance(t, str) and t.strip()]
-            # keep unique, preserve order
-            seen = set()
-            merged = []
-            for t in titles:
-                if t not in seen:
-                    seen.add(t)
-                    merged.append(t)
-            return " / ".join(merged)
+        # Deduplicate by email if email exists
+        if 'email' in df.columns:
+            df = df.sort_values(by=['email']).drop_duplicates(subset=['email'], keep='first')
         
-        # Dedup by email when email present
-        has_email = df['email_normalized'].str.len() > 0
-        df_email = df[has_email].copy()
-        df_no_email = df[~has_email].copy()
+        # Deduplicate by name + school
+        df = df.sort_values(by=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'])
+        df = df.drop_duplicates(
+            subset=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'],
+            keep='first'
+        )
         
-        if not df_email.empty:
-            df_email = (df_email
-                        .sort_values(by=['email_normalized'])
-                        .groupby('email_normalized', as_index=False)
-                        .agg({
-                            'first_name': 'first',
-                            'last_name': 'first',
-                            'title': merge_titles,
-                            'email': 'first',
-                            'phone': 'first',
-                            'school_name': 'first',
-                            'source_url': 'first',
-                            'first_name_normalized': 'first',
-                            'last_name_normalized': 'first',
-                            'school_name_normalized': 'first',
-                            'email_normalized': 'first'
-                        }))
+        # Remove temporary normalization columns
+        df = df.drop(columns=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'], errors='ignore')
         
-        # Dedup by name + school for remaining rows (and also a second pass for email rows)
-        def dedup_name_school(df_subset):
-            if df_subset.empty:
-                return df_subset
-            return (df_subset
-                    .sort_values(by=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'])
-                    .groupby(['first_name_normalized', 'last_name_normalized', 'school_name_normalized'], as_index=False)
-                    .agg({
-                        'first_name': 'first',
-                        'last_name': 'first',
-                        'title': merge_titles,
-                        'email': 'first',
-                        'phone': 'first',
-                        'school_name': 'first',
-                        'source_url': 'first',
-                        'email_normalized': 'first'
-                    }))
-        
-        df_email = dedup_name_school(df_email)
-        df_no_email = dedup_name_school(df_no_email)
-        
-        # Combine back
-        combined = pd.concat([df_email, df_no_email], ignore_index=True)
-        
-        # Drop helper cols
-        combined = combined.drop(columns=['email_normalized'], errors='ignore')
-        
-        # Title-case names for presentation
-        combined['first_name'] = combined['first_name'].astype(str).str.title()
-        combined['last_name'] = combined['last_name'].astype(str).str.title()
-        
-        return combined.reset_index(drop=True)
+        return df.reset_index(drop=True)
     
     def compile_contacts_to_csv(
         self,

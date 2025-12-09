@@ -15,7 +15,7 @@ import re
 
 # Step 7: Extract ALL contacts (NO filtering - that happens in Step 10)
 CONTACT_EXTRACTION_PROMPT = """
-You extract ALL PEOPLE from raw HTML. Do not hallucinate or invent data. This tool is for PRIVATE CHRISTIAN or CATHOLIC schools only. If the page clearly appears PUBLIC, CHARTER, or SECULAR (no religious signals), return ONLY the header.
+You extract ALL PEOPLE from raw HTML. Do not hallucinate or invent data.
 
 INPUT:
 - Full HTML from a single web page or a contiguous chunk of HTML.
@@ -33,7 +33,6 @@ GENERAL RULES:
 - Keep each person's name, title, email, and phone correctly matched.
 - If a field is missing, leave it blank but keep the comma.
 - If no valid contacts are found, return ONLY the header.
-- If the school looks public/charter/secular (no faith language, no religious affiliation), return ONLY the header.
 
 HEADER (always the first line):
 First Name,Last Name,Title,Email,Phone
