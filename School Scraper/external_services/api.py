@@ -22,9 +22,22 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from Pipeline import StreamingPipeline
 from assets.shared.models import Contact
-import step11_contact_splitter
-import step12_hunter_io
-import step13_final_compiler
+
+# Handle hyphens in filenames using importlib.util
+import importlib.util
+_parent_dir = Path(__file__).parent.parent
+_steps_dir = _parent_dir / "steps"
+
+def load_module_with_hyphen(filename, module_name):
+    """Load a Python module from a file with hyphens in the filename"""
+    spec = importlib.util.spec_from_file_location(module_name, _steps_dir / filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+step11_contact_splitter = load_module_with_hyphen('step11-contact_splitter.py', 'step11_contact_splitter')
+step12_hunter_io = load_module_with_hyphen('step12-enrichment.py', 'step12_enrichment')
+step13_final_compiler = load_module_with_hyphen('step13-compiler.py', 'step13_compiler')
 
 app = Flask(__name__)
 
@@ -333,7 +346,7 @@ def aggregate_final_results(run_id: str, state: str):
             
             pipeline_runs[run_id]["csvData"] = csv_content
             pipeline_runs[run_id]["csvFilename"] = f"{state.title()}_leads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            
+        
             # Count final contacts
             final_df = pd.read_csv(final_csv_path)
             email_col = 'email' if 'email' in final_df.columns else 'Email'
@@ -550,7 +563,7 @@ def pipeline_status(run_id):
             estimated_schools_remaining = (total_counties - counties_processed) * 10
             estimated_remaining = estimated_schools_remaining * avg_time_per_school
         
-        run_data["estimatedTimeRemaining"] = int(estimated_remaining)
+            run_data["estimatedTimeRemaining"] = int(estimated_remaining)
     else:
         run_data["estimatedTimeRemaining"] = 0
     

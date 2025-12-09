@@ -17,13 +17,25 @@ from typing import List, Iterator, Optional, Dict
 from datetime import datetime
 from pathlib import Path
 import traceback
+import importlib.util
 
 # Import shared models
 from assets.shared.models import School, Page, PageContent, Contact
 
 # Import streaming steps
-from step1 import SchoolSearcher
-from step2 import filter_school, LLMSchoolFilter
+# Handle hyphens in filenames using importlib.util
+_script_dir = Path(__file__).parent
+_steps_dir = _script_dir / "steps"
+step1_spec = importlib.util.spec_from_file_location("step1_search", _steps_dir / "step1-search.py")
+step1_module = importlib.util.module_from_spec(step1_spec)
+step1_spec.loader.exec_module(step1_module)
+SchoolSearcher = step1_module.SchoolSearcher
+
+step2_spec = importlib.util.spec_from_file_location("step2_school_filter", _steps_dir / "step2-school_filter.py")
+step2_module = importlib.util.module_from_spec(step2_spec)
+step2_spec.loader.exec_module(step2_module)
+filter_school = step2_module.filter_school
+LLMSchoolFilter = step2_module.LLMSchoolFilter
 
 
 def load_counties_from_state(state: str) -> List[str]:
@@ -67,17 +79,25 @@ def load_counties_from_state(state: str) -> List[str]:
 
 # Import step classes (will need to refactor these to support streaming)
 # For now, we'll import the existing classes and wrap them
-import step3   # Step 3 – page discovery
-import step4   # Step 4 – content collection
-import step5   # Step 5 – HTML reduction
-import step6   # Step 6 – HTML chunking
-import step7   # Step 7 – LLM parsing
-import step8   # Step 8 – CSV/email cleaning
-import step9   # Step 9 – deduplication
-import step10  # Step 10 – title filtering
-import step11_contact_splitter  # Step 11 – split contacts with/without emails
-import step12_hunter_io  # Step 12 – email enrichment (Hunter.io)
-import step13_final_compiler  # Step 13 – final CSV compilation
+# Handle hyphens in filenames using importlib.util
+def load_module_with_hyphen(filename, module_name):
+    """Load a Python module from a file with hyphens in the filename"""
+    spec = importlib.util.spec_from_file_location(module_name, _steps_dir / filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+step3 = load_module_with_hyphen('step3-discovery.py', 'step3_discovery')   # Step 3 – page discovery
+step4 = load_module_with_hyphen('step4-crawler.py', 'step4_crawler')   # Step 4 – content collection
+step5 = load_module_with_hyphen('step5-html_reduction.py', 'step5_html_reduction')   # Step 5 – HTML reduction
+step6 = load_module_with_hyphen('step6-html_chunking.py', 'step6_html_chunking')   # Step 6 – HTML chunking
+step7 = load_module_with_hyphen('step7-llm_parser.py', 'step7_llm_parser')   # Step 7 – LLM parsing
+step8 = load_module_with_hyphen('step8-lead_cleaner.py', 'step8_lead_cleaner')   # Step 8 – CSV/email cleaning
+step9 = load_module_with_hyphen('step9-lead_dedupe.py', 'step9_lead_dedupe')   # Step 9 – deduplication
+step10 = load_module_with_hyphen('step10-lead_filter.py', 'step10_lead_filter')  # Step 10 – title filtering
+step11_contact_splitter = load_module_with_hyphen('step11-contact_splitter.py', 'step11_contact_splitter')  # Step 11 – split contacts with/without emails
+step12_hunter_io = load_module_with_hyphen('step12-enrichment.py', 'step12_enrichment')  # Step 12 – email enrichment (Hunter.io)
+step13_final_compiler = load_module_with_hyphen('step13-compiler.py', 'step13_compiler')  # Step 13 – final CSV compilation
 
 
 class StreamingPipeline:
@@ -438,11 +458,11 @@ class StreamingPipeline:
               "academy, prep)")
         
         school_generator = self.school_searcher.discover_schools(
-                counties=counties,
-                state=self._state or 'Texas',
-                batch_size=batch_size,
-                max_search_terms=max_search_terms_per_county
-            )
+            counties=counties,
+            state=self._state or 'Texas',
+            batch_size=batch_size,
+            max_search_terms=max_search_terms_per_county
+        )
         
         for school in school_generator:
             schools_discovered += 1
