@@ -242,21 +242,23 @@ def aggregate_final_results(run_id: str, state: str):
                     if len(df) > 0:
                         # Convert DataFrame rows to Contact objects
                         for _, row in df.iterrows():
-                            # Handle email - convert empty strings to None
-                            email_val = row.get('email', '') or row.get('Email', '') or ''
-                            if email_val and email_val.strip():
-                                email_val = email_val.strip()
-                            else:
+                            # Safe coercion helpers
+                            def sval(val):
+                                return str(val).strip() if val is not None and not (isinstance(val, float) and pd.isna(val)) else ""
+                            
+                            email_raw = row.get('email', '') or row.get('Email', '')
+                            email_val = sval(email_raw)
+                            if not email_val:
                                 email_val = None
                             
                             contact = Contact(
-                                first_name=str(row.get('first_name', '') or row.get('First Name', '') or '').strip(),
-                                last_name=str(row.get('last_name', '') or row.get('Last Name', '') or '').strip(),
-                                title=str(row.get('title', '') or row.get('Title', '') or '').strip(),
+                                first_name=sval(row.get('first_name', '') or row.get('First Name', '')),
+                                last_name=sval(row.get('last_name', '') or row.get('Last Name', '')),
+                                title=sval(row.get('title', '') or row.get('Title', '')),
                                 email=email_val,
-                                phone=str(row.get('phone', '') or row.get('Phone', '') or '').strip(),
-                                school_name=str(row.get('school_name', '') or row.get('School Name', '') or '').strip(),
-                                source_url=str(row.get('source_url', '') or row.get('Source URL', '') or '').strip()
+                                phone=sval(row.get('phone', '') or row.get('Phone', '')),
+                                school_name=sval(row.get('school_name', '') or row.get('School Name', '')),
+                                source_url=sval(row.get('source_url', '') or row.get('Source URL', ''))
                             )
                             all_contacts.append(contact)
                         print(f"[{run_id}] Loaded {len(df)} contacts from {county} County")
