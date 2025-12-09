@@ -91,7 +91,8 @@ class HunterIOEnricher:
             domain: School domain (extracted from source_url)
         
         Returns:
-            Dict with 'email', 'score', 'sources' or None if not found
+            Dict with 'email' (and 'score' for threshold checking only) or None if not found
+            Note: Only 'email' is used - score and sources are discarded
         """
         if not all([first_name, last_name, domain]):
             return None
@@ -153,11 +154,13 @@ class HunterIOEnricher:
                     data = response.json()
                     if data.get('data') and data['data'].get('email'):
                         email_data = data['data']
-                        if email_data.get('score', 0) >= self.score_threshold:
+                        score = email_data.get('score', 0)
+                        # Only return if score meets threshold
+                        # Note: We return score for threshold checking, but only email is used/stored
+                        if score >= self.score_threshold:
                             return {
                                 'email': email_data['email'],
-                                'score': email_data['score'],
-                                'sources': email_data.get('sources', [])
+                                'score': score  # Only used for threshold check and logging, not stored
                             }
                 return None
                 
@@ -237,11 +240,12 @@ class HunterIOEnricher:
                 self.stats['contacts_processed'] += 1
                 
                 if email_result:
+                    # Only extract email - ignore score and sources from Hunter.io
                     email = email_result['email']
-                    score = email_result['score']
+                    score = email_result.get('score', 0)  # Only for logging
                     print(f"      ✓ Found: {email} (score: {score})")
                     
-                    # Update contact with found email
+                    # Update contact with ONLY the email field - no other Hunter.io data
                     contact.email = email
                     enriched_contacts.append(contact)
                     self.stats['emails_found'] += 1
@@ -370,11 +374,12 @@ class HunterIOEnricher:
                     self.stats['contacts_processed'] += 1
                     
                     if email_result:
+                        # Only extract email - ignore score and sources from Hunter.io
                         email = email_result['email']
-                        score = email_result['score']
+                        score = email_result.get('score', 0)  # Only for logging
                         print(f"      ✓ Found: {email} (score: {score})")
                         
-                        # Update DataFrame
+                        # Update DataFrame with ONLY the email - no other Hunter.io data
                         df.loc[idx, email_col] = email
                         enriched_count += 1
                         self.stats['emails_found'] += 1
