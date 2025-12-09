@@ -1,8 +1,7 @@
 {
-  "buildCommand": "cd 'School Scraper/assets/frontend' && npm install && npm run build",
-  "outputDirectory": "School Scraper/assets/frontend/.next",
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
   "framework": "nextjs",
-  "installCommand": "cd 'School Scraper/assets/frontend' && npm install",
-  "rootDirectory": "School Scraper/assets/frontend"
+  "installCommand": "npm install"
 }
 
