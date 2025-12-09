@@ -239,14 +239,14 @@ class SchoolSearcher:
         # Use target_state if state not provided
         if state is None:
             state = self.full_state_name
-        # Define search terms for Christian schools (5 terms optimized for best coverage)
-        # Removed: "preparatory school" (redundant with "prep school")
-        # Removed: "sacred heart", "holy family" (very specific, limited value)
-        # Removed: "St. school", "jesuit school" (specific patterns, covered by other terms)
+        # Define search terms (balanced for recall; filters prune noise)
         search_terms = [
             f"Christian schools in {county} County, {state}",
             f"Catholic schools in {county} County, {state}",
-            f"private schools in {county} County, {state}",
+            f"Episcopal schools in {county} County, {state}",
+            f"Lutheran schools in {county} County, {state}",
+            f"parochial schools in {county} County, {state}",
+            f"church schools in {county} County, {state}",
             f"academy in {county} County, {state}",
             f"prep school in {county} County, {state}"
         ]
@@ -344,10 +344,7 @@ class SchoolSearcher:
                             next_page_token = page_data.get('nextPageToken')
                         else:
                             break
-                    else:
-                        break
-                
-                elif response.status_code == 200:
+                elif response.status_code == 204:
                     # Success but no results
                     pass
                 else:
