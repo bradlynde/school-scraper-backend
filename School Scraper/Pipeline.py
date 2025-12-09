@@ -543,7 +543,7 @@ class StreamingPipeline:
             return
         
         fieldnames = ['first_name', 'last_name', 'title', 'email', 'phone', 
-                     'school_name', 'source_url', 'confidence_score']
+                     'school_name', 'source_url']
         
         with open(filename, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)

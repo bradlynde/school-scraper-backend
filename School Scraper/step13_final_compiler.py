@@ -441,7 +441,7 @@ class FinalCompiler:
             print(f"  ⚠️  No contacts to compile")
             # Create empty CSV with headers
             empty_df = pd.DataFrame(columns=['first_name', 'last_name', 'title', 'email', 'phone', 
-                                            'school_name', 'source_url', 'confidence_score'])
+                                            'school_name', 'source_url'])
             empty_df.to_csv(output_csv, index=False)
             return output_csv
         
@@ -480,7 +480,11 @@ class FinalCompiler:
         df = self.deduplicate_contacts(df)
         print(f"After deduplication: {len(df)}")
         
-        # Create final structure
+        # Sort by confidence score (descending) for internal ordering
+        if 'confidence_score' in df.columns:
+            df = df.sort_values('confidence_score', ascending=False)
+        
+        # Create final structure (exclude confidence_score from output)
         final_df = pd.DataFrame({
             'first_name': df['first_name'],
             'last_name': df['last_name'],
@@ -488,13 +492,8 @@ class FinalCompiler:
             'email': df.get('email', ''),
             'phone': df.get('phone', ''),
             'school_name': df.get('school_name', ''),
-            'source_url': df.get('source_url', ''),
-            'confidence_score': df.get('confidence_score', '')
+            'source_url': df.get('source_url', '')
         })
-        
-        # Sort by confidence score (descending)
-        if 'confidence_score' in final_df.columns:
-            final_df = final_df.sort_values('confidence_score', ascending=False)
         
         # Save to CSV
         final_df.to_csv(output_csv, index=False)

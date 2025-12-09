@@ -29,7 +29,13 @@
    - **Value:** `your-openai-api-key-here`
    - Click **"Add"**
 
-   **Variable 3 (Optional):**
+   **Variable 3:**
+   - **Name:** `HUNTER_IO_API_KEY`
+   - **Value:** `your-hunter-io-api-key-here`
+   - Click **"Add"**
+   - *Note: Optional - Hunter.io email enrichment will be skipped if not set*
+
+   **Variable 4 (Optional):**
    - **Name:** `PORT`
    - **Value:** `8080`
    - Click **"Add"**
@@ -62,6 +68,7 @@ If you have multiple services sharing the same variables:
 |--------------|-------------|---------|
 | `GOOGLE_PLACES_API_KEY` | Your Google Places API key | `AIzaSy...` |
 | `OPENAI_API_KEY` | Your OpenAI API key | `sk-proj-...` |
+| `HUNTER_IO_API_KEY` | Your Hunter.io API key (optional) | `your-key...` |
 | `PORT` | Server port (optional, Railway sets this) | `8080` |
 
 ## Verification
