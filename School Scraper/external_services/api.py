@@ -170,6 +170,7 @@ def process_next_county(state: str, run_id: str, county_index: int):
         # Update progress after county completion
         pipeline_runs[run_id]["countiesProcessed"] = county_index + 1
         pipeline_runs[run_id]["schoolsFound"] = pipeline_runs[run_id].get("schoolsFound", 0) + result.get('schools', 0)
+        pipeline_runs[run_id]["schoolsProcessed"] = pipeline_runs[run_id].get("schoolsProcessed", 0) + result.get('schools', 0)
         
         # Process next county in background thread (Railway supports long-running processes)
         # No need for HTTP self-requests - just continue in thread
@@ -273,6 +274,7 @@ def aggregate_final_results(run_id: str, state: str):
         pipeline_runs[run_id]["currentStep"] = 7
         pipeline_runs[run_id]["progress"] = 100
         pipeline_runs[run_id]["countiesProcessed"] = len(counties)
+        pipeline_runs[run_id]["completedAt"] = time.time()  # Track completion time
         
     except Exception as e:
         pipeline_runs[run_id]["status"] = "error"
@@ -298,6 +300,7 @@ def run_streaming_pipeline(state: str, run_id: str):
         "totalContacts": 0,
         "totalContactsNoEmails": 0,
         "schoolsFound": 0,
+        "schoolsProcessed": 0,
         "csvData": None,
         "csvFilename": None,
         "csvNoEmailsData": None,
@@ -432,19 +435,37 @@ def pipeline_status(run_id):
     
     run_data = pipeline_runs[run_id].copy()
     
-    # Calculate estimated time remaining based on counties
-    if run_data["status"] == "running" and run_data.get("totalCounties", 0) > 0:
-        counties_processed = run_data.get("countiesProcessed", 0)
-        total_counties = run_data.get("totalCounties", 1)
+    # If run is completed and has been completed for more than 5 minutes, return 410 Gone
+    # This prevents unnecessary polling after completion
+    if run_data.get("status") == "completed":
+        completed_time = run_data.get("completedAt")
+        if completed_time:
+            time_since_completion = time.time() - completed_time
+            if time_since_completion > 300:  # 5 minutes
+                return jsonify({
+                    "status": "completed",
+                    "message": "Run completed. Status no longer available."
+                }), 410  # Gone status code
+    
+    # Calculate estimated time remaining based on schools (1 minute per school)
+    if run_data["status"] == "running":
+        schools_found = run_data.get("schoolsFound", 0)
+        schools_processed = run_data.get("schoolsProcessed", 0)
         
-        if counties_processed > 0:
-            # Estimate: ~20 minutes per county average
-            avg_time_per_county = 20 * 60  # seconds
-            remaining_counties = total_counties - counties_processed
-            estimated_remaining = remaining_counties * avg_time_per_county
-            run_data["estimatedTimeRemaining"] = int(estimated_remaining)
-        else:
-            run_data["estimatedTimeRemaining"] = total_counties * 20 * 60
+        # Estimate: 1 minute per school
+        avg_time_per_school = 60  # seconds
+        remaining_schools = max(0, schools_found - schools_processed)
+        estimated_remaining = remaining_schools * avg_time_per_school
+        
+        # If we don't have school data yet, estimate based on counties
+        if schools_found == 0 and run_data.get("totalCounties", 0) > 0:
+            counties_processed = run_data.get("countiesProcessed", 0)
+            total_counties = run_data.get("totalCounties", 1)
+            # Estimate ~10 schools per county, 1 minute per school
+            estimated_schools_remaining = (total_counties - counties_processed) * 10
+            estimated_remaining = estimated_schools_remaining * avg_time_per_school
+        
+        run_data["estimatedTimeRemaining"] = int(estimated_remaining)
     else:
         run_data["estimatedTimeRemaining"] = 0
     

@@ -76,6 +76,7 @@ import step8   # Step 8 – CSV/email cleaning
 import step9   # Step 9 – deduplication
 import step10  # Step 10 – title filtering
 import step11  # Step 11 – final compilation
+import step12_hunter_io  # Step 12 – email enrichment (Hunter.io)
 
 
 class StreamingPipeline:
@@ -494,9 +495,56 @@ class StreamingPipeline:
         else:
             print(f"No contacts to write to {output_csv}")
         
-        # Calculate contacts with and without emails
+        # Step 12: Email Enrichment with Hunter.io (optional)
+        if self.enable_hunter_io and os.path.exists(output_csv):
+            try:
+                print("\n" + "="*70)
+                print("STEP 12: EMAIL ENRICHMENT (Hunter.io)")
+                print("="*70)
+                
+                enriched_csv = step12_hunter_io.enrich_csv_with_hunter_io(
+                    csv_path=output_csv,
+                    api_key=os.getenv('HUNTER_IO_API_KEY'),
+                    output_csv_path=output_csv,  # Overwrite with enriched version
+                    verify_emails=False,  # Set to True to verify emails (uses more credits)
+                    score_threshold=70,  # Minimum email score to accept
+                    batch_size=10
+                )
+                
+                if enriched_csv != output_csv:
+                    # If a new file was created, update output_csv
+                    output_csv = enriched_csv
+                
+                print(f"✓ Email enrichment completed")
+            except Exception as e:
+                print(f"\n⚠️  Email enrichment failed: {e}")
+                print("   Continuing with original CSV...")
+                import traceback
+                traceback.print_exc()
+                # Don't fail pipeline if enrichment fails
+        
+        # Calculate contacts with and without emails (after enrichment)
         contacts_with_emails = [c for c in self.all_contacts if c.email and c.email.strip()]
         contacts_without_emails = [c for c in self.all_contacts if not c.email or not c.email.strip()]
+        
+        # If enrichment happened, re-read CSV to get updated email counts
+        if self.enable_hunter_io and os.path.exists(output_csv):
+            try:
+                import pandas as pd
+                df = pd.read_csv(output_csv)
+                email_col = None
+                for col in ['email', 'Email', 'EMAIL']:
+                    if col in df.columns:
+                        email_col = col
+                        break
+                if email_col:
+                    contacts_with_emails_count = df[df[email_col].notna() & (df[email_col] != '') & (df[email_col].str.strip() != '')].shape[0]
+                    contacts_without_emails_count = len(df) - contacts_with_emails_count
+                    # Update stats with enriched counts
+                    self.stats['contacts_with_emails'] = contacts_with_emails_count
+                    self.stats['contacts_without_emails'] = contacts_without_emails_count
+            except Exception:
+                pass  # If re-reading fails, use original counts
         
         # Update stats
         self.stats['contacts_extracted'] = len(self.all_contacts)
