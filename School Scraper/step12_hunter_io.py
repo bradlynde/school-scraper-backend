@@ -126,11 +126,11 @@ class HunterIOEnricher:
                     score = email_data.get('score', 0)
                     
                     # Only return if score meets threshold
+                    # Note: We return score for threshold checking, but only email is used/stored
                     if score >= self.score_threshold:
                         return {
                             'email': email_data['email'],
-                            'score': score,
-                            'sources': email_data.get('sources', [])
+                            'score': score  # Only used for threshold check and logging, not stored
                         }
                     else:
                         print(f"      ⚠️  Email found but score too low ({score} < {self.score_threshold}): {email_data['email']}")
