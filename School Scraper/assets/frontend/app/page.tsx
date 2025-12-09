@@ -590,35 +590,16 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Download Buttons */}
+            {/* Download Button */}
             <div className="flex flex-col space-y-4">
               {summary.csvData && summary.csvFilename ? (
                 <button
                   onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
                   className="w-full px-6 py-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
                 >
-                  Download Leads with Emails ({summary.totalContacts || 0} contacts)
+                  Download Leads ({summary.totalContacts || 0} contacts)
                 </button>
               ) : (
-                <div className="w-full px-6 py-4 bg-gray-800 border border-gray-700 rounded-lg text-center">
-                  <p className="text-gray-400 text-sm">No contacts with emails found</p>
-                </div>
-              )}
-              
-              {summary.csvNoEmailsData && summary.csvNoEmailsFilename ? (
-                <button
-                  onClick={() => downloadCSV(summary.csvNoEmailsData!, summary.csvNoEmailsFilename!)}
-                  className="w-full px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-                >
-                  Download Leads without Emails ({summary.totalContactsNoEmails || 0} contacts)
-                </button>
-              ) : (
-                <div className="w-full px-6 py-4 bg-gray-800 border border-gray-700 rounded-lg text-center">
-                  <p className="text-gray-400 text-sm">No contacts without emails found</p>
-                </div>
-              )}
-              
-              {(!summary.csvData && !summary.csvNoEmailsData) && (
                 <div className="w-full px-6 py-4 bg-yellow-900/30 border border-yellow-800 rounded-lg text-center mb-4">
                   <p className="text-yellow-300 text-sm">
                     No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
