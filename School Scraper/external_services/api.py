@@ -21,6 +21,10 @@ import sys
 # Add parent directory to path to import Pipeline
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from Pipeline import StreamingPipeline
+from assets.shared.models import Contact
+import step11_contact_splitter
+import step12_hunter_io
+import step13_final_compiler
 
 app = Flask(__name__)
 
@@ -188,16 +192,46 @@ def process_next_county(state: str, run_id: str, county_index: int):
 
 
 def aggregate_final_results(run_id: str, state: str):
-    """Aggregate all county results into final CSV"""
+    """Aggregate all county results, run global Steps 11-13, and generate final CSV"""
     try:
         counties = load_counties_from_state(state)
         run_dir = Path(f"/tmp/runs/{run_id}")
         
+        pipeline_runs[run_id]["statusMessage"] = "Waiting for all counties to complete..."
+        
+        # Wait for all counties to complete (check that all CSV files exist)
+        max_wait_time = 3600  # 1 hour max wait
+        wait_interval = 5  # Check every 5 seconds
+        elapsed_time = 0
+        
+        while elapsed_time < max_wait_time:
+            all_complete = True
+            missing_counties = []
+            
+            for county in counties:
+                county_dir = run_dir / county.replace(' ', '_')
+                county_csv = county_dir / "final_contacts.csv"
+                if not county_csv.exists():
+                    all_complete = False
+                    missing_counties.append(county)
+            
+            if all_complete:
+                print(f"[{run_id}] All {len(counties)} counties completed, proceeding with aggregation...")
+                break
+            
+            if elapsed_time % 30 == 0:  # Log every 30 seconds
+                print(f"[{run_id}] Waiting for {len(missing_counties)} counties to complete: {', '.join(missing_counties[:3])}...")
+            
+            time.sleep(wait_interval)
+            elapsed_time += wait_interval
+        
+        if not all_complete:
+            print(f"[{run_id}] WARNING: Some counties did not complete within timeout. Proceeding with available data...")
+        
         pipeline_runs[run_id]["statusMessage"] = "Aggregating results from all counties..."
         
-        all_dataframes = []
-        
-        # Read and combine all county CSVs
+        # Read and combine all county CSVs into Contact objects
+        all_contacts = []
         for county in counties:
             county_dir = run_dir / county.replace(' ', '_')
             county_csv = county_dir / "final_contacts.csv"
@@ -206,72 +240,121 @@ def aggregate_final_results(run_id: str, state: str):
                 try:
                     df = pd.read_csv(county_csv)
                     if len(df) > 0:
-                        all_dataframes.append(df)
+                        # Convert DataFrame rows to Contact objects
+                        for _, row in df.iterrows():
+                            # Handle email - convert empty strings to None
+                            email_val = row.get('email', '') or row.get('Email', '') or ''
+                            if email_val and email_val.strip():
+                                email_val = email_val.strip()
+                            else:
+                                email_val = None
+                            
+                            contact = Contact(
+                                first_name=str(row.get('first_name', '') or row.get('First Name', '') or '').strip(),
+                                last_name=str(row.get('last_name', '') or row.get('Last Name', '') or '').strip(),
+                                title=str(row.get('title', '') or row.get('Title', '') or '').strip(),
+                                email=email_val,
+                                phone=str(row.get('phone', '') or row.get('Phone', '') or '').strip(),
+                                school_name=str(row.get('school_name', '') or row.get('School Name', '') or '').strip(),
+                                source_url=str(row.get('source_url', '') or row.get('Source URL', '') or '').strip()
+                            )
+                            all_contacts.append(contact)
                         print(f"[{run_id}] Loaded {len(df)} contacts from {county} County")
                 except Exception as e:
                     print(f"[{run_id}] Error reading {county_csv}: {e}")
+                    import traceback
+                    traceback.print_exc()
         
-        # Combine all results
-        if all_dataframes:
-            final_df = pd.concat(all_dataframes, ignore_index=True)
+        if not all_contacts:
+            print(f"[{run_id}] No contacts found in any county")
+            pipeline_runs[run_id]["status"] = "completed"
+            pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found."
+            pipeline_runs[run_id]["totalContacts"] = 0
+            pipeline_runs[run_id]["completedAt"] = time.time()
+            return
+        
+        print(f"[{run_id}] Total contacts collected: {len(all_contacts)}")
+        
+        # STEP 11: Split contacts into with/without emails
+        pipeline_runs[run_id]["statusMessage"] = "Step 11: Splitting contacts..."
+        splitter = step11_contact_splitter.ContactSplitter()
+        contacts_with_emails, contacts_without_emails = splitter.split_contacts(all_contacts)
+        
+        print(f"[{run_id}] Step 11 complete: {len(contacts_with_emails)} with emails, {len(contacts_without_emails)} without emails")
+        
+        # STEP 12: Email Enrichment with Hunter.io (optional)
+        contacts_enriched = []
+        hunter_io_enabled = os.getenv('HUNTER_IO_API_KEY') is not None
+        
+        if hunter_io_enabled and contacts_without_emails:
+            pipeline_runs[run_id]["statusMessage"] = f"Step 12: Enriching {len(contacts_without_emails)} contacts with Hunter.io..."
+            try:
+                enricher = step12_hunter_io.HunterIOEnricher(
+                    api_key=os.getenv('HUNTER_IO_API_KEY'),
+                    verify_emails=False,
+                    score_threshold=70
+                )
+                contacts_enriched = enricher.enrich_contact_objects(
+                    contacts=contacts_without_emails,
+                    batch_size=10,
+                    delay_between_batches=1.0
+                )
+                print(f"[{run_id}] Step 12 complete: Enriched {len(contacts_enriched)} contacts with emails")
+            except Exception as e:
+                print(f"[{run_id}] ⚠️  Email enrichment failed: {e}")
+                print(f"[{run_id}]    Continuing without enriched contacts...")
+                import traceback
+                traceback.print_exc()
+        elif not hunter_io_enabled:
+            print(f"[{run_id}] Step 12 skipped: HUNTER_IO_API_KEY not set")
+        elif not contacts_without_emails:
+            print(f"[{run_id}] Step 12 skipped: No contacts without emails to enrich")
+        
+        # STEP 13: Compile final CSV
+        pipeline_runs[run_id]["statusMessage"] = "Step 13: Compiling final CSV..."
+        final_output_csv = str(run_dir / f"{state.title()}_leads_final.csv")
+        
+        compiler = step13_final_compiler.FinalCompiler()
+        final_csv_path = compiler.compile_contacts_to_csv(
+            contacts_with_emails=contacts_with_emails,
+            contacts_enriched=contacts_enriched,
+            output_csv=final_output_csv,
+            state=state
+        )
+        
+        print(f"[{run_id}] Step 13 complete: Final CSV saved to {final_csv_path}")
+        
+        # Read final CSV for download
+        if os.path.exists(final_csv_path):
+            with open(final_csv_path, 'r') as f:
+                csv_content = f.read()
             
-            # Check which columns exist for deduplication
-            # Try different possible column name variations
-            dedup_cols = []
-            for col_name in ['First Name', 'first_name', 'First_Name']:
-                if col_name in final_df.columns:
-                    dedup_cols.append(col_name)
-                    break
-            
-            for col_name in ['Last Name', 'last_name', 'Last_Name']:
-                if col_name in final_df.columns:
-                    dedup_cols.append(col_name)
-                    break
-            
-            for col_name in ['School Name', 'school_name', 'School_Name']:
-                if col_name in final_df.columns:
-                    dedup_cols.append(col_name)
-                    break
-            
-            # Only drop duplicates if we found the required columns
-            if len(dedup_cols) == 3:
-                final_df = final_df.drop_duplicates(subset=dedup_cols, keep='first')
-            elif len(dedup_cols) > 0:
-                # If we have at least some columns, use what we have
-                final_df = final_df.drop_duplicates(subset=dedup_cols, keep='first')
-            else:
-                # Fallback: drop duplicates on all columns
-                final_df = final_df.drop_duplicates(keep='first')
-            
-            # Count contacts with and without emails
-            # Check for Email column (try different variations)
-            email_col = None
-            for col_name in ['Email', 'email', 'EMAIL']:
-                if col_name in final_df.columns:
-                    email_col = col_name
-                    break
-            
-            if email_col:
-                contacts_with_emails = final_df[final_df[email_col].notna() & (final_df[email_col] != '') & (final_df[email_col].str.strip() != '')]
-                contacts_without_emails = final_df[final_df[email_col].isna() | (final_df[email_col] == '') | (final_df[email_col].str.strip() == '')]
-            else:
-                # No email column found
-                contacts_with_emails = pd.DataFrame()
-                contacts_without_emails = final_df
-            
-            pipeline_runs[run_id]["totalContacts"] = len(final_df)
-            pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails)
-            pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails)
-            
-            # Store CSV data for download
-            csv_content = final_df.to_csv(index=False)
             pipeline_runs[run_id]["csvData"] = csv_content
             pipeline_runs[run_id]["csvFilename"] = f"{state.title()}_leads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            
+            # Count final contacts
+            final_df = pd.read_csv(final_csv_path)
+            email_col = 'email' if 'email' in final_df.columns else 'Email'
+            if email_col in final_df.columns:
+                contacts_with_emails_final = final_df[final_df[email_col].notna() & (final_df[email_col] != '') & (final_df[email_col].str.strip() != '')]
+                contacts_without_emails_final = final_df[final_df[email_col].isna() | (final_df[email_col] == '') | (final_df[email_col].str.strip() == '')]
+            else:
+                contacts_with_emails_final = pd.DataFrame()
+                contacts_without_emails_final = final_df
+            
+            pipeline_runs[run_id]["totalContacts"] = len(final_df)
+            pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails_final)
+            pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails_final)
+        else:
+            print(f"[{run_id}] ERROR: Final CSV not created at {final_csv_path}")
+            pipeline_runs[run_id]["totalContacts"] = len(all_contacts)
+            pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails)
+            pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails) - len(contacts_enriched)
         
         # Update final stats
         pipeline_runs[run_id]["status"] = "completed"
-        pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed! Processed {len(counties)} counties."
-        pipeline_runs[run_id]["currentStep"] = 7
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts."
+        pipeline_runs[run_id]["currentStep"] = 13
         pipeline_runs[run_id]["progress"] = 100
         pipeline_runs[run_id]["countiesProcessed"] = len(counties)
         pipeline_runs[run_id]["completedAt"] = time.time()  # Track completion time

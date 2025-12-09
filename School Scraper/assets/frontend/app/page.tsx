@@ -18,13 +18,10 @@ type PipelineSummary = {
   status: string;
   steps: StepSummary[];
   totalContacts: number;
-  totalContactsNoEmails: number;
   schoolsFound: number;
   runId: string;
   csvData?: string;
   csvFilename?: string;
-  csvNoEmailsData?: string;
-  csvNoEmailsFilename?: string;
   estimatedTimeRemaining?: number;
   currentStep?: number;
   totalSteps?: number;
@@ -329,9 +326,18 @@ export default function Home() {
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
         <div className="w-full max-w-2xl">
           <div className="bg-gray-900 rounded-lg border border-gray-800 p-8 shadow-xl">
-            <h1 className="text-3xl font-bold text-center mb-8 text-white">
-              School Contact Scraper
-            </h1>
+            {/* NPSA Logo */}
+            <div className="mb-8 text-center">
+              <div className="inline-block">
+                <h1 className="text-2xl font-bold text-white mb-2 tracking-wide">
+                  Nonprofit Security Advisors
+                </h1>
+                <div className="h-1 w-24 bg-blue-600 mx-auto mb-4"></div>
+                <p className="text-lg font-semibold text-gray-300">
+                  NPSA Scraper
+                </p>
+              </div>
+            </div>
             
             <div className="flex flex-col space-y-6">
               {/* State Selection */}
@@ -343,7 +349,7 @@ export default function Home() {
                   id="state"
                   value={selectedState}
                   onChange={(e) => setSelectedState(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 transition-colors"
                 >
                   <option value="">-- Select a state --</option>
                   {US_STATES.map((state) => (
@@ -395,10 +401,10 @@ export default function Home() {
               <button
                 onClick={runPipeline}
                 disabled={isRunning || !selectedState}
-                className={`w-full px-8 py-4 rounded-lg font-medium text-white transition-colors ${
+                className={`w-full px-8 py-4 rounded-lg font-semibold text-white transition-all duration-200 shadow-lg ${
                   isRunning || !selectedState
-                    ? "bg-gray-600 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700"
+                    ? "bg-gray-600 cursor-not-allowed opacity-60"
+                    : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl transform hover:-translate-y-0.5"
                 }`}
               >
                 {isRunning ? "Starting..." : "Start Search"}
@@ -440,7 +446,7 @@ export default function Home() {
       }
       if (step.name.includes("Parsing") || step.name.includes("LLM")) {
         return step.contactsWithEmails !== undefined
-          ? `Step 4: ${step.contactsWithEmails} Contacts with Emails, ${step.contactsWithoutEmails || 0} without`
+          ? `Step 4: ${step.contactsWithEmails} Contacts Extracted`
           : "Step 4: Parsing with LLM...";
       }
       if (step.name.includes("Filter")) {
@@ -460,6 +466,15 @@ export default function Home() {
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
         <div className="w-full max-w-4xl">
           <div className="bg-gray-900 rounded-lg border border-gray-800 p-8 shadow-xl">
+            {/* NPSA Logo Header */}
+            <div className="mb-6 text-center">
+              <h2 className="text-xl font-bold text-white mb-1 tracking-wide">
+                Nonprofit Security Advisors
+              </h2>
+              <div className="h-0.5 w-20 bg-blue-600 mx-auto mb-2"></div>
+              <p className="text-sm text-gray-400">NPSA Scraper</p>
+            </div>
+            
             <h2 className="text-2xl font-bold text-center mb-2 text-white">
               SCRAPING IN PROGRESS
             </h2>
@@ -475,7 +490,7 @@ export default function Home() {
               </div>
               <div className="w-full bg-gray-800 rounded-full h-4 mb-2">
                 <div
-                  className="bg-green-500 h-4 rounded-full transition-all duration-500"
+                  className="bg-blue-600 h-4 rounded-full transition-all duration-500 shadow-lg"
                   style={{ width: `${progress}%` }}
                 ></div>
               </div>
@@ -498,11 +513,11 @@ export default function Home() {
               
               {/* County Progress */}
               {summary?.totalCounties && (
-                <div className="p-3 rounded-lg bg-blue-900/30 border border-blue-800 mb-3">
-                  <p className="text-sm text-blue-300">
-                    <strong>Counties:</strong> {summary.countiesProcessed || 0} of {summary.totalCounties} processed
+                <div className="p-4 rounded-lg bg-blue-900/20 border border-blue-700/50 mb-3">
+                  <p className="text-sm text-blue-200">
+                    <strong className="text-blue-100">Counties:</strong> {summary.countiesProcessed || 0} of {summary.totalCounties} processed
                     {summary.currentCounty && (
-                      <span className="block mt-1">Currently processing: <strong>{summary.currentCounty}</strong></span>
+                      <span className="block mt-1 text-blue-300">Currently processing: <strong className="text-blue-100">{summary.currentCounty}</strong></span>
                     )}
                   </p>
                 </div>
@@ -514,18 +529,18 @@ export default function Home() {
                   {summary.steps.map((step: StepSummary, index: number) => (
                     <div
                       key={index}
-                      className="p-3 rounded-lg bg-green-900/30 border border-green-800"
+                      className="p-4 rounded-lg bg-blue-900/20 border border-blue-700/50"
                     >
-                      <p className="text-sm text-green-300">
-                        ✓ {step.name}
+                      <p className="text-sm text-blue-200">
+                        <span className="text-blue-400 font-semibold">✓</span> {step.name}
                         {step.schoolsFound !== undefined && (
-                          <span className="block mt-1 text-xs text-green-400">
+                          <span className="block mt-1 text-xs text-blue-300">
                             {step.schoolsFound} schools found
                           </span>
                         )}
                         {step.contactsWithEmails !== undefined && (
-                          <span className="block mt-1 text-xs text-green-400">
-                            {step.contactsWithEmails} contacts with emails, {step.contactsWithoutEmails || 0} without
+                          <span className="block mt-1 text-xs text-blue-300">
+                            {step.contactsWithEmails} contacts extracted
                           </span>
                         )}
                       </p>
@@ -570,6 +585,15 @@ export default function Home() {
       <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
         <div className="w-full max-w-2xl">
           <div className="bg-gray-900 rounded-lg border border-gray-800 p-8 shadow-xl">
+            {/* NPSA Logo Header */}
+            <div className="mb-6 text-center">
+              <h2 className="text-xl font-bold text-white mb-1 tracking-wide">
+                Nonprofit Security Advisors
+              </h2>
+              <div className="h-0.5 w-20 bg-blue-600 mx-auto mb-2"></div>
+              <p className="text-sm text-gray-400">NPSA Scraper</p>
+            </div>
+            
             <h2 className="text-2xl font-bold text-center mb-8 text-white">
               SCRAPING COMPLETE
             </h2>
@@ -582,10 +606,7 @@ export default function Home() {
                   <span className="font-semibold">{summary.schoolsFound || 0}</span> Schools found
                 </p>
                 <p className="text-gray-300">
-                  <span className="font-semibold">{summary.totalContacts || 0}</span> Contacts with emails
-                </p>
-                <p className="text-gray-300">
-                  <span className="font-semibold">{summary.totalContactsNoEmails || 0}</span> Contacts without emails
+                  <span className="font-semibold">{summary.totalContacts || 0}</span> Contacts
                 </p>
               </div>
             </div>
@@ -595,7 +616,7 @@ export default function Home() {
               {summary.csvData && summary.csvFilename ? (
                 <button
                   onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
-                  className="w-full px-6 py-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+                  className="w-full px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
                   Download Leads ({summary.totalContacts || 0} contacts)
                 </button>
@@ -609,7 +630,7 @@ export default function Home() {
               
               <button
                 onClick={resetToStart}
-                className="w-full px-6 py-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium transition-colors"
+                className="w-full px-6 py-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium transition-all duration-200"
           >
                 Run Another Search
               </button>

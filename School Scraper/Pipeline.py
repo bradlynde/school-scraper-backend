@@ -478,60 +478,26 @@ class StreamingPipeline:
         if self.llm_school_filter:
             self.llm_school_filter.flush()
         
-        # Generate filename with state name if not provided
-        if output_csv == "final_contacts.csv" or not output_csv:
-            state_name = (self._state or 'Texas').title()
-            output_csv = f"{state_name} leads.csv"
-        elif output_csv.endswith(' - with emails.csv'):
-            # Remove old suffix if present
-            state_name = (self._state or 'Texas').title()
-            output_csv = f"{state_name} leads.csv"
+        # Generate filename for county-level output (will be aggregated later)
+        if not output_csv or output_csv == "final_contacts.csv":
+            output_csv = "final_contacts.csv"
         
-        # Step 11: Split contacts into with/without emails
+        # Write raw contacts to CSV (Steps 11, 12, 13 will run globally after all counties complete)
+        # This is per-county output that will be aggregated and enriched later
         if self.all_contacts:
-            contacts_with_emails, contacts_without_emails = self.contact_splitter.split_contacts(self.all_contacts)
-        else:
-            print(f"No contacts to process")
-            contacts_with_emails = []
-            contacts_without_emails = []
-        
-        # Step 12: Email Enrichment with Hunter.io (optional, batch processing)
-        contacts_enriched = []
-        if self.enable_hunter_io and contacts_without_emails:
-            try:
-                enricher = step12_hunter_io.HunterIOEnricher(
-                    api_key=os.getenv('HUNTER_IO_API_KEY'),
-                    verify_emails=False,
-                    score_threshold=70
-                )
-                contacts_enriched = enricher.enrich_contact_objects(
-                    contacts=contacts_without_emails,
-                    batch_size=10,
-                    delay_between_batches=1.0
-                )
-            except Exception as e:
-                print(f"\n⚠️  Email enrichment failed: {e}")
-                print("   Continuing without enriched contacts...")
-                import traceback
-                traceback.print_exc()
-                # Don't fail pipeline if enrichment fails
-        
-        # Step 13: Compile final CSV
-        if contacts_with_emails or contacts_enriched:
-            self.final_compiler.compile_contacts_to_csv(
-                contacts_with_emails=contacts_with_emails,
-                contacts_enriched=contacts_enriched,
-                output_csv=output_csv,
-                state=self._state
-            )
+            self._write_final_csv(self.all_contacts, output_csv)
         else:
             print(f"No contacts to write to {output_csv}")
         
         # Update stats
         self.stats['contacts_extracted'] = len(self.all_contacts)
         self.stats['unique_contacts'] = len(self.unique_contacts_set)
+        
+        # Count contacts with/without emails for stats (but don't process them yet)
+        contacts_with_emails = [c for c in self.all_contacts if c.has_email()]
+        contacts_without_emails = [c for c in self.all_contacts if not c.has_email()]
         self.stats['contacts_with_emails'] = len(contacts_with_emails)
-        self.stats['contacts_without_emails'] = len(contacts_without_emails) - len(contacts_enriched)  # Original count minus enriched
+        self.stats['contacts_without_emails'] = len(contacts_without_emails)
         
         # Print final summary
         self._print_summary()
