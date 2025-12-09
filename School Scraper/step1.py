@@ -239,14 +239,12 @@ class SchoolSearcher:
         # Use target_state if state not provided
         if state is None:
             state = self.full_state_name
-        # Define search terms (balanced for recall; filters prune noise)
+        # Define search terms (lean set: original 5 + Episcopal for impact)
         search_terms = [
             f"Christian schools in {county} County, {state}",
             f"Catholic schools in {county} County, {state}",
             f"Episcopal schools in {county} County, {state}",
-            f"Lutheran schools in {county} County, {state}",
-            f"parochial schools in {county} County, {state}",
-            f"church schools in {county} County, {state}",
+            f"private schools in {county} County, {state}",
             f"academy in {county} County, {state}",
             f"prep school in {county} County, {state}"
         ]
