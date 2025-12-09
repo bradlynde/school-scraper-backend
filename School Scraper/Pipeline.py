@@ -128,6 +128,7 @@ class StreamingPipeline:
         self.deduplicator = step9.ContactDeduplicator(email_cleaner=self.csv_parser.clean_email)
         self.title_filter = step10.TitleFilter(openai_api_key, model="gpt-4o-mini")
         self.final_compiler = step11.FinalCompiler()
+        self.enable_hunter_io = os.getenv('HUNTER_IO_API_KEY') is not None
         
         # Results accumulator
         self.all_contacts = []
