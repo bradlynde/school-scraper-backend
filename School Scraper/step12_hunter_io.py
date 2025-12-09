@@ -3,8 +3,8 @@ STEP 12: EMAIL ENRICHMENT (Hunter.io)
 ======================================
 Enrich contacts without email addresses using Hunter.io Email Finder API.
 
-Input: Final CSV from Step 11 (may contain contacts without emails)
-Output: Enriched CSV with found emails added
+Input: List of Contact objects without emails (from Step 11)
+Output: List of Contact objects with emails added where found
 
 This step is optional and non-blocking - pipeline continues even if enrichment fails.
 """
@@ -16,6 +16,7 @@ import time
 from typing import Optional, Dict, List
 from urllib.parse import urlparse
 import re
+from assets.shared.models import Contact
 
 
 class HunterIOEnricher:
@@ -56,7 +57,7 @@ class HunterIOEnricher:
         Returns:
             Domain string or None if invalid
         """
-        if not url or pd.isna(url):
+        if not url:
             return None
         
         try:
@@ -178,6 +179,96 @@ class HunterIOEnricher:
             print(f"      ⚠️  Hunter.io API error: {str(e)}")
             self.stats['errors'] += 1
             return None
+    
+    def enrich_contact_objects(
+        self,
+        contacts: List[Contact],
+        batch_size: int = 10,
+        delay_between_batches: float = 1.0
+    ) -> List[Contact]:
+        """
+        Enrich Contact objects without emails using Hunter.io API.
+        
+        Args:
+            contacts: List of Contact objects without emails
+            batch_size: Number of contacts to process per batch
+            delay_between_batches: Delay in seconds between batches
+        
+        Returns:
+            List of Contact objects with emails added where found
+            (Only returns contacts that successfully got emails - skips failed contacts)
+        """
+        print("\n" + "="*70)
+        print("STEP 12: EMAIL ENRICHMENT (Hunter.io)")
+        print("="*70)
+        
+        if not contacts:
+            print(f"  ✓ No contacts to enrich")
+            return []
+        
+        print(f"  📧 Processing {len(contacts)} contacts without emails")
+        
+        enriched_contacts = []
+        total_batches = (len(contacts) + batch_size - 1) // batch_size
+        
+        for batch_idx in range(0, len(contacts), batch_size):
+            batch = contacts[batch_idx:batch_idx + batch_size]
+            batch_num = (batch_idx // batch_size) + 1
+            
+            print(f"\n  Processing batch {batch_num}/{total_batches} ({len(batch)} contacts)...")
+            
+            for contact in batch:
+                if not contact.first_name or not contact.last_name:
+                    print(f"    ⚠️  Skipping: missing name")
+                    continue
+                
+                domain = self.extract_domain_from_url(contact.source_url)
+                if not domain:
+                    print(f"    ⚠️  Skipping {contact.first_name} {contact.last_name}: invalid domain from {contact.source_url}")
+                    continue
+                
+                print(f"    🔍 Searching for: {contact.first_name} {contact.last_name} @ {domain}")
+                
+                email_result = self.find_email_via_hunter_io(
+                    contact.first_name,
+                    contact.last_name,
+                    domain
+                )
+                self.stats['contacts_processed'] += 1
+                
+                if email_result:
+                    email = email_result['email']
+                    score = email_result['score']
+                    print(f"      ✓ Found: {email} (score: {score})")
+                    
+                    # Update contact with found email
+                    contact.email = email
+                    enriched_contacts.append(contact)
+                    self.stats['emails_found'] += 1
+                else:
+                    print(f"      ✗ Not found - skipping contact")
+                    # Skip failed contacts (per user requirement)
+                
+                # Small delay between requests to respect rate limits
+                time.sleep(0.5)
+            
+            # Delay between batches
+            if batch_idx + batch_size < len(contacts):
+                time.sleep(delay_between_batches)
+        
+        # Print summary
+        print(f"\n" + "="*70)
+        print(f"EMAIL ENRICHMENT COMPLETE")
+        print(f"="*70)
+        print(f"  Contacts processed: {self.stats['contacts_processed']}")
+        print(f"  Emails found: {self.stats['emails_found']} ({len(enriched_contacts)} contacts enriched)")
+        print(f"  API calls: {self.stats['api_calls']}")
+        print(f"  Errors: {self.stats['errors']}")
+        if self.stats['contacts_processed'] > 0:
+            print(f"  Success rate: {(self.stats['emails_found'] / self.stats['contacts_processed']) * 100:.1f}%")
+        print("="*70)
+        
+        return enriched_contacts
     
     def enrich_contacts_with_hunter_io(
         self,

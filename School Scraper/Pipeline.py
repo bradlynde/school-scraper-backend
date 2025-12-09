@@ -75,8 +75,9 @@ import step7   # Step 7 – LLM parsing
 import step8   # Step 8 – CSV/email cleaning
 import step9   # Step 9 – deduplication
 import step10  # Step 10 – title filtering
-import step11  # Step 11 – final compilation
+import step11_contact_splitter  # Step 11 – split contacts with/without emails
 import step12_hunter_io  # Step 12 – email enrichment (Hunter.io)
+import step13_final_compiler  # Step 13 – final CSV compilation
 
 
 class StreamingPipeline:
@@ -127,7 +128,8 @@ class StreamingPipeline:
         self.csv_parser = step8.CSVParser()
         self.deduplicator = step9.ContactDeduplicator(email_cleaner=self.csv_parser.clean_email)
         self.title_filter = step10.TitleFilter(openai_api_key, model="gpt-4o-mini")
-        self.final_compiler = step11.FinalCompiler()
+        self.contact_splitter = step11_contact_splitter.ContactSplitter()
+        self.final_compiler = step13_final_compiler.FinalCompiler()
         self.enable_hunter_io = os.getenv('HUNTER_IO_API_KEY') is not None
         
         # Results accumulator
@@ -476,11 +478,6 @@ class StreamingPipeline:
         if self.llm_school_filter:
             self.llm_school_filter.flush()
         
-        # Step 6: Write final CSV files
-        print("\n" + "="*70)
-        print("STEP 6: WRITING FINAL OUTPUT")
-        print("="*70)
-        
         # Generate filename with state name if not provided
         if output_csv == "final_contacts.csv" or not output_csv:
             state_name = (self._state or 'Texas').title()
@@ -490,68 +487,51 @@ class StreamingPipeline:
             state_name = (self._state or 'Texas').title()
             output_csv = f"{state_name} leads.csv"
         
-        # Write all contacts to single CSV file
+        # Step 11: Split contacts into with/without emails
         if self.all_contacts:
-            self._write_final_csv(self.all_contacts, output_csv)
+            contacts_with_emails, contacts_without_emails = self.contact_splitter.split_contacts(self.all_contacts)
         else:
-            print(f"No contacts to write to {output_csv}")
+            print(f"No contacts to process")
+            contacts_with_emails = []
+            contacts_without_emails = []
         
-        # Step 12: Email Enrichment with Hunter.io (optional)
-        if self.enable_hunter_io and os.path.exists(output_csv):
+        # Step 12: Email Enrichment with Hunter.io (optional, batch processing)
+        contacts_enriched = []
+        if self.enable_hunter_io and contacts_without_emails:
             try:
-                print("\n" + "="*70)
-                print("STEP 12: EMAIL ENRICHMENT (Hunter.io)")
-                print("="*70)
-                
-                enriched_csv = step12_hunter_io.enrich_csv_with_hunter_io(
-                    csv_path=output_csv,
+                enricher = step12_hunter_io.HunterIOEnricher(
                     api_key=os.getenv('HUNTER_IO_API_KEY'),
-                    output_csv_path=output_csv,  # Overwrite with enriched version
-                    verify_emails=False,  # Set to True to verify emails (uses more credits)
-                    score_threshold=70,  # Minimum email score to accept
-                    batch_size=10
+                    verify_emails=False,
+                    score_threshold=70
                 )
-                
-                if enriched_csv != output_csv:
-                    # If a new file was created, update output_csv
-                    output_csv = enriched_csv
-                
-                print(f"✓ Email enrichment completed")
+                contacts_enriched = enricher.enrich_contact_objects(
+                    contacts=contacts_without_emails,
+                    batch_size=10,
+                    delay_between_batches=1.0
+                )
             except Exception as e:
                 print(f"\n⚠️  Email enrichment failed: {e}")
-                print("   Continuing with original CSV...")
+                print("   Continuing without enriched contacts...")
                 import traceback
                 traceback.print_exc()
                 # Don't fail pipeline if enrichment fails
         
-        # Calculate contacts with and without emails (after enrichment)
-        contacts_with_emails = [c for c in self.all_contacts if c.email and c.email.strip()]
-        contacts_without_emails = [c for c in self.all_contacts if not c.email or not c.email.strip()]
-        
-        # If enrichment happened, re-read CSV to get updated email counts
-        if self.enable_hunter_io and os.path.exists(output_csv):
-            try:
-                import pandas as pd
-                df = pd.read_csv(output_csv)
-                email_col = None
-                for col in ['email', 'Email', 'EMAIL']:
-                    if col in df.columns:
-                        email_col = col
-                        break
-                if email_col:
-                    contacts_with_emails_count = df[df[email_col].notna() & (df[email_col] != '') & (df[email_col].str.strip() != '')].shape[0]
-                    contacts_without_emails_count = len(df) - contacts_with_emails_count
-                    # Update stats with enriched counts
-                    self.stats['contacts_with_emails'] = contacts_with_emails_count
-                    self.stats['contacts_without_emails'] = contacts_without_emails_count
-            except Exception:
-                pass  # If re-reading fails, use original counts
+        # Step 13: Compile final CSV
+        if contacts_with_emails or contacts_enriched:
+            self.final_compiler.compile_contacts_to_csv(
+                contacts_with_emails=contacts_with_emails,
+                contacts_enriched=contacts_enriched,
+                output_csv=output_csv,
+                state=self._state
+            )
+        else:
+            print(f"No contacts to write to {output_csv}")
         
         # Update stats
         self.stats['contacts_extracted'] = len(self.all_contacts)
         self.stats['unique_contacts'] = len(self.unique_contacts_set)
         self.stats['contacts_with_emails'] = len(contacts_with_emails)
-        self.stats['contacts_without_emails'] = len(contacts_without_emails)
+        self.stats['contacts_without_emails'] = len(contacts_without_emails) - len(contacts_enriched)  # Original count minus enriched
         
         # Print final summary
         self._print_summary()

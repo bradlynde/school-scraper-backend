@@ -13,7 +13,7 @@ from typing import List, Dict
 import re
 
 
-# Step 7: Extract ALL contacts (NO filtering - that happens in Step 11)
+# Step 7: Extract ALL contacts (NO filtering - that happens in Step 10)
 CONTACT_EXTRACTION_PROMPT = """
 You extract ALL PEOPLE from raw HTML. Do not hallucinate or invent data.
 
