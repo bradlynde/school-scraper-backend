@@ -580,8 +580,8 @@ def pipeline_status(run_id):
                 # Fallback: use 17 minutes (1015 seconds) based on Illinois log analysis
                 avg_time_per_county = 1015  # 16.9 minutes average from logs
             
-            # Account for parallel processing (4 workers)
-            # If we have 4 workers, remaining time = (remaining_counties / 4) * avg_time
+            # Account for sequential processing (1 worker)
+            # With 1 worker, remaining time = remaining_counties * avg_time
             max_workers = 1
             effective_remaining = max(1, remaining_counties / max_workers)
             estimated_remaining = effective_remaining * avg_time_per_county
