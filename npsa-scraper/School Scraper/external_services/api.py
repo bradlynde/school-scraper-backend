@@ -420,9 +420,9 @@ def run_streaming_pipeline(state: str, run_id: str):
             pipeline_runs[run_id]["totalCounties"] = total_counties
             pipeline_runs[run_id]["statusMessage"] = f"Starting pipeline for {state} ({total_counties} counties)..."
             
-            # Use ThreadPoolExecutor with 4 workers (prevents thread exhaustion)
-            # 4 workers = ~4x speedup while staying within Railway limits
-            max_workers = 4
+            # Use ThreadPoolExecutor with 1 worker (prevents Selenium Chrome crashes)
+            # 1 worker = sequential processing, stable but slower
+            max_workers = 1
             print(f"[{run_id}] Processing {total_counties} counties with {max_workers} concurrent workers...")
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -582,7 +582,7 @@ def pipeline_status(run_id):
             
             # Account for parallel processing (4 workers)
             # If we have 4 workers, remaining time = (remaining_counties / 4) * avg_time
-            max_workers = 4
+            max_workers = 1
             effective_remaining = max(1, remaining_counties / max_workers)
             estimated_remaining = effective_remaining * avg_time_per_county
             
