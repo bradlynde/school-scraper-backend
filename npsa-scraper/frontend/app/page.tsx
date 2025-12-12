@@ -305,10 +305,20 @@ export default function Home() {
   // START VIEW
   if (viewState === "start") {
     return (
-      <div className="min-h-screen bg-white">
-        <Navigation />
+      <div className="min-h-screen bg-white relative">
+        <Navigation activeTab={selectedType} onTabChange={setSelectedType} />
         <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
-          <div className="w-full max-w-2xl">
+          <div className="w-full max-w-2xl relative">
+            {/* In Development Overlay for Church Scraper */}
+            {selectedType === "church" && (
+              <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 rounded-lg flex items-center justify-center">
+                <div className="text-center">
+                  <h2 className="text-3xl font-bold text-white mb-2">In Development</h2>
+                  <p className="text-gray-300">Church scraper functionality coming soon</p>
+                </div>
+              </div>
+            )}
+            
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
               <div className="flex flex-col space-y-6">
                 {/* State Selection */}
@@ -331,38 +341,6 @@ export default function Home() {
                   </select>
                 </div>
 
-                {/* Type Selection */}
-                <div>
-                  <label htmlFor="type" className="block text-sm font-medium text-gray-700 mb-2">
-                    Select Type
-                  </label>
-                  <div className="flex space-x-4">
-                    <label className="flex items-center">
-                      <input
-                        type="radio"
-                        name="type"
-                        value="school"
-                        checked={selectedType === "school"}
-                        onChange={(e) => setSelectedType(e.target.value as "school" | "church")}
-                        className="mr-2 text-[#1e3a5f] focus:ring-[#1e3a5f]"
-                      />
-                      <span className="text-gray-700">School</span>
-                    </label>
-                    <label className="flex items-center">
-                      <input
-                        type="radio"
-                        name="type"
-                        value="church"
-                        checked={selectedType === "church"}
-                        onChange={(e) => setSelectedType(e.target.value as "school" | "church")}
-                        disabled
-                        className="mr-2 opacity-50 cursor-not-allowed"
-                      />
-                      <span className="text-gray-400 line-through">Church (Coming Soon)</span>
-                    </label>
-                  </div>
-                </div>
-
                 {error && (
                   <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
                     <p className="text-red-700 text-sm">{error}</p>
@@ -371,9 +349,9 @@ export default function Home() {
 
                 <button
                   onClick={runPipeline}
-                  disabled={isRunning || !selectedState}
+                  disabled={isRunning || !selectedState || selectedType === "church"}
                   className={`w-full px-8 py-4 rounded-lg font-semibold text-white transition-all duration-200 shadow-md ${
-                    isRunning || !selectedState
+                    isRunning || !selectedState || selectedType === "church"
                       ? "bg-gray-400 cursor-not-allowed opacity-60"
                       : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-lg transform hover:-translate-y-0.5"
                   }`}
@@ -398,7 +376,7 @@ export default function Home() {
 
     return (
       <div className="min-h-screen bg-white">
-        <Navigation />
+        <Navigation activeTab={selectedType} onTabChange={setSelectedType} />
         <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
           <div className="w-full max-w-4xl">
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
@@ -461,7 +439,7 @@ export default function Home() {
   if (viewState === "summary" && summary) {
     return (
       <div className="min-h-screen bg-white">
-        <Navigation />
+        <Navigation activeTab={selectedType} onTabChange={setSelectedType} />
         <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
           <div className="w-full max-w-2xl">
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
