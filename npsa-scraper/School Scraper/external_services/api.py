@@ -411,15 +411,15 @@ def run_streaming_pipeline(state: str, run_id: str):
     
     def process_all_counties():
         """Process all counties using thread pool"""
-        try:
-            # Load counties for state
-            counties = load_counties_from_state(state)
-            total_counties = len(counties)
-            
-            # Update progress tracking with county info
-            pipeline_runs[run_id]["totalCounties"] = total_counties
-            pipeline_runs[run_id]["statusMessage"] = f"Starting pipeline for {state} ({total_counties} counties)..."
-            
+    try:
+        # Load counties for state
+        counties = load_counties_from_state(state)
+        total_counties = len(counties)
+        
+        # Update progress tracking with county info
+        pipeline_runs[run_id]["totalCounties"] = total_counties
+        pipeline_runs[run_id]["statusMessage"] = f"Starting pipeline for {state} ({total_counties} counties)..."
+        
             # Use ThreadPoolExecutor with 1 worker (prevents Selenium Chrome crashes)
             # 1 worker = sequential processing, stable but slower
             max_workers = 1
@@ -455,23 +455,23 @@ def run_streaming_pipeline(state: str, run_id: str):
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed, starting aggregation...")
             aggregate_final_results(run_id, state)
-            
-        except FileNotFoundError as e:
-            # State file not found
-            error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
-            pipeline_runs[run_id]["status"] = "error"
-            pipeline_runs[run_id]["error"] = error_msg
-            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
-            import traceback
-            traceback.print_exc()
-        except Exception as e:
-            # Any other error
-            error_msg = str(e)[:500]  # Limit error message length
-            pipeline_runs[run_id]["status"] = "error"
-            pipeline_runs[run_id]["error"] = error_msg
-            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
-            import traceback
-            traceback.print_exc()
+        
+    except FileNotFoundError as e:
+        # State file not found
+        error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
+        pipeline_runs[run_id]["status"] = "error"
+        pipeline_runs[run_id]["error"] = error_msg
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+        import traceback
+        traceback.print_exc()
+    except Exception as e:
+        # Any other error
+        error_msg = str(e)[:500]  # Limit error message length
+        pipeline_runs[run_id]["status"] = "error"
+        pipeline_runs[run_id]["error"] = error_msg
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+        import traceback
+        traceback.print_exc()
     
     # Start processing in a background thread
     thread = threading.Thread(target=process_all_counties)
@@ -577,15 +577,16 @@ def pipeline_status(run_id):
             if len(county_times) > 0:
                 avg_time_per_county = sum(county_times) / len(county_times)
             else:
-                # Fallback: use 17 minutes (1015 seconds) based on Illinois log analysis
-                avg_time_per_county = 1015  # 16.9 minutes average from logs
+                # Fallback: use 11.75 minutes (705 seconds) based on actual Illinois run (Dec 11-12, 2025)
+                # Actual performance: 101 counties in 19h 47m = 11.75 min/county average
+                avg_time_per_county = 705  # 11.75 minutes average from actual production run
             
             # Account for sequential processing (1 worker)
             # With 1 worker, remaining time = remaining_counties * avg_time
             max_workers = 1
             effective_remaining = max(1, remaining_counties / max_workers)
             estimated_remaining = effective_remaining * avg_time_per_county
-            
+        
             run_data["estimatedTimeRemaining"] = int(estimated_remaining)
             run_data["averageCountyTime"] = int(avg_time_per_county) if len(county_times) > 0 else None
         else:
