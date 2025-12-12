@@ -101,6 +101,7 @@ export default function Home() {
   const [estimatedTime, setEstimatedTime] = useState<number | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [elapsedTimeDisplay, setElapsedTimeDisplay] = useState<number>(0);
 
   function downloadCSV(csvContent: string, filename: string) {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -243,7 +244,7 @@ export default function Home() {
       if (data.runId) {
         const interval = setInterval(() => {
           checkPipelineStatus(data.runId);
-        }, 15000);
+        }, 60000); // Poll every 1 minute
         setPollingInterval(interval);
         checkPipelineStatus(data.runId);
       } else {
@@ -278,6 +279,7 @@ export default function Home() {
     setProgress(0);
     setEstimatedTime(null);
     setStartTime(null);
+    setElapsedTimeDisplay(0);
     
     if (pollingInterval) {
       clearInterval(pollingInterval);
@@ -285,14 +287,18 @@ export default function Home() {
     }
   }
 
+  // Update elapsed time display every second (real-time counter)
   useEffect(() => {
     if (startTime && isRunning) {
       const interval = setInterval(() => {
         const elapsed = (Date.now() - startTime) / 1000;
+        setElapsedTimeDisplay(elapsed);
       }, 1000);
       return () => clearInterval(interval);
+    } else {
+      setElapsedTimeDisplay(0);
     }
-  }, [startTime, isRunning, estimatedTime]);
+  }, [startTime, isRunning]);
 
   useEffect(() => {
     return () => {
@@ -368,11 +374,10 @@ export default function Home() {
 
   // PROGRESS VIEW
   if (viewState === "progress") {
-    const elapsedTime = startTime ? (Date.now() - startTime) / 1000 : 0;
     const hasRemainingTime = estimatedTime !== null && estimatedTime > 0;
     const timeDisplay = hasRemainingTime
-      ? `Elapsed: ${formatTime(elapsedTime)} | Remaining: ${formatTime(estimatedTime)}`
-      : `Elapsed: ${formatTime(elapsedTime)}`;
+      ? `Elapsed: ${formatTime(elapsedTimeDisplay)} | Remaining: ${formatTime(estimatedTime)}`
+      : `Elapsed: ${formatTime(elapsedTimeDisplay)}`;
 
     return (
       <div className="min-h-screen bg-white">
