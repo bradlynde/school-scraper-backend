@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Navigation from "../components/Navigation";
 
 type StepSummary = {
   name: string;
@@ -135,10 +136,8 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        // If 404, the run ID doesn't exist (likely an error occurred during initialization)
         if (response.status === 404) {
           const errorData = await response.json().catch(() => ({ error: "Run ID not found" }));
-          // Stop polling
           if (pollingInterval) {
             clearInterval(pollingInterval);
             setPollingInterval(null);
@@ -155,7 +154,6 @@ export default function Home() {
       const data = await response.json();
       
       if (data.status === "completed") {
-        // Stop polling
         if (pollingInterval) {
           clearInterval(pollingInterval);
           setPollingInterval(null);
@@ -168,7 +166,6 @@ export default function Home() {
         setViewState("summary");
         setIsRunning(false);
       } else if (data.status === "error") {
-        // Stop polling
         if (pollingInterval) {
           clearInterval(pollingInterval);
           setPollingInterval(null);
@@ -178,13 +175,10 @@ export default function Home() {
         setStatus("Pipeline failed - see error below");
         setIsRunning(false);
         setSummary(data);
-        // Stay in progress view to show the error
       } else if (data.status === "running") {
-        // Update progress
         setSummary(data);
         setCurrentStep(data.currentStep || 0);
         
-        // Calculate progress based on counties processed
         const countiesProcessed = data.countiesProcessed || 0;
         const totalCounties = data.totalCounties || 1;
         const countyProgress = Math.round((countiesProcessed / totalCounties) * 100);
@@ -192,7 +186,6 @@ export default function Home() {
         
         setEstimatedTime(data.estimatedTimeRemaining || null);
         
-        // Build status message with county info
         let statusMsg = data.statusMessage || "Processing...";
         if (data.currentCounty) {
           statusMsg = `Processing ${data.currentCounty} County (${countiesProcessed + 1} of ${totalCounties})`;
@@ -201,7 +194,6 @@ export default function Home() {
       }
     } catch (err) {
       console.error("Status check error:", err);
-      // Don't stop polling on transient errors
     }
   }
 
@@ -249,16 +241,12 @@ export default function Home() {
       console.log("Pipeline response:", data);
       
       if (data.runId) {
-        // Start polling for status updates
         const interval = setInterval(() => {
           checkPipelineStatus(data.runId);
-        }, 15000); // Poll every 15 seconds
+        }, 15000);
         setPollingInterval(interval);
-        
-        // Initial status check
         checkPipelineStatus(data.runId);
       } else {
-        // Legacy: immediate completion (for testing)
         setSummary(data);
         setStatus("Pipeline completed successfully!");
         setProgress(100);
@@ -297,21 +285,15 @@ export default function Home() {
     }
   }
 
-  // Calculate elapsed time
   useEffect(() => {
     if (startTime && isRunning) {
       const interval = setInterval(() => {
         const elapsed = (Date.now() - startTime) / 1000;
-        // Update estimated time if available, otherwise show elapsed
-        if (!estimatedTime || estimatedTime > 0) {
-          // Keep showing elapsed time
-        }
       }, 1000);
       return () => clearInterval(interval);
     }
   }, [startTime, isRunning, estimatedTime]);
 
-  // Cleanup polling on unmount
   useEffect(() => {
     return () => {
       if (pollingInterval) {
@@ -322,93 +304,83 @@ export default function Home() {
 
   // START VIEW
   if (viewState === "start") {
-  return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
-        <div className="w-full max-w-2xl">
-          <div className="bg-gray-900 rounded-lg border border-gray-800 p-8 shadow-xl">
-            {/* NPSA Logo */}
-            <div className="mb-8 text-center">
-              <div className="inline-block">
-                <h1 className="text-2xl font-bold text-white mb-2 tracking-wide">
-                  Nonprofit Security Advisors
-                </h1>
-                <div className="h-1 w-24 bg-blue-600 mx-auto mb-4"></div>
-                <p className="text-lg font-semibold text-gray-300">
-                  NPSA Scraper
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex flex-col space-y-6">
-              {/* State Selection */}
-              <div>
-                <label htmlFor="state" className="block text-sm font-medium text-gray-300 mb-2">
-                  Select State
-                </label>
-                <select
-                  id="state"
-                  value={selectedState}
-                  onChange={(e) => setSelectedState(e.target.value)}
-                  className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 transition-colors"
+    return (
+      <div className="min-h-screen bg-white">
+        <Navigation />
+        <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
+          <div className="w-full max-w-2xl">
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
+              <div className="flex flex-col space-y-6">
+                {/* State Selection */}
+                <div>
+                  <label htmlFor="state" className="block text-sm font-medium text-gray-700 mb-2">
+                    Select State
+                  </label>
+                  <select
+                    id="state"
+                    value={selectedState}
+                    onChange={(e) => setSelectedState(e.target.value)}
+                    className="w-full px-4 py-3 bg-white border border-gray-300 rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#1e3a5f] focus:border-[#1e3a5f] transition-colors shadow-sm"
+                  >
+                    <option value="">-- Select a state --</option>
+                    {US_STATES.map((state) => (
+                      <option key={state.value} value={state.value}>
+                        {state.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Type Selection */}
+                <div>
+                  <label htmlFor="type" className="block text-sm font-medium text-gray-700 mb-2">
+                    Select Type
+                  </label>
+                  <div className="flex space-x-4">
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="type"
+                        value="school"
+                        checked={selectedType === "school"}
+                        onChange={(e) => setSelectedType(e.target.value as "school" | "church")}
+                        className="mr-2 text-[#1e3a5f] focus:ring-[#1e3a5f]"
+                      />
+                      <span className="text-gray-700">School</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        name="type"
+                        value="church"
+                        checked={selectedType === "church"}
+                        onChange={(e) => setSelectedType(e.target.value as "school" | "church")}
+                        disabled
+                        className="mr-2 opacity-50 cursor-not-allowed"
+                      />
+                      <span className="text-gray-400 line-through">Church (Coming Soon)</span>
+                    </label>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-red-700 text-sm">{error}</p>
+                  </div>
+                )}
+
+                <button
+                  onClick={runPipeline}
+                  disabled={isRunning || !selectedState}
+                  className={`w-full px-8 py-4 rounded-lg font-semibold text-white transition-all duration-200 shadow-md ${
+                    isRunning || !selectedState
+                      ? "bg-gray-400 cursor-not-allowed opacity-60"
+                      : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-lg transform hover:-translate-y-0.5"
+                  }`}
                 >
-                  <option value="">-- Select a state --</option>
-                  {US_STATES.map((state) => (
-                    <option key={state.value} value={state.value}>
-                      {state.label}
-                    </option>
-                  ))}
-                </select>
+                  {isRunning ? "Starting..." : "Start Search"}
+                </button>
               </div>
-
-              {/* Type Selection */}
-              <div>
-                <label htmlFor="type" className="block text-sm font-medium text-gray-300 mb-2">
-                  Select Type
-                </label>
-                <div className="flex space-x-4">
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="type"
-                      value="school"
-                      checked={selectedType === "school"}
-                      onChange={(e) => setSelectedType(e.target.value as "school" | "church")}
-                      className="mr-2"
-                    />
-                    <span className="text-gray-300">School</span>
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      name="type"
-                      value="church"
-                      checked={selectedType === "church"}
-                      onChange={(e) => setSelectedType(e.target.value as "school" | "church")}
-                      disabled
-                      className="mr-2 opacity-50 cursor-not-allowed"
-                    />
-                    <span className="text-gray-400 line-through">Church (Coming Soon)</span>
-                  </label>
-                </div>
-              </div>
-
-              {error && (
-                <div className="p-4 bg-red-900/30 border border-red-800 rounded-lg">
-                  <p className="text-red-300 text-sm">{error}</p>
-                </div>
-              )}
-
-              <button
-                onClick={runPipeline}
-                disabled={isRunning || !selectedState}
-                className={`w-full px-8 py-4 rounded-lg font-semibold text-white transition-all duration-200 shadow-lg ${
-                  isRunning || !selectedState
-                    ? "bg-gray-600 cursor-not-allowed opacity-60"
-                    : "bg-blue-600 hover:bg-blue-700 hover:shadow-xl transform hover:-translate-y-0.5"
-                }`}
-              >
-                {isRunning ? "Starting..." : "Start Search"}
-              </button>
             </div>
           </div>
         </div>
@@ -424,156 +396,68 @@ export default function Home() {
       ? `Elapsed: ${formatTime(elapsedTime)} | Remaining: ${formatTime(estimatedTime)}`
       : `Elapsed: ${formatTime(elapsedTime)}`;
 
-    const getStepMessage = (stepIndex: number) => {
-      if (!summary?.steps) return "Processing...";
-      
-      const step = summary.steps[stepIndex];
-      if (!step) return "Processing...";
-      
-      if (step.name.includes("Discovery")) {
-        return step.schoolsFound 
-          ? `Step 1: ${step.schoolsFound} Schools Discovered`
-          : "Step 1: Discovering schools...";
-      }
-      if (step.name.includes("Page")) {
-        return step.pagesDiscovered
-          ? `Step 2: ${step.pagesDiscovered} Pages Discovered`
-          : "Step 2: Discovering pages...";
-      }
-      if (step.name.includes("Content")) {
-        return step.emailsFound
-          ? `Step 3: ${step.emailsFound} Emails Found`
-          : "Step 3: Collecting content...";
-      }
-      if (step.name.includes("Parsing") || step.name.includes("LLM")) {
-        return step.contactsWithEmails !== undefined
-          ? `Step 4: ${step.contactsWithEmails} Contacts Extracted`
-          : "Step 4: Parsing with LLM...";
-      }
-      if (step.name.includes("Filter")) {
-        return "Step 5: Filtering contacts...";
-      }
-      if (step.name.includes("Compilation") || step.name.includes("Final")) {
-        return "Step 6: Final compilation...";
-      }
-      return step.name || "Processing...";
-    };
-
-    const stepMessages = summary?.steps 
-      ? summary.steps.map((_, i) => getStepMessage(i))
-      : ["Starting pipeline..."];
-
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
-        <div className="w-full max-w-4xl">
-          <div className="bg-gray-900 rounded-lg border border-gray-800 p-8 shadow-xl">
-            {/* NPSA Logo Header */}
-            <div className="mb-6 text-center">
-              <h2 className="text-xl font-bold text-white mb-1 tracking-wide">
-                Nonprofit Security Advisors
+      <div className="min-h-screen bg-white">
+        <Navigation />
+        <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
+          <div className="w-full max-w-4xl">
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
+              <h2 className="text-2xl font-bold text-center mb-2 text-gray-900">
+                SCRAPING IN PROGRESS
               </h2>
-              <div className="h-0.5 w-20 bg-blue-600 mx-auto mb-2"></div>
-              <p className="text-sm text-gray-400">NPSA Scraper</p>
-            </div>
-            
-            <h2 className="text-2xl font-bold text-center mb-2 text-white">
-              SCRAPING IN PROGRESS
-            </h2>
-            <p className="text-center text-gray-400 mb-8">
-              {selectedState ? US_STATES.find(s => s.value === selectedState)?.label : "Unknown"} - {selectedType === "school" ? "Schools" : "Churches"}
-            </p>
-            
-            {/* Progress Bar */}
-            <div className="mb-6">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm text-gray-400">Progress</span>
-                <span className="text-sm text-gray-400">{Math.round(progress)}%</span>
-              </div>
-              <div className="w-full bg-gray-800 rounded-full h-4 mb-2">
-                <div
-                  className="bg-blue-600 h-4 rounded-full transition-all duration-500 shadow-lg"
-                  style={{ width: `${progress}%` }}
-                ></div>
-              </div>
-              <div className="flex justify-between items-center text-sm text-gray-400">
-                <span>{timeDisplay}</span>
-                <span>
-                  {summary?.countiesProcessed || 0} / {summary?.totalCounties || 0} counties
-                </span>
-              </div>
-            </div>
-
-            {/* Current Status */}
-            <div className="mb-6 p-4 bg-gray-800 rounded-lg border border-gray-700">
-              <p className="text-white font-medium">{status}</p>
-            </div>
-
-            {/* Milestones */}
-            <div className="space-y-2">
-              <h3 className="text-lg font-semibold mb-3 text-white">Current Progress</h3>
+              <p className="text-center text-gray-600 mb-8">
+                {selectedState ? US_STATES.find(s => s.value === selectedState)?.label : "Unknown"} - {selectedType === "school" ? "Schools" : "Churches"}
+              </p>
               
-              {/* County Progress */}
-              {summary?.totalCounties && (
-                <div className="p-4 rounded-lg bg-blue-900/20 border border-blue-700/50 mb-3">
-                  <p className="text-sm text-blue-200">
-                    <strong className="text-blue-100">Counties:</strong> {summary.countiesProcessed || 0} of {summary.totalCounties} processed
-                    {summary.currentCounty && (
-                      <span className="block mt-1 text-blue-300">Currently processing: <strong className="text-blue-100">{summary.currentCounty}</strong></span>
-                    )}
-                  </p>
+              {/* Progress Bar */}
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm text-gray-600">Progress</span>
+                  <span className="text-sm text-gray-600">{Math.round(progress)}%</span>
                 </div>
-              )}
-              
-              {/* Step Progress */}
-              {summary?.steps && summary.steps.length > 0 && (
-                <div className="space-y-2">
-                  {summary.steps.map((step: StepSummary, index: number) => (
-                    <div
-                      key={index}
-                      className="p-4 rounded-lg bg-blue-900/20 border border-blue-700/50"
-                    >
-                      <p className="text-sm text-blue-200">
-                        <span className="text-blue-400 font-semibold">✓</span> {step.name}
-                        {step.schoolsFound !== undefined && (
-                          <span className="block mt-1 text-xs text-blue-300">
-                            {step.schoolsFound} schools found
-                          </span>
-                        )}
-                        {step.contactsWithEmails !== undefined && (
-                          <span className="block mt-1 text-xs text-blue-300">
-                            {step.contactsWithEmails} contacts extracted
-                          </span>
-                        )}
-                      </p>
+                <div className="w-full bg-gray-200 rounded-full h-4 mb-2">
+                  <div
+                    className="bg-[#1e3a5f] h-4 rounded-full transition-all duration-500 shadow-sm"
+                    style={{ width: `${progress}%` }}
+                  ></div>
+                </div>
+                <div className="flex justify-between items-center text-sm text-gray-600">
+                  <span>{timeDisplay}</span>
+                  <span>
+                    {summary?.countiesProcessed || 0} / {summary?.totalCounties || 0} counties
+                  </span>
+                </div>
+              </div>
+
+              {/* Current Status - Simplified Gray Bar */}
+              <div className="mb-6 p-4 bg-gray-100 rounded-lg border border-gray-200">
+                <p className="text-gray-800 font-medium">{status}</p>
+              </div>
+
+              {error && (
+                <div className="mt-6 p-6 bg-red-50 border-2 border-red-300 rounded-lg">
+                  <div className="flex items-start">
+                    <div className="flex-shrink-0">
+                      <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
                     </div>
-                  ))}
+                    <div className="ml-3 flex-1">
+                      <h3 className="text-lg font-semibold text-red-800 mb-2">Pipeline Error</h3>
+                      <p className="text-red-700 text-sm whitespace-pre-wrap">{error}</p>
+                    </div>
+                  </div>
+                  <div className="mt-4">
+                    <button
+                      onClick={resetToStart}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+                    >
+                      Return to Start
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
-
-            {error && (
-              <div className="mt-6 p-6 bg-red-900/50 border-2 border-red-600 rounded-lg">
-                <div className="flex items-start">
-                  <div className="flex-shrink-0">
-                    <svg className="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <div className="ml-3 flex-1">
-                    <h3 className="text-lg font-semibold text-red-300 mb-2">Pipeline Error</h3>
-                    <p className="text-red-200 text-sm whitespace-pre-wrap">{error}</p>
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <button
-                    onClick={resetToStart}
-                    className="px-4 py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg font-medium transition-colors"
-                  >
-                    Return to Start
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -583,63 +467,57 @@ export default function Home() {
   // SUMMARY VIEW
   if (viewState === "summary" && summary) {
     return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center p-8">
-        <div className="w-full max-w-2xl">
-          <div className="bg-gray-900 rounded-lg border border-gray-800 p-8 shadow-xl">
-            {/* NPSA Logo Header */}
-            <div className="mb-6 text-center">
-              <h2 className="text-xl font-bold text-white mb-1 tracking-wide">
-                Nonprofit Security Advisors
+      <div className="min-h-screen bg-white">
+        <Navigation />
+        <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
+          <div className="w-full max-w-2xl">
+            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
+              <h2 className="text-2xl font-bold text-center mb-8 text-gray-900">
+                SCRAPING COMPLETE
               </h2>
-              <div className="h-0.5 w-20 bg-blue-600 mx-auto mb-2"></div>
-              <p className="text-sm text-gray-400">NPSA Scraper</p>
-            </div>
-            
-            <h2 className="text-2xl font-bold text-center mb-8 text-white">
-              SCRAPING COMPLETE
-            </h2>
-            
-            {/* Results Section */}
-            <div className="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
-              <h3 className="text-xl font-semibold mb-4 text-white">Results</h3>
-              <div className="space-y-3">
-                <p className="text-gray-300">
-                  <span className="font-semibold">{summary.schoolsFound || 0}</span> Schools found
-                </p>
-                <p className="text-gray-300">
-                  <span className="font-semibold">{summary.totalContacts || 0}</span> Contacts
-                </p>
-              </div>
-            </div>
-
-            {/* Download Button */}
-            <div className="flex flex-col space-y-4">
-              {summary.csvData && summary.csvFilename ? (
-                <button
-                  onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
-                  className="w-full px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                >
-                  Download Leads ({summary.totalContacts || 0} contacts)
-                </button>
-              ) : (
-                <div className="w-full px-6 py-4 bg-yellow-900/30 border border-yellow-800 rounded-lg text-center mb-4">
-                  <p className="text-yellow-300 text-sm">
-                    No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
+              
+              {/* Results Section */}
+              <div className="bg-gray-50 rounded-lg p-6 mb-6 border border-gray-200">
+                <h3 className="text-xl font-semibold mb-4 text-gray-900">Results</h3>
+                <div className="space-y-3">
+                  <p className="text-gray-700">
+                    <span className="font-semibold text-[#1e3a5f]">{summary.schoolsFound || 0}</span> Schools found
+                  </p>
+                  <p className="text-gray-700">
+                    <span className="font-semibold text-[#1e3a5f]">{summary.totalContacts || 0}</span> Contacts
                   </p>
                 </div>
-              )}
-              
-              <button
-                onClick={resetToStart}
-                className="w-full px-6 py-4 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-medium transition-all duration-200"
-          >
-                Run Another Search
-              </button>
+              </div>
+
+              {/* Download Button */}
+              <div className="flex flex-col space-y-4">
+                {summary.csvData && summary.csvFilename ? (
+                  <button
+                    onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
+                    className="w-full px-6 py-4 bg-[#1e3a5f] hover:bg-[#2c5282] text-white rounded-lg font-semibold transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                  >
+                    Download Leads ({summary.totalContacts || 0} contacts)
+                  </button>
+                ) : (
+                  <div className="w-full px-6 py-4 bg-yellow-50 border border-yellow-200 rounded-lg text-center mb-4">
+                    <p className="text-yellow-800 text-sm">
+                      No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
+                    </p>
+                  </div>
+                )}
+                
+                <button
+                  onClick={resetToStart}
+                  className="w-full px-6 py-4 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-medium transition-all duration-200"
+                >
+                  Run Another Search
+                </button>
+              </div>
             </div>
           </div>
         </div>
-    </div>
-  );
+      </div>
+    );
   }
 
   return null;
