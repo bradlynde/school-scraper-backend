@@ -307,9 +307,30 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-white">
         <Navigation />
-        <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
+        
+        {/* Hero Section with Visual Interest */}
+        <div className="bg-gradient-to-b from-gray-50 to-white py-16">
+          <div className="max-w-7xl mx-auto px-6 text-center">
+            <h1 className="text-4xl font-bold text-gray-900 mb-4">
+              School Contact Scraper
+            </h1>
+            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+              Discover and extract contact information from private Christian and Catholic schools across the United States
+            </p>
+          </div>
+        </div>
+
+        {/* Decorative Divider - Jagged Pattern */}
+        <div className="relative w-full h-12 bg-gray-50 overflow-hidden">
+          <svg className="absolute bottom-0 w-full h-full" viewBox="0 0 1200 120" preserveAspectRatio="none">
+            <path d="M0,0 L0,60 Q150,80 300,60 T600,60 T900,60 T1200,60 L1200,0 Z" fill="white" />
+            <path d="M0,60 Q150,40 300,60 T600,60 T900,60 T1200,60 L1200,120 L0,120 Z" fill="white" />
+          </svg>
+        </div>
+
+        <div className="flex items-center justify-center p-8 pb-16">
           <div className="w-full max-w-2xl">
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
+            <div className="bg-white rounded-lg border border-gray-200 shadow-lg p-8">
               <div className="flex flex-col space-y-6">
                 {/* State Selection */}
                 <div>
@@ -399,16 +420,30 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-white">
         <Navigation />
-        <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
+        
+        {/* Decorative Top Section */}
+        <div className="bg-gradient-to-b from-gray-50 to-white py-12">
+          <div className="max-w-7xl mx-auto px-6 text-center">
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              Scraping in Progress
+            </h1>
+            <p className="text-gray-600">
+              {selectedState ? US_STATES.find(s => s.value === selectedState)?.label : "Unknown"} - {selectedType === "school" ? "Schools" : "Churches"}
+            </p>
+          </div>
+        </div>
+
+        {/* Decorative Divider */}
+        <div className="relative w-full h-12 bg-white overflow-hidden">
+          <svg className="absolute bottom-0 w-full h-full" viewBox="0 0 1200 120" preserveAspectRatio="none">
+            <path d="M0,0 L0,60 Q150,80 300,60 T600,60 T900,60 T1200,60 L1200,0 Z" fill="#f9fafb" />
+            <path d="M0,60 Q150,40 300,60 T600,60 T900,60 T1200,60 L1200,120 L0,120 Z" fill="#f9fafb" />
+          </svg>
+        </div>
+
+        <div className="flex items-center justify-center p-8 pb-16">
           <div className="w-full max-w-4xl">
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
-              <h2 className="text-2xl font-bold text-center mb-2 text-gray-900">
-                SCRAPING IN PROGRESS
-              </h2>
-              <p className="text-center text-gray-600 mb-8">
-                {selectedState ? US_STATES.find(s => s.value === selectedState)?.label : "Unknown"} - {selectedType === "school" ? "Schools" : "Churches"}
-              </p>
-              
+            <div className="bg-white rounded-lg border border-gray-200 shadow-lg p-8">
               {/* Progress Bar */}
               <div className="mb-6">
                 <div className="flex justify-between items-center mb-2">
@@ -469,12 +504,35 @@ export default function Home() {
     return (
       <div className="min-h-screen bg-white">
         <Navigation />
-        <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
+        
+        {/* Success Hero Section */}
+        <div className="bg-gradient-to-b from-[#6b8e23]/10 to-white py-16">
+          <div className="max-w-7xl mx-auto px-6 text-center">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-[#6b8e23] rounded-full mb-4">
+              <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h1 className="text-4xl font-bold text-gray-900 mb-4">
+              Scraping Complete
+            </h1>
+            <p className="text-xl text-gray-600">
+              Your results are ready for download
+            </p>
+          </div>
+        </div>
+
+        {/* Decorative Divider */}
+        <div className="relative w-full h-12 bg-white overflow-hidden">
+          <svg className="absolute bottom-0 w-full h-full" viewBox="0 0 1200 120" preserveAspectRatio="none">
+            <path d="M0,0 L0,60 Q150,80 300,60 T600,60 T900,60 T1200,60 L1200,0 Z" fill="#f0fdf4" />
+            <path d="M0,60 Q150,40 300,60 T600,60 T900,60 T1200,60 L1200,120 L0,120 Z" fill="#f0fdf4" />
+          </svg>
+        </div>
+
+        <div className="flex items-center justify-center p-8 pb-16">
           <div className="w-full max-w-2xl">
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
-              <h2 className="text-2xl font-bold text-center mb-8 text-gray-900">
-                SCRAPING COMPLETE
-              </h2>
+            <div className="bg-white rounded-lg border border-gray-200 shadow-lg p-8">
               
               {/* Results Section */}
               <div className="bg-gray-50 rounded-lg p-6 mb-6 border border-gray-200">
