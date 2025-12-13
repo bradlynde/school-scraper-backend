@@ -2,6 +2,7 @@
 Backend API for School Scraper Pipeline
 Deploy this to Railway to handle POST requests from Vercel frontend
 Processes states county-by-county to avoid timeout issues
+Last updated: 2025-12-13 - Force Railway redeploy
 """
 
 from flask import Flask, request, jsonify
