@@ -20,6 +20,7 @@ type PipelineSummary = {
   steps: StepSummary[];
   totalContacts: number;
   schoolsFound: number;
+  schoolsProcessed?: number;
   runId: string;
   csvData?: string;
   csvFilename?: string;
@@ -31,6 +32,8 @@ type PipelineSummary = {
   currentCounty?: string;
   currentCountyIndex?: number;
   statusMessage?: string;
+  countyContacts?: number[];
+  countySchools?: number[];
 };
 
 type ViewState = "start" | "progress" | "summary";
@@ -119,8 +122,7 @@ export default function Home() {
   function formatTime(seconds: number): string {
     if (seconds < 60) return `${Math.round(seconds)}s`;
     const minutes = Math.floor(seconds / 60);
-    const secs = Math.round(seconds % 60);
-    if (minutes < 60) return `${minutes}m ${secs}s`;
+    if (minutes < 60) return `${minutes}m`;
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
@@ -440,52 +442,120 @@ export default function Home() {
     );
   }
 
+  // Helper function to create cumulative line graph
+  const createLineGraph = (data: number[], width: number = 200, height: number = 80, color: string = "#6b8e23") => {
+    if (!data || data.length === 0) return null;
+    
+    // Calculate cumulative values
+    const cumulative = [];
+    let sum = 0;
+    for (const value of data) {
+      sum += value;
+      cumulative.push(sum);
+    }
+    
+    const max = Math.max(...cumulative, 1);
+    const padding = 10;
+    const graphWidth = width - padding * 2;
+    const graphHeight = height - padding * 2;
+    
+    // Generate path points
+    const points = cumulative.map((value, index) => {
+      const x = padding + (index / (cumulative.length - 1 || 1)) * graphWidth;
+      const y = padding + graphHeight - (value / max) * graphHeight;
+      return `${x},${y}`;
+    }).join(' ');
+    
+    // Create area path for fill
+    const areaPath = `M ${padding},${height - padding} L ${points} L ${width - padding},${height - padding} Z`;
+    
+    return (
+      <svg width={width} height={height} className="w-full h-full">
+        <defs>
+          <linearGradient id={`gradient-${color}`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.05" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill={`url(#gradient-${color})`} />
+        <polyline
+          points={points}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  };
+
   // SUMMARY VIEW
   if (viewState === "summary" && summary) {
+    const totalProcessingTime = elapsedTimeDisplay || 0;
+    
     return (
       <div className="min-h-screen bg-white">
         <Navigation activeTab={selectedType} onTabChange={setSelectedType} />
         <div className="flex items-center justify-center p-8 min-h-[calc(100vh-80px)]">
-          <div className="w-full max-w-2xl">
-            <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-8">
+          <div className="w-full max-w-6xl">
+            {/* 3 Card Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
               
-              {/* Results Section */}
-              <div className="bg-gray-50 rounded-lg p-6 mb-6 border border-gray-200">
-                <h3 className="text-xl font-semibold mb-4 text-gray-900">Results</h3>
-                <div className="space-y-3">
-                  <p className="text-gray-700">
-                    <span className="font-semibold text-[#1e3a5f]">{summary.schoolsFound || 0}</span> Schools found
-                  </p>
-                  <p className="text-gray-700">
-                    <span className="font-semibold text-[#1e3a5f]">{summary.totalContacts || 0}</span> Contacts
-                  </p>
+              {/* Card 1: Total Contacts */}
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+                <h3 className="text-sm font-medium text-gray-600 mb-2">Contacts Extracted</h3>
+                <div className="text-4xl font-bold text-[#1e3a5f] mb-4">
+                  {summary.totalContacts || 0}
+                </div>
+                <div className="h-20 -mx-6 -mb-6 mt-4">
+                  {createLineGraph(summary.countyContacts || [], 400, 80, "#6b8e23")}
                 </div>
               </div>
 
-              {/* Download Button */}
-              <div className="flex flex-col space-y-4">
-                {summary.csvData && summary.csvFilename ? (
-                  <button
-                    onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
-                    className="w-full px-6 py-4 bg-[#1e3a5f] hover:bg-[#2c5282] text-white rounded-lg font-semibold transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                  >
-                    Download Leads ({summary.totalContacts || 0} contacts)
-                  </button>
-                ) : (
-                  <div className="w-full px-6 py-4 bg-yellow-50 border border-yellow-200 rounded-lg text-center mb-4">
-                    <p className="text-yellow-800 text-sm">
-                      No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
-                    </p>
-                  </div>
-                )}
-                
-                <button
-                  onClick={resetToStart}
-                  className="w-full px-6 py-4 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-medium transition-all duration-200"
-                >
-                  Run Another Search
-                </button>
+              {/* Card 2: Schools Processed */}
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+                <h3 className="text-sm font-medium text-gray-600 mb-2">Schools Processed</h3>
+                <div className="text-4xl font-bold text-[#1e3a5f] mb-4">
+                  {summary.schoolsProcessed || summary.schoolsFound || 0}
+                </div>
+                <div className="h-20 -mx-6 -mb-6 mt-4">
+                  {createLineGraph(summary.countySchools || [], 400, 80, "#1e3a5f")}
+                </div>
               </div>
+
+              {/* Card 3: Processing Time */}
+              <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+                <h3 className="text-sm font-medium text-gray-600 mb-2">Processing Time</h3>
+                <div className="text-4xl font-bold text-[#1e3a5f]">
+                  {formatTime(totalProcessingTime)}
+                </div>
+              </div>
+            </div>
+
+            {/* Download Button */}
+            <div className="flex flex-col space-y-4">
+              {summary.csvData && summary.csvFilename ? (
+                <button
+                  onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
+                  className="w-full px-6 py-4 bg-[#1e3a5f] hover:bg-[#2c5282] text-white rounded-lg font-semibold transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                >
+                  Download Leads ({summary.totalContacts || 0} contacts)
+                </button>
+              ) : (
+                <div className="w-full px-6 py-4 bg-yellow-50 border border-yellow-200 rounded-lg text-center mb-4">
+                  <p className="text-yellow-800 text-sm">
+                    No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
+                  </p>
+                </div>
+              )}
+              
+              <button
+                onClick={resetToStart}
+                className="w-full px-6 py-4 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-medium transition-all duration-200"
+              >
+                Run Another Search
+              </button>
             </div>
           </div>
         </div>

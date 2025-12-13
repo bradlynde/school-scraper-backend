@@ -186,6 +186,15 @@ def process_county_with_timing(state: str, run_id: str, county: str, county_inde
             pipeline_runs[run_id]["countyTimes"] = []
         pipeline_runs[run_id]["countyTimes"].append(processing_time)
         
+        # Track per-county contacts and schools for graphs
+        if "countyContacts" not in pipeline_runs[run_id]:
+            pipeline_runs[run_id]["countyContacts"] = []
+        if "countySchools" not in pipeline_runs[run_id]:
+            pipeline_runs[run_id]["countySchools"] = []
+        
+        pipeline_runs[run_id]["countyContacts"].append(result.get('contacts', 0))
+        pipeline_runs[run_id]["countySchools"].append(result.get('schools', 0))
+        
         print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
         
         return (county_index, result, processing_time)
@@ -406,6 +415,8 @@ def run_streaming_pipeline(state: str, run_id: str):
         "currentCounty": None,
         "currentCountyIndex": 0,
         "countyTimes": [],  # Track processing times for each county
+        "countyContacts": [],  # Track contacts per county for graphs
+        "countySchools": [],  # Track schools per county for graphs
         "startTime": time.time(),  # Track overall start time
     }
     
