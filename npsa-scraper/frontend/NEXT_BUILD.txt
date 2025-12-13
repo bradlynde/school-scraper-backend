@@ -1,0 +1,4 @@
+# Next.js Build Configuration
+# Vercel auto-detects Next.js projects - no vercel.json needed
+# Root directory should be set to "frontend" in Vercel project settings
+# Build date: 2025-12-13
