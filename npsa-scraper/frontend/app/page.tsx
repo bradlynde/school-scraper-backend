@@ -162,6 +162,12 @@ export default function Home() {
           setPollingInterval(null);
         }
         
+        // Calculate final elapsed time before stopping
+        if (startTime) {
+          const finalElapsed = (Date.now() - startTime) / 1000;
+          setElapsedTimeDisplay(finalElapsed);
+        }
+        
         setSummary(data);
         setStatus("Pipeline completed successfully!");
         setProgress(100);
@@ -297,9 +303,8 @@ export default function Home() {
         setElapsedTimeDisplay(elapsed);
       }, 1000);
       return () => clearInterval(interval);
-    } else {
-      setElapsedTimeDisplay(0);
     }
+    // Don't reset to 0 when stopping - preserve the final elapsed time for summary view
   }, [startTime, isRunning]);
 
   useEffect(() => {
