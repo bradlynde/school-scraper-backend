@@ -162,7 +162,8 @@ export default function Home() {
           setPollingInterval(null);
         }
         
-        // Calculate final elapsed time before stopping
+        // Calculate final elapsed time - elapsedTimeDisplay will continue updating via useEffect
+        // but we ensure it's set correctly here as well
         if (startTime) {
           const finalElapsed = (Date.now() - startTime) / 1000;
           setElapsedTimeDisplay(finalElapsed);
@@ -172,8 +173,8 @@ export default function Home() {
         setStatus("Pipeline completed successfully!");
         setProgress(100);
         setEstimatedTime(0);
-        setViewState("summary");
         setIsRunning(false);
+        setViewState("summary");
       } else if (data.status === "error") {
         if (pollingInterval) {
           clearInterval(pollingInterval);
@@ -296,16 +297,19 @@ export default function Home() {
   }
 
   // Update elapsed time display every second (real-time counter)
+  // Continue updating even after completion to preserve final value for summary view
   useEffect(() => {
-    if (startTime && isRunning) {
+    if (startTime) {
       const interval = setInterval(() => {
         const elapsed = (Date.now() - startTime) / 1000;
         setElapsedTimeDisplay(elapsed);
       }, 1000);
       return () => clearInterval(interval);
+    } else {
+      // Only reset to 0 when startTime is null (before a run starts)
+      setElapsedTimeDisplay(0);
     }
-    // Don't reset to 0 when stopping - preserve the final elapsed time for summary view
-  }, [startTime, isRunning]);
+  }, [startTime]);
 
   useEffect(() => {
     return () => {
