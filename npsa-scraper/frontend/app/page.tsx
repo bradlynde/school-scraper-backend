@@ -391,18 +391,15 @@ export default function Home() {
     );
   };
 
-  // Render all views with fade transitions
+  // Render views with fade-in transitions
   return (
     <div className="min-h-screen bg-gray-50">
       <Sidebar activeTab={selectedType} onTabChange={setSelectedType} isCollapsed={sidebarCollapsed} onCollapseChange={setSidebarCollapsed} />
       <div className={`min-h-screen transition-all duration-300 ${sidebarCollapsed ? 'ml-20' : 'ml-64'}`}>
         {/* START VIEW */}
-        <div
-          className={`transition-opacity duration-500 ${
-            viewState === "start" ? "opacity-100 relative" : "opacity-0 absolute inset-0 pointer-events-none"
-          }`}
-        >
-          <div className="flex items-center justify-center p-12 min-h-screen">
+        {viewState === "start" && (
+          <div className="animate-fade-in">
+            <div className="flex items-center justify-center p-12 min-h-screen">
             <div className="w-full max-w-2xl relative">
               {/* In Development Overlay for Church Scraper */}
               {selectedType === "church" && (
@@ -461,15 +458,13 @@ export default function Home() {
               </div>
             </div>
           </div>
-        </div>
+          </div>
+        )}
 
         {/* PROGRESS VIEW */}
-        <div
-          className={`transition-opacity duration-500 ${
-            viewState === "progress" ? "opacity-100 relative" : "opacity-0 absolute inset-0 pointer-events-none"
-          }`}
-        >
-          <div className="flex items-center justify-center min-h-screen py-12 px-8">
+        {viewState === "progress" && (
+          <div className="animate-fade-in">
+            <div className="flex items-center justify-center min-h-screen py-12 px-8">
             <div className="w-full max-w-7xl">
               {/* Header */}
               <div className="mb-10 text-center">
@@ -612,18 +607,13 @@ export default function Home() {
             </div>
           </div>
           </div>
-        </div>
+        )}
 
         {/* SUMMARY VIEW */}
-        {summary && (
-          <div
-            className={`transition-opacity duration-500 ${
-              viewState === "summary" ? "opacity-100 relative" : "opacity-0 absolute inset-0 pointer-events-none"
-            }`}
-          >
+        {viewState === "summary" && summary && (
+          <div className="animate-fade-in">
             {(() => {
               const totalProcessingTime = elapsedTimeDisplay || 0;
-
               return (
                 <div className="flex items-center justify-center min-h-screen py-12 px-8">
             <div className="w-full max-w-7xl">
