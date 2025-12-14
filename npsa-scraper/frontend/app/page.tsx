@@ -337,6 +337,54 @@ export default function Home() {
     };
   }, [pollingInterval]);
 
+  // Helper function to create cumulative line graph
+  const createLineGraph = (data: number[], width: number = 200, height: number = 80, color: string = "#6b8e23") => {
+    if (!data || data.length === 0) return null;
+    
+    // Calculate cumulative values
+    const cumulative = [];
+    let sum = 0;
+    for (const value of data) {
+      sum += value;
+      cumulative.push(sum);
+    }
+    
+    const max = Math.max(...cumulative, 1);
+    const padding = 10;
+    const graphWidth = width - padding * 2;
+    const graphHeight = height - padding * 2;
+    
+    // Generate path points
+    const points = cumulative.map((value, index) => {
+      const x = padding + (index / (cumulative.length - 1 || 1)) * graphWidth;
+      const y = padding + graphHeight - (value / max) * graphHeight;
+      return `${x},${y}`;
+    }).join(' ');
+    
+    // Create area path for fill
+    const areaPath = `M ${padding},${height - padding} L ${points} L ${width - padding},${height - padding} Z`;
+    
+    return (
+      <svg width={width} height={height} className="w-full h-full">
+        <defs>
+          <linearGradient id={`gradient-${color}`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.05" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill={`url(#gradient-${color})`} />
+        <polyline
+          points={points}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  };
+
   // Render all views with fade transitions
   return (
     <div className="min-h-screen bg-gray-50">
@@ -569,54 +617,6 @@ export default function Home() {
             })()}
           </div>
         )}
-
-  // Helper function to create cumulative line graph
-  const createLineGraph = (data: number[], width: number = 200, height: number = 80, color: string = "#6b8e23") => {
-    if (!data || data.length === 0) return null;
-    
-    // Calculate cumulative values
-    const cumulative = [];
-    let sum = 0;
-    for (const value of data) {
-      sum += value;
-      cumulative.push(sum);
-    }
-    
-    const max = Math.max(...cumulative, 1);
-    const padding = 10;
-    const graphWidth = width - padding * 2;
-    const graphHeight = height - padding * 2;
-    
-    // Generate path points
-    const points = cumulative.map((value, index) => {
-      const x = padding + (index / (cumulative.length - 1 || 1)) * graphWidth;
-      const y = padding + graphHeight - (value / max) * graphHeight;
-      return `${x},${y}`;
-    }).join(' ');
-    
-    // Create area path for fill
-    const areaPath = `M ${padding},${height - padding} L ${points} L ${width - padding},${height - padding} Z`;
-    
-    return (
-      <svg width={width} height={height} className="w-full h-full">
-        <defs>
-          <linearGradient id={`gradient-${color}`} x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-            <stop offset="100%" stopColor={color} stopOpacity="0.05" />
-          </linearGradient>
-        </defs>
-        <path d={areaPath} fill={`url(#gradient-${color})`} />
-        <polyline
-          points={points}
-          fill="none"
-          stroke={color}
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  };
 
         {/* SUMMARY VIEW */}
         {summary && (
