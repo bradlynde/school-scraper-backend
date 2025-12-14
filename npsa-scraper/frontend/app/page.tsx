@@ -315,19 +315,19 @@ export default function Home() {
   }
 
   // Update elapsed time display every second (real-time counter)
-  // Continue updating even after completion to preserve final value for summary view
+  // Stop updating when run completes (viewState === "summary")
   useEffect(() => {
-    if (startTime) {
+    if (startTime && viewState === "progress") {
       const interval = setInterval(() => {
         const elapsed = (Date.now() - startTime) / 1000;
         setElapsedTimeDisplay(elapsed);
       }, 1000);
       return () => clearInterval(interval);
-    } else {
+    } else if (!startTime) {
       // Only reset to 0 when startTime is null (before a run starts)
       setElapsedTimeDisplay(0);
     }
-  }, [startTime]);
+  }, [startTime, viewState]);
 
   useEffect(() => {
     return () => {
@@ -359,7 +359,6 @@ export default function Home() {
                 <div className="flex flex-col space-y-8">
                   <div>
                     <h1 className="text-2xl font-semibold text-gray-900 mb-1">Start New Search</h1>
-                    <p className="text-gray-600 text-base">Select a state to begin scraping</p>
                   </div>
 
                   {/* State Selection */}
@@ -419,92 +418,93 @@ export default function Home() {
       <div className="min-h-screen bg-gray-50">
         <Sidebar activeTab={selectedType} onTabChange={setSelectedType} isCollapsed={sidebarCollapsed} onCollapseChange={setSidebarCollapsed} />
         <div className={`min-h-screen transition-all duration-300 ${sidebarCollapsed ? 'ml-20' : 'ml-64'}`}>
-          <div className="p-8">
-            <div className="max-w-7xl mx-auto">
-              <div className="mb-8">
-                <h1 className="text-3xl font-semibold text-gray-900 mb-2">Pipeline Running</h1>
-                <p className="text-gray-600 text-base">Processing {selectedState.charAt(0).toUpperCase() + selectedState.slice(1)}</p>
+          <div className="flex items-center justify-center min-h-screen py-12 px-8">
+            <div className="w-full max-w-7xl">
+              {/* Header */}
+              <div className="mb-10 text-center">
+                <h1 className="text-4xl font-bold text-gray-900 mb-2">Pipeline Running</h1>
+                <p className="text-lg text-gray-600">Processing {selectedState.charAt(0).toUpperCase() + selectedState.slice(1)}</p>
               </div>
 
               {/* Two Column Layout */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Left Column - Progress Cards */}
                 <div className="lg:col-span-2 space-y-6">
                   {/* 3 Progress Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {/* Card 1: Completed Counties */}
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-sm font-medium text-gray-600">Completed Counties</h3>
-                        <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Completed Counties</h3>
+                        <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                         </svg>
                       </div>
-                      <div className="flex items-baseline gap-2">
-                        <span className="text-4xl font-bold text-[#1e3a5f]">{countiesProcessed}</span>
-                        <span className="text-lg text-gray-500">/ {totalCounties}</span>
+                      <div className="flex items-baseline gap-2 mb-2">
+                        <span className="text-5xl font-bold text-[#1e3a5f]">{countiesProcessed}</span>
+                        <span className="text-xl text-gray-500">/ {totalCounties}</span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">
+                      <p className="text-sm text-gray-500">
                         {totalCounties > 0 ? Math.round((countiesProcessed / totalCounties) * 100) : 0}% complete
                       </p>
                     </div>
 
                     {/* Card 2: Processed Schools */}
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-sm font-medium text-gray-600">Processed Schools</h3>
-                        <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Processed Schools</h3>
+                        <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                         </svg>
                       </div>
-                      <div className="flex items-baseline">
-                        <span className="text-4xl font-bold text-[#1e3a5f]">{schoolsProcessed}</span>
+                      <div className="flex items-baseline mb-2">
+                        <span className="text-5xl font-bold text-[#1e3a5f]">{schoolsProcessed}</span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">Schools discovered and processed</p>
+                      <p className="text-sm text-gray-500">Schools discovered and processed</p>
                     </div>
 
                     {/* Card 3: Current County with Pulse */}
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-sm font-medium text-gray-600">Current County</h3>
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Current County</h3>
                         <div className="relative">
                           <div className="absolute inset-0 rounded-full bg-[#1e3a5f] opacity-20 animate-pulse"></div>
-                          <div className="relative w-3 h-3 rounded-full bg-[#1e3a5f]"></div>
+                          <div className="relative w-4 h-4 rounded-full bg-[#1e3a5f]"></div>
                         </div>
                       </div>
-                      <div className="flex items-baseline">
-                        <span className="text-2xl font-semibold text-[#1e3a5f]">{currentCounty}</span>
+                      <div className="flex items-baseline mb-2">
+                        <span className="text-3xl font-bold text-[#1e3a5f]">{currentCounty}</span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">Currently processing</p>
+                      <p className="text-sm text-gray-500">Currently processing</p>
                     </div>
                   </div>
 
                   {/* Activity Log */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-base font-semibold text-gray-900">Activity Log</h3>
-                      <span className="text-xs text-gray-500">{completedCounties.length} completed</span>
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-lg font-bold text-gray-900">Activity Log</h3>
+                      <span className="text-sm text-gray-500 font-medium">{completedCounties.length} completed</span>
                     </div>
-                    <div className="space-y-2.5 max-h-96 overflow-y-auto">
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
                       {summary?.currentCounty && (
-                        <div className="flex items-center gap-3 text-sm py-1">
+                        <div className="flex items-center gap-4 text-sm py-2">
                           <div className="relative flex-shrink-0">
-                            <div className="absolute inset-0 w-2 h-2 rounded-full bg-[#1e3a5f] opacity-30 animate-ping"></div>
-                            <div className="relative w-2 h-2 rounded-full bg-[#1e3a5f]"></div>
+                            <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-[#1e3a5f] opacity-30 animate-ping"></div>
+                            <div className="relative w-2.5 h-2.5 rounded-full bg-[#1e3a5f]"></div>
                           </div>
-                          <span className="text-[#1e3a5f] font-medium">Processing {summary.currentCounty} County...</span>
+                          <span className="text-[#1e3a5f] font-semibold">Processing {summary.currentCounty} County...</span>
                         </div>
                       )}
                       {completedCounties.length > 0 ? (
                         completedCounties.slice().reverse().map((county, index) => (
-                          <div key={index} className="flex items-center gap-3 text-sm py-1">
-                            <div className="w-2 h-2 rounded-full bg-green-500 flex-shrink-0"></div>
-                            <span className="text-gray-700">Completed {county} County</span>
+                          <div key={index} className="flex items-center gap-4 text-sm py-2">
+                            <div className="w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0"></div>
+                            <span className="text-gray-700 font-medium">Completed {county} County</span>
                           </div>
                         ))
                       ) : (
-                        <div className="flex items-center gap-3 text-sm text-gray-500 py-1">
-                          <div className="w-2 h-2 rounded-full bg-gray-300 flex-shrink-0"></div>
+                        <div className="flex items-center gap-4 text-sm text-gray-500 py-2">
+                          <div className="w-2.5 h-2.5 rounded-full bg-gray-300 flex-shrink-0"></div>
                           <span>Waiting for county completion...</span>
                         </div>
                       )}
@@ -514,28 +514,28 @@ export default function Home() {
 
                 {/* Right Column - Stats */}
                 <div className="space-y-6">
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                    <h3 className="text-base font-semibold text-gray-900 mb-4">Run Statistics</h3>
-                    <div className="space-y-4">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8">
+                    <h3 className="text-lg font-bold text-gray-900 mb-6">Run Statistics</h3>
+                    <div className="space-y-6">
                       <div>
-                        <p className="text-xs text-gray-500 mb-1">Elapsed Time</p>
-                        <p className="text-xl font-semibold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
+                        <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Elapsed Time</p>
+                        <p className="text-2xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
                       </div>
                       {estimatedTime !== null && estimatedTime > 0 && (
                         <div>
-                          <p className="text-xs text-gray-500 mb-1">Estimated Remaining</p>
-                          <p className="text-xl font-semibold text-gray-900">{formatTime(estimatedTime)}</p>
+                          <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Estimated Remaining</p>
+                          <p className="text-2xl font-bold text-gray-900">{formatTime(estimatedTime)}</p>
                         </div>
                       )}
                       <div>
-                        <p className="text-xs text-gray-500 mb-1">Status</p>
-                        <p className="text-base font-medium text-[#1e3a5f]">{status}</p>
+                        <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Status</p>
+                        <p className="text-base font-semibold text-[#1e3a5f]">{status}</p>
                       </div>
                     </div>
                   </div>
 
                   {error && (
-                    <div className="bg-red-50 border border-red-200 rounded-xl shadow-sm p-6">
+                    <div className="bg-red-50 border border-red-200 rounded-xl shadow-md p-8">
                       <div className="flex items-start">
                         <div className="flex-shrink-0">
                           <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -622,59 +622,60 @@ export default function Home() {
       <div className="min-h-screen bg-gray-50">
         <Sidebar activeTab={selectedType} onTabChange={setSelectedType} isCollapsed={sidebarCollapsed} onCollapseChange={setSidebarCollapsed} />
         <div className={`min-h-screen transition-all duration-300 ${sidebarCollapsed ? 'ml-20' : 'ml-64'}`}>
-          <div className="p-8">
-            <div className="max-w-7xl mx-auto">
-              <div className="mb-8">
-                <h1 className="text-3xl font-semibold text-gray-900 mb-2">Scraping Complete</h1>
-                <p className="text-gray-600 text-base">Pipeline finished successfully</p>
+          <div className="flex items-center justify-center min-h-screen py-12 px-8">
+            <div className="w-full max-w-7xl">
+              {/* Header */}
+              <div className="mb-10 text-center">
+                <h1 className="text-4xl font-bold text-gray-900 mb-2">Scraping Complete</h1>
+                <p className="text-lg text-gray-600">Pipeline finished successfully</p>
               </div>
 
               {/* 3 Card Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-10">
                 
                 {/* Card 1: Total Contacts */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                  <h3 className="text-sm font-medium text-gray-600 mb-3">Contacts Extracted</h3>
-                  <div className="text-5xl font-bold text-[#1e3a5f] mb-4">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                  <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Contacts Extracted</h3>
+                  <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
                     {summary.totalContacts || 0}
                   </div>
-                  <div className="h-24 -mx-6 -mb-6 mt-4">
-                    {createLineGraph(summary.countyContacts || [], 400, 96, "#6b8e23")}
+                  <div className="h-28 -mx-8 -mb-8 mt-4">
+                    {createLineGraph(summary.countyContacts || [], 400, 112, "#6b8e23")}
                   </div>
                 </div>
 
                 {/* Card 2: Schools Processed */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                  <h3 className="text-sm font-medium text-gray-600 mb-3">Schools Processed</h3>
-                  <div className="text-5xl font-bold text-[#1e3a5f] mb-4">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                  <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Schools Processed</h3>
+                  <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
                     {summary.schoolsProcessed || summary.schoolsFound || 0}
                   </div>
-                  <div className="h-24 -mx-6 -mb-6 mt-4">
-                    {createLineGraph(summary.countySchools || [], 400, 96, "#1e3a5f")}
+                  <div className="h-28 -mx-8 -mb-8 mt-4">
+                    {createLineGraph(summary.countySchools || [], 400, 112, "#1e3a5f")}
                   </div>
                 </div>
 
                 {/* Card 3: Processing Time */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                  <h3 className="text-sm font-medium text-gray-600 mb-3">Processing Time</h3>
-                  <div className="text-5xl font-bold text-[#1e3a5f]">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                  <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Processing Time</h3>
+                  <div className="text-6xl font-bold text-[#1e3a5f]">
                     {formatTime(totalProcessingTime)}
                   </div>
                 </div>
               </div>
 
               {/* Download Button */}
-              <div className="flex flex-col space-y-4">
+              <div className="flex flex-col space-y-4 max-w-2xl mx-auto">
                 {summary.csvData && summary.csvFilename ? (
                   <button
                     onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
-                    className="w-full px-6 py-4 bg-[#1e3a5f] hover:bg-[#2c5282] text-white rounded-lg text-base font-semibold transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                    className="w-full px-8 py-5 bg-[#1e3a5f] hover:bg-[#2c5282] text-white rounded-xl text-lg font-semibold transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
                   >
                     Download Leads ({summary.totalContacts || 0} contacts)
                   </button>
                 ) : (
-                  <div className="w-full px-6 py-4 bg-yellow-50 border border-yellow-200 rounded-lg text-center mb-4">
-                    <p className="text-yellow-800 text-base">
+                  <div className="w-full px-8 py-5 bg-yellow-50 border border-yellow-200 rounded-xl text-center shadow-sm">
+                    <p className="text-yellow-800 text-base font-medium">
                       No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
                     </p>
                   </div>
@@ -682,7 +683,7 @@ export default function Home() {
                 
                 <button
                   onClick={resetToStart}
-                  className="w-full px-6 py-4 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-base font-medium transition-all duration-200"
+                  className="w-full px-8 py-5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-lg font-semibold transition-all duration-200 shadow-sm hover:shadow-md"
                 >
                   Run Another Search
                 </button>
