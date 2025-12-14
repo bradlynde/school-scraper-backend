@@ -345,7 +345,7 @@ export default function Home() {
         {/* START VIEW */}
         <div
           className={`transition-opacity duration-500 ${
-            viewState === "start" ? "opacity-100" : "opacity-0 absolute inset-0 pointer-events-none"
+            viewState === "start" ? "opacity-100 relative" : "opacity-0 absolute inset-0 pointer-events-none"
           }`}
         >
           <div className="flex items-center justify-center p-12 min-h-screen">
