@@ -525,9 +525,8 @@ export default function Home() {
 
                   {/* Activity Log */}
                   <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8">
-                    <div className="flex items-center justify-between mb-6">
+                    <div className="mb-6">
                       <h3 className="text-lg font-bold text-gray-900">Activity Log</h3>
-                      <span className="text-sm text-gray-500 font-medium">{completedCounties.length} completed</span>
                     </div>
                     <div className="space-y-3 max-h-96 overflow-y-auto">
                       {summary?.currentCounty && (
