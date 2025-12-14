@@ -337,6 +337,12 @@ export default function Home() {
     };
   }, [pollingInterval]);
 
+  // Calculate progress view variables
+  const countiesProcessed = summary?.countiesProcessed || 0;
+  const totalCounties = summary?.totalCounties || 0;
+  const schoolsProcessed = summary?.schoolsProcessed || summary?.schoolsFound || 0;
+  const currentCounty = summary?.currentCounty || "Initializing...";
+
   // Helper function to create cumulative line graph
   const createLineGraph = (data: number[], width: number = 200, height: number = 80, color: string = "#6b8e23") => {
     if (!data || data.length === 0) return null;
@@ -463,14 +469,7 @@ export default function Home() {
             viewState === "progress" ? "opacity-100 relative" : "opacity-0 absolute inset-0 pointer-events-none"
           }`}
         >
-            {(() => {
-              const countiesProcessed = summary?.countiesProcessed || 0;
-              const totalCounties = summary?.totalCounties || 0;
-              const schoolsProcessed = summary?.schoolsProcessed || summary?.schoolsFound || 0;
-              const currentCounty = summary?.currentCounty || "Initializing...";
-
-              return (
-                <div className="flex items-center justify-center min-h-screen py-12 px-8">
+          <div className="flex items-center justify-center min-h-screen py-12 px-8">
             <div className="w-full max-w-7xl">
               {/* Header */}
               <div className="mb-10 text-center">
@@ -612,11 +611,8 @@ export default function Home() {
               </div>
             </div>
           </div>
-                </div>
-              );
-            })()}
           </div>
-        )}
+        </div>
 
         {/* SUMMARY VIEW */}
         {summary && (
