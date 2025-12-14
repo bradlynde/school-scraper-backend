@@ -465,13 +465,16 @@ export default function Home() {
           <div className="animate-fade-in">
             <div className="flex items-center justify-center min-h-screen py-12 px-8">
             <div className="w-full max-w-7xl">
-              {/* Header */}
-              <div className="mb-10 text-center">
-                <h1 className="text-4xl font-bold text-gray-900">Running Pipeline</h1>
-              </div>
-
               {/* Two Column Layout */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Header - Left aligned with cards */}
+                <div className="lg:col-span-2 mb-10">
+                  <h1 className="text-4xl font-bold text-gray-900">Running Pipeline</h1>
+                </div>
+                <div></div> {/* Empty spacer for grid alignment */}
+                
+                {/* Restart grid for content */}
+                <div className="lg:col-span-3 grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Left Column - Progress Cards */}
                 <div className="lg:col-span-2 space-y-6">
                   {/* 3 Progress Cards */}
@@ -558,22 +561,22 @@ export default function Home() {
 
                 {/* Right Column - Stats */}
                 <div className="space-y-6">
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 flex flex-col h-full">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-6 flex flex-col h-full">
                     <h3 className="text-lg font-bold text-gray-900 mb-6">Run Statistics</h3>
                     <div className="flex-1 flex flex-col justify-center space-y-6">
                       <div>
                         <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Elapsed Time</p>
-                        <p className="text-2xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
+                        <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
                       </div>
                       {estimatedTime !== null && estimatedTime > 0 && (
                         <div>
                           <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Estimated Remaining</p>
-                          <p className="text-2xl font-bold text-gray-900">{formatTime(estimatedTime)}</p>
+                          <p className="text-3xl font-bold text-gray-900">{formatTime(estimatedTime)}</p>
                         </div>
                       )}
                       <div>
                         <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Status</p>
-                        <p className="text-base font-semibold text-[#1e3a5f]">{status}</p>
+                        <p className="text-lg font-semibold text-[#1e3a5f]">{status}</p>
                       </div>
                     </div>
                   </div>
