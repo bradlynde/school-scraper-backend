@@ -465,16 +465,13 @@ export default function Home() {
           <div className="animate-fade-in">
             <div className="flex items-center justify-center min-h-screen py-12 px-8">
             <div className="w-full max-w-7xl">
+              {/* Header - Left aligned with cards */}
+              <div className="mb-10">
+                <h1 className="text-4xl font-bold text-gray-900">Running Pipeline</h1>
+              </div>
+
               {/* Two Column Layout */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Header - Left aligned with cards */}
-                <div className="lg:col-span-2 mb-10">
-                  <h1 className="text-4xl font-bold text-gray-900">Running Pipeline</h1>
-                </div>
-                <div></div> {/* Empty spacer for grid alignment */}
-                
-                {/* Restart grid for content */}
-                <div className="lg:col-span-3 grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Left Column - Progress Cards */}
                 <div className="lg:col-span-2 space-y-6">
                   {/* 3 Progress Cards */}
