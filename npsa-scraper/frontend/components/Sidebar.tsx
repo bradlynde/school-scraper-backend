@@ -32,7 +32,7 @@ const Sidebar = ({ activeTab, onTabChange, isCollapsed: externalCollapsed, onCol
     >
       <div className="flex flex-col h-full">
         {/* Logo Section */}
-        <div className={`p-6 border-b border-gray-200 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+        <div className={`p-6 border-b border-gray-200 flex items-center ${isCollapsed ? 'justify-center' : 'justify-center'}`}>
           <Image
             src="/npsa-logo.png"
             alt="Nonprofit Security Advisors"
@@ -41,48 +41,6 @@ const Sidebar = ({ activeTab, onTabChange, isCollapsed: externalCollapsed, onCol
             className="h-auto"
             priority
           />
-          {!isCollapsed && (
-            <button
-              onClick={handleCollapse}
-              className="p-2 rounded-lg hover:bg-gray-100 transition-colors ml-auto"
-              aria-label="Collapse sidebar"
-            >
-              <svg
-                className="w-5 h-5 text-gray-600 transition-transform"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-            </button>
-          )}
-          {isCollapsed && (
-            <button
-              onClick={handleCollapse}
-              className="absolute top-6 right-2 p-2 rounded-lg hover:bg-gray-100 transition-colors"
-              aria-label="Expand sidebar"
-            >
-              <svg
-                className="w-5 h-5 text-gray-600 transition-transform rotate-180"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
-            </button>
-          )}
         </div>
 
         {/* Navigation Items */}
@@ -137,6 +95,32 @@ const Sidebar = ({ activeTab, onTabChange, isCollapsed: externalCollapsed, onCol
             {!isCollapsed && <span>Church Scraper</span>}
           </button>
         </nav>
+
+        {/* Collapse Button - Bottom */}
+        <div className="p-4 border-t border-gray-200">
+          <button
+            onClick={handleCollapse}
+            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 text-gray-700 hover:bg-gray-100 ${
+              isCollapsed ? 'justify-center' : ''
+            }`}
+            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <svg
+              className={`w-5 h-5 flex-shrink-0 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M15 19l-7-7 7-7"
+              />
+            </svg>
+            {!isCollapsed && <span>Collapse</span>}
+          </button>
+        </div>
       </div>
     </aside>
   );
