@@ -612,80 +612,74 @@ export default function Home() {
         {/* SUMMARY VIEW */}
         {viewState === "summary" && summary && (
           <div className="animate-fade-in">
-            {(() => {
-              const totalProcessingTime = elapsedTimeDisplay || 0;
-              return (
-                <div className="flex items-center justify-center min-h-screen py-12 px-8">
-            <div className="w-full max-w-7xl">
-              {/* Header */}
-              <div className="mb-10 text-center">
-                <h1 className="text-4xl font-bold text-gray-900 mb-2">Scraping Complete</h1>
-                <p className="text-lg text-gray-600">Pipeline finished successfully</p>
-              </div>
+            <div className="flex items-center justify-center min-h-screen py-12 px-8">
+              <div className="w-full max-w-7xl">
+                {/* Header */}
+                <div className="mb-10 text-center">
+                  <h1 className="text-4xl font-bold text-gray-900 mb-2">Scraping Complete</h1>
+                  <p className="text-lg text-gray-600">Pipeline finished successfully</p>
+                </div>
 
-              {/* 3 Card Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-10">
-                
-                {/* Card 1: Total Contacts */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
-                  <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Contacts Extracted</h3>
-                  <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
-                    {summary.totalContacts || 0}
+                {/* 3 Card Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-10">
+                  
+                  {/* Card 1: Total Contacts */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Contacts Extracted</h3>
+                    <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
+                      {summary.totalContacts || 0}
+                    </div>
+                    <div className="h-28 -mx-8 -mb-8 mt-4">
+                      {createLineGraph(summary.countyContacts || [], 400, 112, "#6b8e23")}
+                    </div>
                   </div>
-                  <div className="h-28 -mx-8 -mb-8 mt-4">
-                    {createLineGraph(summary.countyContacts || [], 400, 112, "#6b8e23")}
+
+                  {/* Card 2: Schools Processed */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Schools Processed</h3>
+                    <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
+                      {summary.schoolsProcessed || summary.schoolsFound || 0}
+                    </div>
+                    <div className="h-28 -mx-8 -mb-8 mt-4">
+                      {createLineGraph(summary.countySchools || [], 400, 112, "#1e3a5f")}
+                    </div>
+                  </div>
+
+                  {/* Card 3: Processing Time */}
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Processing Time</h3>
+                    <div className="text-6xl font-bold text-[#1e3a5f]">
+                      {formatTime(elapsedTimeDisplay || 0)}
+                    </div>
                   </div>
                 </div>
 
-                {/* Card 2: Schools Processed */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
-                  <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Schools Processed</h3>
-                  <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
-                    {summary.schoolsProcessed || summary.schoolsFound || 0}
-                  </div>
-                  <div className="h-28 -mx-8 -mb-8 mt-4">
-                    {createLineGraph(summary.countySchools || [], 400, 112, "#1e3a5f")}
-                  </div>
-                </div>
-
-                {/* Card 3: Processing Time */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
-                  <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Processing Time</h3>
-                  <div className="text-6xl font-bold text-[#1e3a5f]">
-                    {formatTime(totalProcessingTime)}
-                  </div>
-                </div>
-              </div>
-
-              {/* Download Button */}
-              <div className="flex flex-col space-y-4 max-w-2xl mx-auto">
-                {summary.csvData && summary.csvFilename ? (
+                {/* Download Button */}
+                <div className="flex flex-col space-y-4 max-w-2xl mx-auto">
+                  {summary.csvData && summary.csvFilename ? (
+                    <button
+                      onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
+                      className="w-full px-8 py-5 bg-[#1e3a5f] hover:bg-[#2c5282] text-white rounded-xl text-lg font-semibold transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                    >
+                      Download Leads ({summary.totalContacts || 0} contacts)
+                    </button>
+                  ) : (
+                    <div className="w-full px-8 py-5 bg-yellow-50 border border-yellow-200 rounded-xl text-center shadow-sm">
+                      <p className="text-yellow-800 text-base font-medium">
+                        No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
+                      </p>
+                    </div>
+                  )}
+                  
                   <button
-                    onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
-                    className="w-full px-8 py-5 bg-[#1e3a5f] hover:bg-[#2c5282] text-white rounded-xl text-lg font-semibold transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
+                    onClick={resetToStart}
+                    className="w-full px-8 py-5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-lg font-semibold transition-all duration-200 shadow-sm hover:shadow-md"
                   >
-                    Download Leads ({summary.totalContacts || 0} contacts)
+                    Run Another Search
                   </button>
-                ) : (
-                  <div className="w-full px-8 py-5 bg-yellow-50 border border-yellow-200 rounded-xl text-center shadow-sm">
-                    <p className="text-yellow-800 text-base font-medium">
-                      No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
-                    </p>
-                  </div>
-                )}
-                
-                <button
-                  onClick={resetToStart}
-                  className="w-full px-8 py-5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-lg font-semibold transition-all duration-200 shadow-sm hover:shadow-md"
-                >
-                  Run Another Search
-                </button>
+                </div>
               </div>
             </div>
-          </div>
-                </div>
-              );
-            })()}
           </div>
         )}
       </div>
