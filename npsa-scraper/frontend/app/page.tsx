@@ -422,8 +422,7 @@ export default function Home() {
             <div className="w-full max-w-7xl">
               {/* Header */}
               <div className="mb-10 text-center">
-                <h1 className="text-4xl font-bold text-gray-900 mb-2">Pipeline Running</h1>
-                <p className="text-lg text-gray-600">Processing {selectedState.charAt(0).toUpperCase() + selectedState.slice(1)}</p>
+                <h1 className="text-4xl font-bold text-gray-900">Running Pipeline</h1>
               </div>
 
               {/* Two Column Layout */}
@@ -472,10 +471,10 @@ export default function Home() {
                           <div className="relative w-4 h-4 rounded-full bg-[#1e3a5f]"></div>
                         </div>
                       </div>
-                      <div className="flex items-baseline mb-2">
+                      <div className="flex items-baseline mb-2 mt-1">
                         <span className="text-3xl font-bold text-[#1e3a5f]">{currentCounty}</span>
                       </div>
-                      <p className="text-sm text-gray-500">Currently processing</p>
+                      <p className="text-sm text-gray-500 mt-1">Currently processing</p>
                     </div>
                   </div>
 
@@ -514,9 +513,9 @@ export default function Home() {
 
                 {/* Right Column - Stats */}
                 <div className="space-y-6">
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 flex flex-col h-full">
                     <h3 className="text-lg font-bold text-gray-900 mb-6">Run Statistics</h3>
-                    <div className="space-y-6">
+                    <div className="flex-1 flex flex-col justify-center space-y-6">
                       <div>
                         <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Elapsed Time</p>
                         <p className="text-2xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
