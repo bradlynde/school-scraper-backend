@@ -96,17 +96,15 @@ const Sidebar = ({ activeTab, onTabChange, isCollapsed: externalCollapsed, onCol
           </button>
         </nav>
 
-        {/* Collapse Button - Bottom */}
-        <div className="p-4 border-t border-gray-200">
+        {/* Collapse Button - Bottom Corner */}
+        <div className="p-4 flex items-center justify-center">
           <button
             onClick={handleCollapse}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 text-gray-700 hover:bg-gray-100 ${
-              isCollapsed ? 'justify-center' : ''
-            }`}
+            className="p-2 rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
             aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             <svg
-              className={`w-5 h-5 flex-shrink-0 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
+              className={`w-5 h-5 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -118,7 +116,6 @@ const Sidebar = ({ activeTab, onTabChange, isCollapsed: externalCollapsed, onCol
                 d="M15 19l-7-7 7-7"
               />
             </svg>
-            {!isCollapsed && <span>Collapse</span>}
           </button>
         </div>
       </div>
