@@ -618,7 +618,7 @@ def pipeline_status(run_id):
             max_workers = 1
             effective_remaining = max(1, remaining_counties / max_workers)
             estimated_remaining = effective_remaining * avg_time_per_county
-        
+            
             run_data["estimatedTimeRemaining"] = int(estimated_remaining)
             run_data["averageCountyTime"] = int(avg_time_per_county) if len(county_times) > 0 else None
         else:
