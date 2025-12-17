@@ -32,6 +32,6 @@ RUN ls -la assets/data/state_counties/ | head -5 || echo "Warning: assets/data/s
 ENV PORT=8080
 EXPOSE 8080
 
-# Run the Flask API server
-CMD ["python3", "external_services/api.py"]
+# Run the Flask API server with Gunicorn for production
+CMD ["gunicorn", "--bind", "0.0.0.0:${PORT:-8080}", "--workers", "1", "--threads", "4", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "external_services.api:app"]
 

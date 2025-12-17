@@ -423,15 +423,15 @@ def run_streaming_pipeline(state: str, run_id: str):
     
     def process_all_counties():
         """Process all counties using thread pool"""
-        try:
-            # Load counties for state
-            counties = load_counties_from_state(state)
-            total_counties = len(counties)
-            
-            # Update progress tracking with county info
-            pipeline_runs[run_id]["totalCounties"] = total_counties
-            pipeline_runs[run_id]["statusMessage"] = f"Starting pipeline for {state} ({total_counties} counties)..."
-            
+    try:
+        # Load counties for state
+        counties = load_counties_from_state(state)
+        total_counties = len(counties)
+        
+        # Update progress tracking with county info
+        pipeline_runs[run_id]["totalCounties"] = total_counties
+        pipeline_runs[run_id]["statusMessage"] = f"Starting pipeline for {state} ({total_counties} counties)..."
+        
             # Use ThreadPoolExecutor with 1 worker (prevents Selenium Chrome crashes)
             # 1 worker = sequential processing, stable but slower
             max_workers = 1
@@ -468,27 +468,41 @@ def run_streaming_pipeline(state: str, run_id: str):
             print(f"[{run_id}] All counties completed, starting aggregation...")
             aggregate_final_results(run_id, state)
         
-        except FileNotFoundError as e:
-            # State file not found
-            error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
-            pipeline_runs[run_id]["status"] = "error"
-            pipeline_runs[run_id]["error"] = error_msg
-            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
-            import traceback
-            traceback.print_exc()
-        except Exception as e:
-            # Any other error
-            error_msg = str(e)[:500]  # Limit error message length
-            pipeline_runs[run_id]["status"] = "error"
-            pipeline_runs[run_id]["error"] = error_msg
-            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
-            import traceback
-            traceback.print_exc()
+    except FileNotFoundError as e:
+        # State file not found
+        error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
+        pipeline_runs[run_id]["status"] = "error"
+        pipeline_runs[run_id]["error"] = error_msg
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+        import traceback
+        traceback.print_exc()
+    except Exception as e:
+        # Any other error
+        error_msg = str(e)[:500]  # Limit error message length
+        pipeline_runs[run_id]["status"] = "error"
+        pipeline_runs[run_id]["error"] = error_msg
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+        import traceback
+        traceback.print_exc()
     
     # Start processing in a background thread
     thread = threading.Thread(target=process_all_counties)
     thread.daemon = True
     thread.start()
+
+
+@app.route("/", methods=["GET"])
+def root():
+    """Root endpoint"""
+    return jsonify({
+        "status": "ok",
+        "service": "School Scraper API",
+        "endpoints": {
+            "health": "/health",
+            "run-pipeline": "/run-pipeline (POST)",
+            "pipeline-status": "/pipeline-status/<run_id> (GET)"
+        }
+    }), 200
 
 
 @app.route("/health", methods=["GET"])
@@ -506,6 +520,12 @@ def run_pipeline():
         response.headers.add("Access-Control-Allow-Headers", "Content-Type")
         response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
+    
+    if request.method != "POST":
+        return jsonify({
+            "status": "error",
+            "error": f"Method {request.method} not allowed. Use POST."
+        }), 405
     
     try:
         data = request.get_json() or {}
@@ -613,6 +633,29 @@ def pipeline_status(run_id):
     return response, 200
 
 
+# Error handler for 405 Method Not Allowed
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({
+        "status": "error",
+        "error": f"Method not allowed: {request.method}",
+        "path": request.path,
+        "allowed_methods": ["POST"] if "/run-pipeline" in request.path else ["GET"]
+    }), 405
+
+# Error handler for 404 Not Found
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({
+        "status": "error",
+        "error": f"Endpoint not found: {request.path}",
+        "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>"]
+    }), 404
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
+    print(f"Starting Flask server on port {port}")
+    print(f"Available routes:")
+    for rule in app.url_map.iter_rules():
+        print(f"  {rule.rule} -> {rule.endpoint} [{', '.join(rule.methods)}]")
     app.run(host="0.0.0.0", port=port, debug=False)
