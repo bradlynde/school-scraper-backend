@@ -362,7 +362,7 @@ class StreamingPipeline:
                 return []
             
             # Step 6: Chunk HTML if needed
-            chunks = self.html_chunker.chunk_html(reduced_html, max_chunk_size=20000)
+            chunks = self.html_chunker.chunk_html(reduced_html, max_chunk_size=50000)  # Increased from 20k to 50k for cost optimization
             
             # Step 7-8: LLM parsing + CSV parsing
             page_contacts_dicts = []

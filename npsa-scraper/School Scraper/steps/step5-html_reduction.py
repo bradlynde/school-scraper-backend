@@ -283,7 +283,7 @@ class HTMLReducer:
                 seen_hashes.add(section_hash)
         
         # Limit total size - if we have too much, prioritize smaller blocks
-        MAX_TOTAL_SIZE = 200000  # Max 200k chars total
+        MAX_TOTAL_SIZE = 100000  # Max 100k chars total (reduced from 200k for cost optimization)
         if sum(len(s) for s in unique_sections) > MAX_TOTAL_SIZE:
             # Sort by size and take smallest blocks first
             unique_sections.sort(key=len)
