@@ -153,6 +153,28 @@ export default function Home() {
           setSummary(null);
           return;
         }
+        if (response.status === 410) {
+          // 410 Gone - run completed and status no longer available, stop polling
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+            setPollingInterval(null);
+          }
+          // If we don't have summary yet, try to get it from the response
+          try {
+            const data = await response.json();
+            if (data.status === "completed" && summary) {
+              // Keep existing summary, just stop polling
+              setIsRunning(false);
+            } else {
+              setIsRunning(false);
+              setStatus("Pipeline completed");
+            }
+          } catch {
+            setIsRunning(false);
+            setStatus("Pipeline completed");
+          }
+          return;
+        }
         throw new Error(`Status check failed: ${response.status}`);
       }
 
@@ -269,7 +291,7 @@ export default function Home() {
       if (data.runId) {
         const interval = setInterval(() => {
           checkPipelineStatus(data.runId);
-        }, 2000); // Poll every 2 seconds
+        }, 60000); // Poll every 1 minute
         setPollingInterval(interval);
         checkPipelineStatus(data.runId);
       } else {
