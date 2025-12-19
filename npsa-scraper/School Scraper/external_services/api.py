@@ -610,13 +610,13 @@ def pipeline_status(run_id):
     
     run_data = pipeline_runs[run_id].copy()
     
-    # If run is completed, return 410 Gone immediately to stop polling
-    # Allow a 30-second grace period for the final status fetch, then return 410 Gone
+    # If run is completed, return 410 Gone after grace period to stop polling
+    # Allow a 2-minute grace period for the final status fetch, then return 410 Gone
     if run_data.get("status") == "completed":
         completed_time = run_data.get("completedAt")
         if completed_time:
             time_since_completion = time.time() - completed_time
-            if time_since_completion > 30:  # 30 seconds grace period, then return 410 Gone
+            if time_since_completion > 120:  # 2 minutes grace period, then return 410 Gone
                 # Clean up old completed runs from memory (older than 1 hour)
                 if time_since_completion > 3600:  # 1 hour
                     pipeline_runs.pop(run_id, None)
