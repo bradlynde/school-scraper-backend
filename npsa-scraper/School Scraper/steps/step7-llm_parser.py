@@ -128,15 +128,15 @@ HTML CONTENT:
                 
                 # Note: Removed signal-based timeout as it doesn't work in background threads
                 # The OpenAI library will handle timeouts internally if needed
-                    response = self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": CONTACT_EXTRACTION_PROMPT},
-                            {"role": "user", "content": user_message}
-                        ],
-                        temperature=0.0,
-                        max_tokens=max_tokens
-                    )
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": CONTACT_EXTRACTION_PROMPT},
+                        {"role": "user", "content": user_message}
+                    ],
+                    temperature=0.0,
+                    max_tokens=max_tokens
+                )
                 
                 # Extract response text
                 response_text = response.choices[0].message.content.strip()

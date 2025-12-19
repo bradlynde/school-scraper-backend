@@ -49,6 +49,10 @@ CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS
 # In-memory storage for pipeline runs (use Redis or database in production)
 pipeline_runs = {}
 
+# Track 404 requests for non-existent run IDs to prevent spam from stale browser tabs
+# Format: {run_id: (first_404_time, count)}
+not_found_runs = {}
+
 
 def load_counties_from_state(state: str) -> list:
     """Load counties for a given state from assets/data/state_counties/{state}.txt
@@ -577,6 +581,27 @@ def run_pipeline():
 def pipeline_status(run_id):
     """Get status of a running pipeline"""
     if run_id not in pipeline_runs:
+        # Track repeated 404 requests to prevent spam from stale browser tabs
+        current_time = time.time()
+        if run_id in not_found_runs:
+            first_time, count = not_found_runs[run_id]
+            # If we've seen 5+ requests for this non-existent run ID within 60 seconds, return 410 Gone
+            if count >= 5 and (current_time - first_time) < 60:
+                return jsonify({
+                    "status": "error",
+                    "error": "Run ID not found. This run no longer exists."
+                }), 410  # Gone - stop polling
+            # Increment count
+            not_found_runs[run_id] = (first_time, count + 1)
+        else:
+            # First time seeing this non-existent run ID
+            not_found_runs[run_id] = (current_time, 1)
+        
+        # Clean up old entries (older than 5 minutes)
+        to_remove = [rid for rid, (ft, _) in not_found_runs.items() if current_time - ft > 300]
+        for rid in to_remove:
+            not_found_runs.pop(rid, None)
+        
         return jsonify({
             "status": "error",
             "error": "Run ID not found"
