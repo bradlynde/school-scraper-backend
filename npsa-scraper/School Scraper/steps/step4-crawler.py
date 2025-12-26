@@ -138,6 +138,21 @@ class ContentCollector:
                 pass
             self.driver = self._setup_selenium()
     
+    def cleanup(self):
+        """Cleanup Selenium driver resources"""
+        if self.driver:
+            try:
+                self.driver.quit()
+            except Exception as e:
+                # Silently handle cleanup errors - don't crash if cleanup fails
+                pass
+            finally:
+                self.driver = None
+    
+    def __del__(self):
+        """Destructor - safety net to ensure driver is cleaned up"""
+        self.cleanup()
+    
     def safe_get(self, url: str) -> requests.Response:
         """Make HTTP request with retry logic"""
         for attempt in range(self.max_retries):

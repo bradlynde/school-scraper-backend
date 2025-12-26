@@ -94,6 +94,7 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
     county_run_id = f"{run_id}_county_{county_index}"
     county_path_prefix = f"runs/{run_id}/counties/{county.replace(' ', '_')}"
     
+    pipeline = None
     try:
         # Update progress for this county
         print(f"[{run_id}] Starting processing for {county} County ({county_index + 1}/{total_counties})")
@@ -156,6 +157,15 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         print(f"Error processing {county}: {error_msg}")
         traceback.print_exc()
         return {'success': False, 'error': error_msg}
+    finally:
+        # CRITICAL: Always cleanup pipeline resources (especially Selenium drivers)
+        # This prevents resource leaks that cause degradation after ~3 days
+        if pipeline:
+            try:
+                pipeline.cleanup()
+            except Exception as cleanup_error:
+                # Log but don't raise - cleanup failures shouldn't mask original errors
+                print(f"[{run_id}] Warning: Error during pipeline cleanup for {county}: {cleanup_error}")
 
 
 def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int):

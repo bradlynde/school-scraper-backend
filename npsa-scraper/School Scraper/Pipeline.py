@@ -523,6 +523,24 @@ class StreamingPipeline:
         # Print final summary
         self._print_summary()
     
+    def cleanup(self):
+        """Cleanup all pipeline resources, especially Selenium drivers"""
+        try:
+            # Cleanup ContentCollector's Selenium driver
+            if hasattr(self, 'content_collector') and self.content_collector:
+                self.content_collector.cleanup()
+        except Exception as e:
+            # Silently handle cleanup errors - don't crash if cleanup fails
+            print(f"    Warning: Error during pipeline cleanup: {e}")
+    
+    def __del__(self):
+        """Destructor - safety net to ensure resources are cleaned up"""
+        try:
+            self.cleanup()
+        except:
+            # Ignore errors in destructor
+            pass
+    
     def _write_final_csv(self, contacts: List[Contact], filename: str):
         """Write contacts to final CSV file"""
         if not contacts:
