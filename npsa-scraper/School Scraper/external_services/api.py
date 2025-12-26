@@ -97,7 +97,7 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
     pipeline = None
     try:
         # Update progress for this county
-        print(f"[{run_id}] Starting processing for {county} County ({county_index + 1}/{total_counties})")
+        print(f"[{run_id}] {county} County ({county_index + 1}/{total_counties})")
         pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
         pipeline_runs[run_id]["currentCounty"] = county
         pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
@@ -113,7 +113,6 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         output_csv = str(county_dir / "final_contacts.csv")
         
         # Initialize pipeline for this county
-        print(f"[{run_id}] Initializing pipeline for {county} County...")
         pipeline = StreamingPipeline(
             google_api_key=os.getenv("GOOGLE_PLACES_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -123,7 +122,6 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         )
         
         # Run pipeline for this single county - collects all contacts
-        print(f"[{run_id}] Running pipeline for {county} County (this may take 15-30 minutes)...")
         pipeline.run(
             counties=[county],  # Process only this county
             batch_size=0,  # Process all schools in county
@@ -133,7 +131,7 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         # Pipeline.run() already handles all compilation and writes to output_csv
         # Just verify the file was created
         all_contacts = pipeline.all_contacts
-        print(f"[{run_id}] Pipeline completed for {county} County - {len(all_contacts)} contacts extracted")
+        print(f"[{run_id}] ✓ {county}: {len(all_contacts)} contacts")
         
         # Count contacts with and without emails
         contacts_with_emails = [c for c in all_contacts if c.has_email()]
@@ -188,7 +186,7 @@ def process_county_with_timing(state: str, run_id: str, county: str, county_inde
         processing_time = time.time() - start_time
         
         if not result.get('success'):
-            print(f"County {county} failed: {result.get('error', 'Unknown error')}")
+            print(f"[{run_id}] ❌ {county}: {result.get('error', 'Unknown error')}")
             pipeline_runs[run_id]["statusMessage"] = f"Warning: {county} County failed, continuing..."
         
         # Update progress after county completion

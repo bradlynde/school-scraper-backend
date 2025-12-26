@@ -200,11 +200,7 @@ class StreamingPipeline:
         Process one school through all steps.
         Returns list of Contact objects extracted from this school.
         """
-        print(f"\n{'='*70}")
-        print(f"PROCESSING: {school.name}")
-        print(f"{'='*70}")
-        print(f"Website: {school.website or 'N/A'}")
-        print(f"County: {school.county}")
+        print(f"\nProcessing: {school.name} ({school.county})")
         
         # Step 2: Filter school
         filter_result = filter_school(school, target_state=self._state, llm_filter=self.llm_school_filter)
@@ -215,35 +211,29 @@ class StreamingPipeline:
             filtered_school, filter_reason = filter_result, None
         
         if not filtered_school:
-            reason_msg = f" ({filter_reason})" if filter_reason else ""
+            reason_msg = f" - {filter_reason}" if filter_reason else ""
             print(f"  ❌ Filtered out{reason_msg}")
             self.stats['schools_filtered_out'] += 1
             return []
         
         if not filtered_school.website:
-            print("  ⚠️  No website - skipping")
+            print("  ⚠️  No website")
             return []
         
         # Step 3: Discover pages
-        print(f"\n  Step 3: Discovering pages...")
         try:
-            # Discover pages for this school (using existing step3 logic)
-            # TODO: Refactor step3 to accept single school and return list of Page objects
             pages = self._discover_pages_for_school(filtered_school)
             self.stats['pages_discovered'] += len(pages)
             
             if not pages:
-                print("  ⚠️  No pages discovered - skipping")
+                print("  ⚠️  No pages found")
                 return []
-            
-            print(f"  ✓ Found {len(pages)} pages")
         except Exception as e:
-            print(f"  ❌ Error discovering pages: {e}")
+            print(f"  ❌ Error: {e}")
             traceback.print_exc()
             return []
         
         # Step 4: Collect content
-        print(f"\n  Step 4: Collecting content...")
         page_contents = []
         for page in pages[:self.max_pages_per_school]:  # Limit pages per school
             try:
@@ -252,32 +242,25 @@ class StreamingPipeline:
                     page_contents.append(content)
                     self.stats['pages_collected'] += 1
             except Exception as e:
-                print(f"    ⚠️  Error collecting {page.url}: {e}")
                 continue
         
         if not page_contents:
-            print("  ⚠️  No content collected - skipping")
+            print("  ⚠️  No content collected")
             return []
         
-        print(f"  ✓ Collected {len(page_contents)} pages")
-        
         # Step 5: Parse content with LLM
-        print(f"\n  Step 5: Parsing content with LLM...")
         all_contacts = []
         for page_content in page_contents:
             try:
                 contacts = self._parse_content_with_llm(page_content, filtered_school)
                 all_contacts.extend(contacts)
             except Exception as e:
-                print(f"    ⚠️  Error parsing {page_content.url}: {e}")
                 continue
         
         if all_contacts:
-            print(f"  ✓ Extracted {len(all_contacts)} contacts")
+            print(f"  ✓ {len(all_contacts)} contacts extracted")
         else:
-            print(f"  ⚠️  No contacts extracted")
-        
-        print(f"{'='*70}\n")
+            print("  ⚠️  No contacts")
         
         self.stats['schools_processed'] += 1
         return all_contacts
@@ -391,7 +374,6 @@ class StreamingPipeline:
             deduped_contacts = self.deduplicator.deduplicate_contacts(page_contacts_dicts)
             
             # Step 10 (previously Step 11): Filter contacts by title
-            print(f"    Filtering {len(deduped_contacts)} contacts by title...")
             filtered_contacts = []
             for contact_dict in deduped_contacts:
                 filter_payload = {
@@ -415,10 +397,9 @@ class StreamingPipeline:
                     )
                     filtered_contacts.append(contact)
             
-            print(f"    Kept {len(filtered_contacts)}/{len(deduped_contacts)} administrative contacts")
             return filtered_contacts
         except Exception as e:
-            print(f"    Error parsing with LLM: {e}")
+            print(f"  ❌ LLM parsing error: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -433,15 +414,11 @@ class StreamingPipeline:
         Run the streaming pipeline.
         Processes schools one at a time through all steps.
         """
-        print("\n" + "="*70)
-        print("STREAMING PIPELINE - ONE LEAD THROUGH ENTIRE SYSTEM")
-        print("="*70)
-        print(f"Start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Output: {output_csv}")
-        print("="*70 + "\n")
+        print(f"\nPipeline started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Output: {output_csv}\n")
         
         # Step 1: Discover schools (generator - yields one at a time)
-        print("STEP 1: Discovering schools (New Places API Essentials tier)...")
+        print("Discovering schools...")
         schools_discovered = 0
         
         # Load counties from state file if not provided
@@ -449,13 +426,9 @@ class StreamingPipeline:
             if not hasattr(self, '_state') or not self._state:
                 raise ValueError("--state parameter is required for county-based search")
             counties = load_counties_from_state(self._state)
-            state_file_name = self._state.lower().replace(' ', '_')
-            print(f"Loaded {len(counties)} counties from assets/data/state_counties/{state_file_name}.txt")
         
         # Use 6 search terms per county (original 5 + Episcopal)
         max_search_terms_per_county = 6
-        print("Using 6 search terms per county (Christian, Catholic, Episcopal, private, "
-              "academy, prep)")
         
         school_generator = self.school_searcher.discover_schools(
             counties=counties,
@@ -487,13 +460,9 @@ class StreamingPipeline:
             total_contacts = len(self.all_contacts)
             unique_contacts = len(self.unique_contacts_set)
             if new_unique_count > 0:
-                print(f"\nProgress: {schools_discovered} schools discovered | "
-                      f"{self.stats['schools_processed']} processed | "
-                      f"{unique_contacts} unique contacts ({total_contacts} total, +{new_unique_count} new)")
+                print(f"Progress: {schools_discovered} schools | {self.stats['schools_processed']} processed | {unique_contacts} contacts (+{new_unique_count})")
             else:
-                print(f"\nProgress: {schools_discovered} schools discovered | "
-                      f"{self.stats['schools_processed']} processed | "
-                      f"{unique_contacts} unique contacts ({total_contacts} total)")
+                print(f"Progress: {schools_discovered} schools | {self.stats['schools_processed']} processed | {unique_contacts} contacts")
         
         # Flush any pending LLM filter batches
         if self.llm_school_filter:
@@ -556,30 +525,17 @@ class StreamingPipeline:
             for contact in contacts:
                 writer.writerow(contact.to_dict())
         
-        print(f"✓ Wrote {len(contacts)} contacts to {filename}")
+        print(f"✓ Saved {len(contacts)} contacts to {filename}")
     
     
     def _print_summary(self):
         """Print final pipeline summary"""
-        print("\n" + "="*70)
-        print("PIPELINE COMPLETE")
-        print("="*70)
-        print(f"Schools discovered: {self.stats['schools_discovered']}")
-        print(f"Schools filtered out: {self.stats['schools_filtered_out']}")
-        print(f"Schools processed: {self.stats['schools_processed']}")
-        print(f"Pages discovered: {self.stats['pages_discovered']}")
-        print(f"Pages collected: {self.stats['pages_collected']}")
+        print(f"\n✓ Pipeline complete: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  Schools: {self.stats['schools_discovered']} discovered, {self.stats['schools_processed']} processed")
         if self.stats['contacts_extracted'] > 0:
-            print(f"Contacts extracted: {self.stats['unique_contacts']} unique (out of {self.stats['contacts_extracted']} total)")
-            print(f"  - With emails: {self.stats['contacts_with_emails']}")
-            print(f"  - Without emails: {self.stats['contacts_without_emails']}")
-            if self.stats['contacts_extracted'] > self.stats['unique_contacts']:
-                duplicates = self.stats['contacts_extracted'] - self.stats['unique_contacts']
-                print(f"  - Duplicates to be removed: {duplicates}")
+            print(f"  Contacts: {self.stats['unique_contacts']} unique ({self.stats['contacts_with_emails']} with emails)")
         else:
-            print("Contacts extracted: 0")
-        print(f"End: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print("="*70)
+            print("  Contacts: 0")
 
 
 if __name__ == "__main__":
