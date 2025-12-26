@@ -498,6 +498,9 @@ class StreamingPipeline:
             # Cleanup ContentCollector's Selenium driver
             if hasattr(self, 'content_collector') and self.content_collector:
                 self.content_collector.cleanup()
+                print("    ✓ Pipeline cleanup successful")
+            else:
+                print("    ✓ Pipeline cleanup successful (no content collector)")
         except Exception as e:
             # Silently handle cleanup errors - don't crash if cleanup fails
             print(f"    Warning: Error during pipeline cleanup: {e}")

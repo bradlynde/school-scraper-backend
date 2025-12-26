@@ -143,11 +143,14 @@ class ContentCollector:
         if self.driver:
             try:
                 self.driver.quit()
+                print("    ✓ Selenium driver quit successfully")
             except Exception as e:
                 # Silently handle cleanup errors - don't crash if cleanup fails
-                pass
+                print(f"    Warning: Error quitting Selenium driver: {e}")
             finally:
                 self.driver = None
+        else:
+            print("    ✓ No Selenium driver to cleanup")
     
     def __del__(self):
         """Destructor - safety net to ensure driver is cleaned up"""
