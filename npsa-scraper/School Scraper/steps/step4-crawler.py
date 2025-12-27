@@ -110,7 +110,7 @@ class ContentCollector:
         return emails
     
     def _setup_selenium(self):
-        """Initialize headless Chrome browser"""
+        """Initialize headless Chrome browser with resource limits to prevent crashes"""
         chrome_options = Options()
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
@@ -119,9 +119,66 @@ class ContentCollector:
         chrome_options.add_argument('--window-size=1920,1080')
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
         
-        driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(15)  # 15 second timeout
-        return driver
+        # Resource limits to prevent crashes
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-plugins')
+        chrome_options.add_argument('--disable-images')  # Don't load images to save memory
+        # Note: We keep JavaScript enabled because we need it for click/hover interactions
+        chrome_options.add_argument('--disable-background-networking')
+        chrome_options.add_argument('--disable-background-timer-throttling')
+        chrome_options.add_argument('--disable-renderer-backgrounding')
+        chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+        chrome_options.add_argument('--disable-ipc-flooding-protection')
+        
+        # Memory and process limits
+        chrome_options.add_argument('--memory-pressure-off')
+        chrome_options.add_argument('--max_old_space_size=512')  # Limit memory to 512MB per instance
+        
+        # Performance optimizations
+        chrome_options.add_argument('--disable-features=TranslateUI')
+        chrome_options.add_argument('--disable-ipc-flooding-protection')
+        chrome_options.add_argument('--disable-hang-monitor')
+        chrome_options.add_argument('--disable-prompt-on-repost')
+        chrome_options.add_argument('--disable-sync')
+        chrome_options.add_argument('--metrics-recording-only')
+        chrome_options.add_argument('--no-first-run')
+        chrome_options.add_argument('--safebrowsing-disable-auto-update')
+        chrome_options.add_argument('--enable-automation')
+        chrome_options.add_argument('--password-store=basic')
+        chrome_options.add_argument('--use-mock-keychain')
+        
+        # Set preferences to reduce resource usage
+        prefs = {
+            'profile.default_content_setting_values': {
+                'images': 2,  # Block images
+                'plugins': 2,  # Block plugins
+                'popups': 2,  # Block popups
+            },
+            'profile.managed_default_content_settings': {
+                'images': 2
+            }
+        }
+        chrome_options.add_experimental_option('prefs', prefs)
+        
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(15)  # 15 second timeout
+            driver.implicitly_wait(2)  # Reduce implicit wait time
+            return driver
+        except Exception as e:
+            print(f"    Warning: Failed to create Chrome driver: {e}")
+            # Retry once with minimal options
+            try:
+                minimal_options = Options()
+                minimal_options.add_argument('--headless')
+                minimal_options.add_argument('--no-sandbox')
+                minimal_options.add_argument('--disable-dev-shm-usage')
+                driver = webdriver.Chrome(options=minimal_options)
+                driver.set_page_load_timeout(15)
+                return driver
+            except Exception as e2:
+                print(f"    Error: Could not create Chrome driver even with minimal options: {e2}")
+                raise
     
     def _ensure_driver_healthy(self):
         """Check and restart Selenium driver if needed"""
