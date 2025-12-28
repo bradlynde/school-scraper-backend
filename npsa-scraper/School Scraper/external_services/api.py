@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 import requests
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import gc  # For explicit garbage collection
 
 # Add parent directory to path to import Pipeline
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -157,12 +157,17 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         return {'success': False, 'error': error_msg}
     finally:
         # CRITICAL: Always cleanup pipeline resources (especially Selenium drivers)
-        # This prevents resource leaks that cause degradation after ~3 days
+        # This prevents resource leaks that cause degradation after long runs
         if pipeline:
             try:
                 print(f"[{run_id}] Cleaning up resources for {county}...")
                 pipeline.cleanup()
                 print(f"[{run_id}] ✓ Cleanup successful for {county}")
+                
+                # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
+                # This ensures Selenium driver and Chrome processes are fully released
+                gc.collect()
+                
             except Exception as cleanup_error:
                 # Log but don't raise - cleanup failures shouldn't mask original errors
                 print(f"[{run_id}] Warning: Error during pipeline cleanup for {county}: {cleanup_error}")
@@ -407,8 +412,15 @@ def aggregate_final_results(run_id: str, state: str):
 
 def run_streaming_pipeline(state: str, run_id: str):
     """
-    Initialize the pipeline and process all counties using a thread pool.
-    Uses ThreadPoolExecutor with 4 workers to process counties in parallel.
+    Initialize the pipeline and process all counties sequentially.
+    
+    Uses true sequential processing (no ThreadPoolExecutor) to prevent:
+    - Thread accumulation over long runs
+    - Resource leaks
+    - Selenium Chrome process buildup
+    
+    This approach is more resource-efficient for long-running processes
+    and prevents the thread exhaustion issues seen after ~12+ hours.
     """
     # Initialize progress tracking FIRST, before any operations that might fail
     pipeline_runs[run_id] = {
@@ -438,7 +450,12 @@ def run_streaming_pipeline(state: str, run_id: str):
     }
     
     def process_all_counties():
-        """Process all counties using thread pool"""
+        """
+        Process all counties sequentially (true sequential processing).
+        
+        This eliminates ThreadPoolExecutor overhead and prevents thread accumulation
+        that causes resource exhaustion after long runs (~12+ hours).
+        """
         try:
             # Load counties for state
             counties = load_counties_from_state(state)
@@ -448,37 +465,35 @@ def run_streaming_pipeline(state: str, run_id: str):
             pipeline_runs[run_id]["totalCounties"] = total_counties
             pipeline_runs[run_id]["statusMessage"] = f"Starting pipeline for {state} ({total_counties} counties)..."
             
-            # Use ThreadPoolExecutor with 1 worker (prevents Selenium Chrome crashes)
-            # 1 worker = sequential processing, stable but slower
-            max_workers = 1
-            print(f"[{run_id}] Processing {total_counties} counties with {max_workers} concurrent workers...")
+            print(f"[{run_id}] Processing {total_counties} counties sequentially...")
             
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all counties to the thread pool
-                future_to_county = {
-                    executor.submit(process_county_with_timing, state, run_id, county, idx, total_counties): (idx, county)
-                    for idx, county in enumerate(counties)
-                }
-                
-                # Process completed counties as they finish
-                completed = 0
-                for future in as_completed(future_to_county):
-                    county_index, county = future_to_county[future]
-                    try:
-                        idx, result, processing_time = future.result()
-                        completed += 1
-                        
-                        # Update progress
-                        progress_pct = int((completed / total_counties) * 100)
-                        pipeline_runs[run_id]["progress"] = progress_pct
-                        pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
-                        
-                        print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                        
-                    except Exception as e:
-                        print(f"[{run_id}] County {county} generated an exception: {e}")
-                        import traceback
-                        traceback.print_exc()
+            # TRUE SEQUENTIAL PROCESSING: Process counties one at a time in a simple loop
+            # This eliminates thread pool overhead and prevents thread accumulation
+            for idx, county in enumerate(counties):
+                try:
+                    # Process this county with timing
+                    county_index, result, processing_time = process_county_with_timing(
+                        state, run_id, county, idx, total_counties
+                    )
+                    
+                    # Update progress
+                    completed = idx + 1
+                    progress_pct = int((completed / total_counties) * 100)
+                    pipeline_runs[run_id]["progress"] = progress_pct
+                    pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
+                    
+                    print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                    
+                    # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
+                    # This prevents memory/thread accumulation over long runs
+                    gc.collect()
+                    
+                except Exception as e:
+                    print(f"[{run_id}] County {county} generated an exception: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue with next county even if one fails
+                    continue
             
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed, starting aggregation...")

@@ -141,6 +141,8 @@ class StreamingPipeline:
             self.llm_school_filter = None
         
         self.page_discoverer = step3.PageDiscoverer(timeout=10, max_retries=1)
+        # ContentCollector will create Selenium driver on init
+        # Driver will be recycled after each county to prevent resource accumulation
         self.content_collector = step4.ContentCollector(timeout=10, max_retries=1, use_selenium=True)
         self.html_reducer = step5.HTMLReducer()
         self.html_chunker = step6.HTMLChunker()
@@ -493,12 +495,27 @@ class StreamingPipeline:
         self._print_summary()
     
     def cleanup(self):
-        """Cleanup all pipeline resources, especially Selenium drivers"""
+        """
+        Cleanup all pipeline resources, especially Selenium drivers.
+        
+        This is called after each county to ensure resources are fully released.
+        Periodic recycling prevents resource accumulation over long runs.
+        """
         try:
             # Cleanup ContentCollector's Selenium driver
             if hasattr(self, 'content_collector') and self.content_collector:
                 self.content_collector.cleanup()
-                print("    ✓ Pipeline cleanup successful")
+                # PERIODIC DRIVER RECYCLING: Recreate driver after cleanup
+                # This ensures a fresh driver for the next county
+                if self.content_collector.use_selenium:
+                    try:
+                        self.content_collector.driver = self.content_collector._setup_selenium()
+                        print("    ✓ Pipeline cleanup and driver recycling successful")
+                    except Exception as recycle_error:
+                        print(f"    Warning: Driver recycling failed: {recycle_error}")
+                        print("    ✓ Pipeline cleanup successful (driver recycling skipped)")
+                else:
+                    print("    ✓ Pipeline cleanup successful")
             else:
                 print("    ✓ Pipeline cleanup successful (no content collector)")
         except Exception as e:
