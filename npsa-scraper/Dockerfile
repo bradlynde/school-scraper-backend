@@ -33,6 +33,7 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Run the Flask API server with Gunicorn for production
-# Reduced to 1 thread to prevent thread accumulation during long runs
-CMD ["gunicorn", "--bind", "0.0.0.0:${PORT:-8080}", "--workers", "1", "--threads", "1", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "external_services.api:app"]
+# Using sync worker (no threads) to prevent thread accumulation during long runs
+# Sync worker blocks on each request but eliminates thread exhaustion issues
+CMD ["gunicorn", "--bind", "0.0.0.0:${PORT:-8080}", "--workers", "1", "--worker-class", "sync", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "external_services.api:app"]
 
