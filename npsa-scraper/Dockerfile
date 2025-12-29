@@ -32,8 +32,9 @@ RUN ls -la assets/data/state_counties/ | head -5 || echo "Warning: assets/data/s
 ENV PORT=8080
 EXPOSE 8080
 
-# Run the Flask API server with Gunicorn for production
-# Using sync worker (no threads) to prevent thread accumulation during long runs
-# Sync worker blocks on each request but eliminates thread exhaustion issues
-CMD ["gunicorn", "--bind", "0.0.0.0:${PORT:-8080}", "--workers", "1", "--worker-class", "sync", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "external_services.api:app"]
+# Run the Flask API server with Waitress for production
+# Waitress is a pure-Python WSGI server that doesn't use threads, eliminating thread exhaustion issues
+# It uses async I/O instead of threads, making it ideal for long-running processes
+# Using shell form to allow environment variable expansion
+CMD waitress-serve --host=0.0.0.0 --port=${PORT:-8080} --threads=1 --channel-timeout=300 external_services.api:app
 
