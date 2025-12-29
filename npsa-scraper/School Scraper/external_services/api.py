@@ -708,9 +708,13 @@ def not_found(e):
         "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>"]
     }), 404
 
+# NOTE: This block only runs when executing api.py directly (local development/testing)
+# In production, Waitress imports 'app' and runs it via: waitress-serve external_services.api:app
+# This block will NOT execute when Waitress imports the module
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    print(f"Starting Flask server on port {port}")
+    print(f"[LOCAL DEV ONLY] Starting Flask development server on port {port}")
+    print(f"[LOCAL DEV ONLY] For production, use: waitress-serve external_services.api:app")
     print(f"Available routes:")
     for rule in app.url_map.iter_rules():
         print(f"  {rule.rule} -> {rule.endpoint} [{', '.join(rule.methods)}]")

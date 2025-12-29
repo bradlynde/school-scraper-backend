@@ -33,8 +33,8 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Run the Flask API server with Waitress for production
-# Waitress is a pure-Python WSGI server that doesn't use threads, eliminating thread exhaustion issues
-# It uses async I/O instead of threads, making it ideal for long-running processes
-# Using shell form to allow environment variable expansion
+# Waitress is a pure-Python WSGI server that uses a fixed thread pool, eliminating thread exhaustion issues
+# It's designed for production workloads and handles long-running processes better than Flask's dev server
+# Using shell form to allow Railway's PORT environment variable to be used
 CMD waitress-serve --host=0.0.0.0 --port=${PORT:-8080} --threads=1 --channel-timeout=300 external_services.api:app
 
