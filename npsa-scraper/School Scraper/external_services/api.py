@@ -708,14 +708,20 @@ def not_found(e):
         "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>"]
     }), 404
 
-# NOTE: This block only runs when executing api.py directly (local development/testing)
-# In production, Waitress imports 'app' and runs it via: waitress-serve external_services.api:app
-# This block will NOT execute when Waitress imports the module
+# Production: Always use Waitress, even if file is run directly
+# This ensures Railway (or any environment) uses Waitress instead of Flask dev server
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    print(f"[LOCAL DEV ONLY] Starting Flask development server on port {port}")
-    print(f"[LOCAL DEV ONLY] For production, use: waitress-serve external_services.api:app")
-    print(f"Available routes:")
-    for rule in app.url_map.iter_rules():
-        print(f"  {rule.rule} -> {rule.endpoint} [{', '.join(rule.methods)}]")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    import subprocess
+    import sys
+    port = os.environ.get("PORT", "8080")
+    print(f"Starting Waitress WSGI server on port {port}")
+    print(f"Using production WSGI server (Waitress) instead of Flask dev server")
+    # Use Waitress even when file is run directly
+    subprocess.run([
+        sys.executable, "-m", "waitress",
+        "--host=0.0.0.0",
+        f"--port={port}",
+        "--threads=1",
+        "--channel-timeout=300",
+        "external_services.api:app"
+    ])
