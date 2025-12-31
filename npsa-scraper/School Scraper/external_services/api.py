@@ -284,14 +284,12 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         if pipeline:
             try:
                 print(f"[{run_id}] Cleaning up resources for {county}...")
-                # Hard reset after every CHECKPOINT_BATCH_SIZE counties to prevent process accumulation
-                # Use nuclear option at checkpoints (when all workers sync up)
-                pipeline.cleanup(hard_reset=hard_reset, is_parallel=(MAX_WORKERS > 1), use_nuclear=use_nuclear)
-                if hard_reset:
-                    nuclear_status = " (nuclear)" if use_nuclear else ""
-                    print(f"[{run_id}] ✓ Hard reset and cleanup successful for {county}{nuclear_status}")
-                else:
-                    print(f"[{run_id}] ✓ Cleanup successful for {county}")
+                # ALWAYS do hard reset after each county to prevent process accumulation
+                # This is critical in parallel mode where processes can accumulate quickly
+                # At checkpoints, use nuclear option (coordinated across workers)
+                pipeline.cleanup(hard_reset=True, is_parallel=(MAX_WORKERS > 1), use_nuclear=use_nuclear)
+                nuclear_status = " (nuclear)" if use_nuclear else ""
+                print(f"[{run_id}] ✓ Hard reset and cleanup successful for {county}{nuclear_status}")
                 
                 # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
                 # This ensures Selenium driver and Chrome processes are fully released
@@ -662,14 +660,15 @@ def run_streaming_pipeline(state: str, run_id: str):
                         return
                     
                     try:
-                        # Determine if this county should trigger hard reset (every CHECKPOINT_BATCH_SIZE)
-                        should_hard_reset = (idx + 1) % CHECKPOINT_BATCH_SIZE == 0
+                        # ALWAYS do hard reset after each county to prevent process accumulation
+                        # Use nuclear option at checkpoints (every CHECKPOINT_BATCH_SIZE counties)
+                        is_checkpoint = (idx + 1) % CHECKPOINT_BATCH_SIZE == 0
                         
-                        # Process this county with timing (use nuclear at checkpoints)
+                        # Process this county with timing (always hard reset, nuclear at checkpoints)
                         county_index, result, processing_time = process_county_with_timing(
                             state, run_id, county, idx, total_counties, 
-                            hard_reset=should_hard_reset, 
-                            use_nuclear=should_hard_reset  # Use nuclear at checkpoints
+                            hard_reset=True,  # Always hard reset after each county
+                            use_nuclear=is_checkpoint  # Nuclear only at checkpoints
                         )
                         
                         # Mark county as completed
@@ -716,11 +715,13 @@ def run_streaming_pipeline(state: str, run_id: str):
                 def process_with_tracking(idx, county):
                     """Wrapper to add thread-safe tracking for parallel processing"""
                     try:
-                        # Process this county (hard reset will be determined at checkpoint time)
+                        # ALWAYS do hard reset after each county to prevent process accumulation
+                        # Nuclear option is coordinated at checkpoints (every 3 counties)
+                        is_checkpoint = (idx + 1) % CHECKPOINT_BATCH_SIZE == 0
                         county_index, result, processing_time = process_county_with_timing(
                             state, run_id, county, idx, total_counties, 
-                            hard_reset=False,  # Don't hard reset per-county in parallel
-                            use_nuclear=False
+                            hard_reset=True,  # Always hard reset after each county
+                            use_nuclear=False  # Nuclear only at coordinated checkpoints
                         )
                         
                         # Thread-safe progress update

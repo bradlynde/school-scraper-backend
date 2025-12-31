@@ -321,42 +321,68 @@ class ContentCollector:
             except Exception as e:
                 print(f"    Warning: Process tree kill failed: {e}")
         
-        # Step 4: Nuclear option - kill all Chrome processes
-        # Use nuclear option if explicitly requested OR if not in parallel mode
-        if use_nuclear or not is_parallel:
-            try:
-                # Kill chromedriver processes
-                result = subprocess.run(
+        # Step 4: ALWAYS use nuclear option - kill ALL Chrome/ChromeDriver processes aggressively
+        # Multiple rounds to ensure everything is killed
+        try:
+            killed_any = False
+            for round_num in range(3):  # 3 rounds of aggressive killing
+                # Round 1: Kill chromedriver processes
+                result1 = subprocess.run(
                     ['pkill', '-9', 'chromedriver'],
                     capture_output=True,
                     timeout=5
                 )
-                if result.returncode == 0:
-                    print("    ✓ Killed all chromedriver processes (nuclear)")
+                if result1.returncode == 0:
+                    killed_any = True
                 
-                # Kill chrome/chromium processes (headless)
-                result = subprocess.run(
+                # Round 2: Kill chrome/chromium processes (headless)
+                result2 = subprocess.run(
                     ['pkill', '-9', '-f', 'chrome.*headless'],
                     capture_output=True,
                     timeout=5
                 )
-                if result.returncode == 0:
-                    print("    ✓ Killed all headless Chrome processes (nuclear)")
-            except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
-                # pkill might not be available or might fail - that's okay
-                print(f"    Note: Nuclear cleanup skipped: {e}")
+                if result2.returncode == 0:
+                    killed_any = True
+                
+                # Round 3: Kill chromium processes (catch-all)
+                result3 = subprocess.run(
+                    ['pkill', '-9', '-f', 'chromium'],
+                    capture_output=True,
+                    timeout=5
+                )
+                if result3.returncode == 0:
+                    killed_any = True
+                
+                # Round 4: Kill any remaining chrome processes (not just headless)
+                result4 = subprocess.run(
+                    ['pkill', '-9', 'chrome'],
+                    capture_output=True,
+                    timeout=5
+                )
+                if result4.returncode == 0:
+                    killed_any = True
+                
+                if round_num < 2:  # Don't sleep after last round
+                    time.sleep(0.5)  # Brief pause between rounds
+            
+            if killed_any:
+                print("    ✓ Killed all Chrome/ChromeDriver processes (nuclear, 3 rounds)")
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+            # pkill might not be available or might fail - that's okay
+            print(f"    Note: Nuclear cleanup had issues: {e}")
         
-        # Step 5: Wait for processes to fully terminate
-        time.sleep(3)
+        # Step 5: Wait for processes to fully terminate (longer wait for thorough cleanup)
+        time.sleep(4)  # Increased from 3 to 4 seconds
         
-        # Step 6: Force garbage collection
+        # Step 6: Force garbage collection (multiple times for thorough cleanup)
+        gc.collect()
+        time.sleep(0.5)
         gc.collect()
         
-        # Step 7: Wait before recreating
+        # Step 7: Final wait before recreating
         time.sleep(2)
         
-        nuclear_status = " (nuclear)" if (use_nuclear or not is_parallel) else ""
-        print(f"    ✓ Hard reset complete{nuclear_status} (killed {len(killed_processes)} tracked processes)")
+        print(f"    ✓ Hard reset complete (nuclear, killed {len(killed_processes)} tracked processes + all Chrome/ChromeDriver)")
     
     def cleanup(self):
         """Cleanup Selenium driver resources (standard cleanup)"""
