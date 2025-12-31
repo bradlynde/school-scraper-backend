@@ -53,6 +53,114 @@ pipeline_runs = {}
 # Format: {run_id: (first_404_time, count)}
 not_found_runs = {}
 
+# Persistent storage configuration
+# Use /data for Railway volume, fallback to /tmp for local development
+PERSISTENT_DATA_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
+PERSISTENT_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Subdirectories for persistent storage
+RUNS_DIR = PERSISTENT_DATA_DIR / "runs"
+CHECKPOINTS_DIR = PERSISTENT_DATA_DIR / "checkpoints"
+METADATA_DIR = PERSISTENT_DATA_DIR / "metadata"
+
+# Create directories if they don't exist
+RUNS_DIR.mkdir(parents=True, exist_ok=True)
+CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
+METADATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Batch size for checkpointing (save checkpoint every N counties)
+CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "10"))
+
+
+def save_checkpoint(run_id: str, state: str, completed_counties: list, next_county_index: int, total_counties: int):
+    """Save checkpoint to persistent storage"""
+    checkpoint_path = CHECKPOINTS_DIR / f"{run_id}.json"
+    checkpoint_data = {
+        "run_id": run_id,
+        "state": state,
+        "completed_counties": completed_counties,
+        "next_county_index": next_county_index,
+        "total_counties": total_counties,
+        "timestamp": time.time(),
+        "updated_at": datetime.now().isoformat()
+    }
+    try:
+        with open(checkpoint_path, 'w') as f:
+            json.dump(checkpoint_data, f, indent=2)
+        print(f"[{run_id}] Checkpoint saved: {len(completed_counties)}/{total_counties} counties completed")
+        return True
+    except Exception as e:
+        print(f"[{run_id}] Error saving checkpoint: {e}")
+        return False
+
+
+def load_checkpoint(run_id: str) -> dict:
+    """Load checkpoint from persistent storage"""
+    checkpoint_path = CHECKPOINTS_DIR / f"{run_id}.json"
+    if not checkpoint_path.exists():
+        return None
+    try:
+        with open(checkpoint_path, 'r') as f:
+            checkpoint_data = json.load(f)
+        print(f"[{run_id}] Checkpoint loaded: {len(checkpoint_data.get('completed_counties', []))}/{checkpoint_data.get('total_counties', 0)} counties completed")
+        return checkpoint_data
+    except Exception as e:
+        print(f"[{run_id}] Error loading checkpoint: {e}")
+        return None
+
+
+def save_run_metadata(run_id: str, metadata: dict):
+    """Save run metadata to persistent storage"""
+    metadata_path = METADATA_DIR / f"{run_id}.json"
+    try:
+        # Add timestamp if not present
+        if "created_at" not in metadata:
+            metadata["created_at"] = datetime.now().isoformat()
+        metadata["updated_at"] = datetime.now().isoformat()
+        
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"[{run_id}] Error saving metadata: {e}")
+        return False
+
+
+def load_run_metadata(run_id: str) -> dict:
+    """Load run metadata from persistent storage"""
+    metadata_path = METADATA_DIR / f"{run_id}.json"
+    if not metadata_path.exists():
+        return None
+    try:
+        with open(metadata_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[{run_id}] Error loading metadata: {e}")
+        return None
+
+
+def list_all_runs() -> list:
+    """List all runs from persistent storage"""
+    runs = []
+    try:
+        # Get all metadata files
+        for metadata_file in METADATA_DIR.glob("*.json"):
+            try:
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
+                    metadata["run_id"] = metadata_file.stem  # Add run_id from filename
+                    runs.append(metadata)
+            except Exception as e:
+                print(f"Error reading metadata file {metadata_file}: {e}")
+                continue
+        
+        # Sort by created_at (newest first)
+        runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return runs
+    except Exception as e:
+        print(f"Error listing runs: {e}")
+        return []
+
 
 def load_counties_from_state(state: str) -> list:
     """Load counties for a given state from assets/data/state_counties/{state}.txt
@@ -103,13 +211,13 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
         pipeline_runs[run_id]["currentStep"] = 1
         
-        # Create temporary output directory for this run
-        run_dir = Path(f"/tmp/runs/{run_id}")
+        # Create persistent output directory for this run
+        run_dir = RUNS_DIR / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         county_dir = run_dir / county.replace(' ', '_')
         county_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create temporary output file (single file for all contacts)
+        # Create persistent output file (single file for all contacts)
         output_csv = str(county_dir / "final_contacts.csv")
         
         # Initialize pipeline for this county
@@ -235,7 +343,7 @@ def aggregate_final_results(run_id: str, state: str):
     """Aggregate all county results, run global Steps 11-13, and generate final CSV"""
     try:
         counties = load_counties_from_state(state)
-        run_dir = Path(f"/tmp/runs/{run_id}")
+        run_dir = RUNS_DIR / run_id
         
         pipeline_runs[run_id]["statusMessage"] = "Waiting for all counties to complete..."
         
@@ -388,6 +496,17 @@ def aggregate_final_results(run_id: str, state: str):
             pipeline_runs[run_id]["totalContacts"] = len(final_df)
             pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails_final)
             pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails_final)
+            
+            # Save final CSV path to metadata
+            metadata = load_run_metadata(run_id) or {}
+            metadata.update({
+                "final_csv_path": final_csv_path,
+                "csv_filename": pipeline_runs[run_id]["csvFilename"],
+                "total_contacts": len(final_df),
+                "total_contacts_with_emails": len(contacts_with_emails_final),
+                "total_contacts_without_emails": len(contacts_without_emails_final)
+            })
+            save_run_metadata(run_id, metadata)
         else:
             print(f"[{run_id}] ERROR: Final CSV not created at {final_csv_path}")
             pipeline_runs[run_id]["totalContacts"] = len(all_contacts)
@@ -451,38 +570,85 @@ def run_streaming_pipeline(state: str, run_id: str):
     
     def process_all_counties():
         """
-        Process all counties sequentially (true sequential processing).
+        Process all counties sequentially with checkpointing.
         
         This eliminates ThreadPoolExecutor overhead and prevents thread accumulation
         that causes resource exhaustion after long runs (~12+ hours).
+        Uses checkpointing to enable resume after restarts.
         """
         try:
             # Load counties for state
             counties = load_counties_from_state(state)
             total_counties = len(counties)
             
+            # Check for existing checkpoint to resume
+            checkpoint = load_checkpoint(run_id)
+            completed_counties = []
+            start_index = 0
+            
+            if checkpoint:
+                # Resume from checkpoint
+                completed_counties = checkpoint.get("completed_counties", [])
+                start_index = checkpoint.get("next_county_index", 0)
+                print(f"[{run_id}] Resuming from checkpoint: {len(completed_counties)}/{total_counties} counties already completed")
+                print(f"[{run_id}] Resuming from county index {start_index}: {counties[start_index] if start_index < len(counties) else 'N/A'}")
+            else:
+                # New run - save initial metadata
+                initial_metadata = {
+                    "run_id": run_id,
+                    "state": state,
+                    "status": "running",
+                    "total_counties": total_counties,
+                    "completed_counties": [],
+                    "start_time": time.time(),
+                    "created_at": datetime.now().isoformat()
+                }
+                save_run_metadata(run_id, initial_metadata)
+                print(f"[{run_id}] New run started: {total_counties} counties to process")
+            
             # Update progress tracking with county info
             pipeline_runs[run_id]["totalCounties"] = total_counties
-            pipeline_runs[run_id]["statusMessage"] = f"Starting pipeline for {state} ({total_counties} counties)..."
+            pipeline_runs[run_id]["statusMessage"] = f"Processing {state} ({len(completed_counties)}/{total_counties} counties completed, resuming from {start_index})..."
             
-            print(f"[{run_id}] Processing {total_counties} counties sequentially...")
+            print(f"[{run_id}] Processing {total_counties} counties sequentially (starting from index {start_index})...")
             
             # TRUE SEQUENTIAL PROCESSING: Process counties one at a time in a simple loop
             # This eliminates thread pool overhead and prevents thread accumulation
-            for idx, county in enumerate(counties):
+            for idx in range(start_index, len(counties)):
+                county = counties[idx]
                 try:
                     # Process this county with timing
                     county_index, result, processing_time = process_county_with_timing(
                         state, run_id, county, idx, total_counties
                     )
                     
+                    # Mark county as completed
+                    if county not in completed_counties:
+                        completed_counties.append(county)
+                    
                     # Update progress
-                    completed = idx + 1
+                    completed = len(completed_counties)
                     progress_pct = int((completed / total_counties) * 100)
                     pipeline_runs[run_id]["progress"] = progress_pct
                     pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
                     
                     print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                    
+                    # Save checkpoint after every N counties (batch size)
+                    if (idx + 1) % CHECKPOINT_BATCH_SIZE == 0 or (idx + 1) == len(counties):
+                        save_checkpoint(run_id, state, completed_counties, idx + 1, total_counties)
+                        
+                        # Update metadata
+                        metadata = load_run_metadata(run_id) or {}
+                        metadata.update({
+                            "status": "running",
+                            "completed_counties": completed_counties,
+                            "progress": progress_pct,
+                            "last_checkpoint": time.time()
+                        })
+                        save_run_metadata(run_id, metadata)
+                        
+                        print(f"[{run_id}] Checkpoint saved after {completed} counties")
                     
                     # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
                     # This prevents memory/thread accumulation over long runs
@@ -498,6 +664,18 @@ def run_streaming_pipeline(state: str, run_id: str):
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed, starting aggregation...")
             aggregate_final_results(run_id, state)
+            
+            # Final checkpoint - mark as completed
+            save_checkpoint(run_id, state, completed_counties, len(counties), total_counties)
+            final_metadata = load_run_metadata(run_id) or {}
+            final_metadata.update({
+                "status": "completed",
+                "completed_counties": completed_counties,
+                "progress": 100,
+                "completed_at": datetime.now().isoformat(),
+                "completion_time": time.time()
+            })
+            save_run_metadata(run_id, final_metadata)
         
         except FileNotFoundError as e:
             # State file not found
@@ -700,12 +878,81 @@ def method_not_allowed(e):
     }), 405
 
 # Error handler for 404 Not Found
+@app.route("/runs", methods=["GET"])
+def list_runs():
+    """List all runs from persistent storage"""
+    try:
+        runs = list_all_runs()
+        
+        # Format response
+        response_data = {
+            "status": "ok",
+            "runs": runs,
+            "count": len(runs)
+        }
+        
+        response = jsonify(response_data)
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
+@app.route("/runs/<run_id>/download", methods=["GET"])
+def download_run_csv(run_id: str):
+    """Download the final CSV for a completed run"""
+    try:
+        # Load metadata to get CSV path
+        metadata = load_run_metadata(run_id)
+        if not metadata:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        # Get CSV path from metadata or construct it
+        csv_path = metadata.get("final_csv_path")
+        if not csv_path:
+            # Try to construct path
+            state = metadata.get("state", "").title()
+            run_dir = RUNS_DIR / run_id
+            csv_path = str(run_dir / f"{state}_leads_final.csv")
+        
+        # Check if file exists
+        if not os.path.exists(csv_path):
+            return jsonify({
+                "status": "error",
+                "error": "CSV file not found for this run"
+            }), 404
+        
+        # Read and return CSV
+        from flask import send_file
+        return send_file(
+            csv_path,
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=metadata.get("csv_filename", f"run_{run_id}.csv")
+        )
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({
         "status": "error",
         "error": f"Endpoint not found: {request.path}",
-        "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>"]
+        "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download"]
     }), 404
 
 # Production: Always use Waitress, even if file is run directly

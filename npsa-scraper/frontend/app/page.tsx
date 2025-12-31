@@ -107,6 +107,7 @@ export default function Home() {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [elapsedTimeDisplay, setElapsedTimeDisplay] = useState<number>(0);
   const [completedCounties, setCompletedCounties] = useState<string[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   function downloadCSV(csvContent: string, filename: string) {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -415,7 +416,16 @@ export default function Home() {
   // Render views with fade-in transitions
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar activeTab={selectedType} onTabChange={setSelectedType} />
+      <Sidebar 
+        activeTab={selectedType} 
+        onTabChange={setSelectedType}
+        onRunSelect={(runId) => {
+          setSelectedRunId(runId);
+          // Fetch and display the run status
+          checkPipelineStatus(runId);
+          setViewState("summary");
+        }}
+      />
       <div className="min-h-screen ml-64">
         {/* START VIEW */}
         {viewState === "start" && (
