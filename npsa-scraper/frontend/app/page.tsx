@@ -444,7 +444,7 @@ export default function Home() {
 
   // Render views with fade-in transitions
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 flex">
       {/* Mobile Hamburger Menu */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -463,9 +463,9 @@ export default function Home() {
         />
       )}
 
-      <div className={`fixed left-0 top-0 h-full z-50 transition-transform duration-300 md:translate-x-0 ${
+      <div className={`fixed left-0 top-0 h-full w-64 z-50 transition-transform duration-300 ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      } md:relative md:translate-x-0`}>
+      } md:translate-x-0 md:relative md:z-auto flex-shrink-0`}>
         <Sidebar 
           activeTab={selectedType} 
           onTabChange={(tab) => {
@@ -513,7 +513,7 @@ export default function Home() {
           }}
         />
       </div>
-      <div className="min-h-screen ml-0 md:ml-64">
+      <div className="flex-1 min-h-screen">
         {/* START VIEW - Only show when school/church tab is active */}
         {viewState === "start" && (selectedType === "school" || selectedType === "church") && (
           <div className="animate-fade-in">
