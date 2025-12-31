@@ -50,6 +50,10 @@ CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS
 # In-memory storage for pipeline runs (use Redis or database in production)
 pipeline_runs = {}
 
+# Track running threads and cancellation flags
+# Format: {run_id: {'thread': Thread, 'cancelled': bool}}
+running_threads = {}
+
 # Track 404 requests for non-existent run IDs to prevent spam from stale browser tabs
 # Format: {run_id: (first_404_time, count)}
 not_found_runs = {}
@@ -643,6 +647,13 @@ def run_streaming_pipeline(state: str, run_id: str):
             if processing_mode == "sequential":
                 # SEQUENTIAL PROCESSING: Process counties one at a time
                 for idx, county in remaining_counties:
+                    # Check for cancellation before each county
+                    if running_threads.get(run_id, {}).get('cancelled', False):
+                        pipeline_runs[run_id]["status"] = "cancelled"
+                        pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+                        print(f"[{run_id}] Pipeline cancelled during processing")
+                        return
+                    
                     try:
                         # Process this county with timing
                         county_index, result, processing_time = process_county_with_timing(
@@ -748,6 +759,16 @@ def run_streaming_pipeline(state: str, run_id: str):
                     
                     # Process results as they complete (out-of-order is handled)
                     for future in as_completed(future_to_county):
+                        # Check for cancellation
+                        if running_threads.get(run_id, {}).get('cancelled', False):
+                            # Cancel remaining futures
+                            for f in future_to_county:
+                                f.cancel()
+                            pipeline_runs[run_id]["status"] = "cancelled"
+                            pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+                            print(f"[{run_id}] Pipeline cancelled during parallel processing")
+                            return
+                        
                         idx, county = future_to_county[future]
                         try:
                             future.result()  # Wait for completion
@@ -792,6 +813,10 @@ def run_streaming_pipeline(state: str, run_id: str):
     # Start processing in a background thread
     thread = threading.Thread(target=process_all_counties)
     thread.daemon = True
+    
+    # Track the thread for cancellation
+    running_threads[run_id] = {'thread': thread, 'cancelled': False}
+    
     thread.start()
 
 
@@ -998,6 +1023,131 @@ def list_runs():
         return error_response, 500
 
 
+@app.route("/runs/<run_id>/stop", methods=["POST", "OPTIONS"])
+def stop_run(run_id: str):
+    """Stop a running pipeline"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    try:
+        # Check if run exists
+        if run_id not in pipeline_runs:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        # Check if run is actually running
+        if pipeline_runs[run_id].get("status") != "running":
+            return jsonify({
+                "status": "error",
+                "error": f"Run is not running (current status: {pipeline_runs[run_id].get('status')})"
+            }), 400
+        
+        # Set cancellation flag
+        if run_id in running_threads:
+            running_threads[run_id]['cancelled'] = True
+        
+        # Update status
+        pipeline_runs[run_id]["status"] = "cancelled"
+        pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+        
+        # Update metadata
+        metadata = load_run_metadata(run_id) or {}
+        metadata.update({
+            "status": "cancelled",
+            "cancelled_at": datetime.now().isoformat()
+        })
+        save_run_metadata(run_id, metadata)
+        
+        print(f"[{run_id}] Pipeline stop requested")
+        
+        response = jsonify({
+            "status": "success",
+            "message": "Pipeline stop requested"
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
+@app.route("/runs/<run_id>/delete", methods=["DELETE", "OPTIONS"])
+def delete_run(run_id: str):
+    """Delete a finished run (metadata, checkpoint, CSV files)"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
+        return response, 200
+    
+    try:
+        # Load metadata to check if run exists
+        metadata = load_run_metadata(run_id)
+        if not metadata:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        # Only allow deletion of completed, error, or cancelled runs
+        status = metadata.get("status")
+        if status == "running":
+            return jsonify({
+                "status": "error",
+                "error": "Cannot delete a running run. Stop it first."
+            }), 400
+        
+        # Delete metadata file
+        metadata_path = METADATA_DIR / f"{run_id}.json"
+        if metadata_path.exists():
+            metadata_path.unlink()
+        
+        # Delete checkpoint file
+        checkpoint_path = CHECKPOINTS_DIR / f"{run_id}.json"
+        if checkpoint_path.exists():
+            checkpoint_path.unlink()
+        
+        # Delete CSV file if it exists
+        csv_path = metadata.get("final_csv_path")
+        if csv_path and os.path.exists(csv_path):
+            os.remove(csv_path)
+        
+        # Delete run directory if it exists
+        run_dir = RUNS_DIR / run_id
+        if run_dir.exists():
+            import shutil
+            shutil.rmtree(run_dir)
+        
+        # Remove from in-memory storage if present
+        pipeline_runs.pop(run_id, None)
+        running_threads.pop(run_id, None)
+        
+        print(f"[{run_id}] Run deleted")
+        
+        response = jsonify({
+            "status": "success",
+            "message": "Run deleted successfully"
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
 @app.route("/runs/<run_id>/download", methods=["GET"])
 def download_run_csv(run_id: str):
     """Download the final CSV for a completed run"""
@@ -1047,7 +1197,7 @@ def not_found(e):
     return jsonify({
         "status": "error",
         "error": f"Endpoint not found: {request.path}",
-        "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download"]
+        "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete"]
     }), 404
 
 # Production: Always use Waitress, even if file is run directly
