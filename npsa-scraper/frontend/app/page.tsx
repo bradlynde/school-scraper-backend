@@ -486,6 +486,15 @@ export default function Home() {
             // Fetch run status to determine if it's running or finished
             const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
             try {
+              // First, try to get run from /runs endpoint to get metadata
+              const runsResponse = await fetch(`${apiUrl}/runs`);
+              let runMetadata = null;
+              if (runsResponse.ok) {
+                const runsData = await runsResponse.json();
+                runMetadata = runsData.runs?.find((r: any) => r.run_id === runId);
+              }
+              
+              // Then try pipeline-status endpoint
               const response = await fetch(`${apiUrl}/pipeline-status/${runId}`);
               if (response.ok) {
                 const data = await response.json();
@@ -502,9 +511,57 @@ export default function Home() {
                   setPollingInterval(interval);
                   checkPipelineStatus(runId);
                 } else if (data.status === "completed" || data.status === "error") {
+                  // Use data from pipeline-status if available, otherwise use metadata
+                  const summaryData = {
+                    ...data,
+                    totalContacts: data.totalContacts || runMetadata?.total_contacts || 0,
+                    schoolsProcessed: data.schoolsProcessed || data.schoolsFound || runMetadata?.schools_processed || 0,
+                    countyContacts: data.countyContacts || [],
+                    countySchools: data.countySchools || [],
+                    csvData: data.csvData,
+                    csvFilename: data.csvFilename || runMetadata?.csv_filename,
+                  };
+                  
+                  // Calculate elapsed time
+                  if (runMetadata?.created_at && runMetadata?.completed_at) {
+                    const start = new Date(runMetadata.created_at).getTime();
+                    const end = new Date(runMetadata.completed_at).getTime();
+                    const elapsed = (end - start) / 1000;
+                    setElapsedTimeDisplay(elapsed);
+                    setStartTime(start);
+                  } else if (data.elapsedTime) {
+                    setElapsedTimeDisplay(data.elapsedTime);
+                  }
+                  
+                  setSummary(summaryData);
                   setViewState("summary");
                   setIsRunning(false);
-                  checkPipelineStatus(runId);
+                }
+              } else if (response.status === 410 || response.status === 404) {
+                // Run is completed and status endpoint no longer available, use metadata
+                if (runMetadata) {
+                  const summaryData = {
+                    status: runMetadata.status || "completed",
+                    totalContacts: runMetadata.total_contacts || 0,
+                    schoolsProcessed: runMetadata.schools_processed || 0,
+                    countyContacts: [],
+                    countySchools: [],
+                    csvData: null,
+                    csvFilename: runMetadata.csv_filename,
+                  };
+                  
+                  // Calculate elapsed time from metadata
+                  if (runMetadata.created_at && runMetadata.completed_at) {
+                    const start = new Date(runMetadata.created_at).getTime();
+                    const end = new Date(runMetadata.completed_at).getTime();
+                    const elapsed = (end - start) / 1000;
+                    setElapsedTimeDisplay(elapsed);
+                    setStartTime(start);
+                  }
+                  
+                  setSummary(summaryData);
+                  setViewState("summary");
+                  setIsRunning(false);
                 }
               }
             } catch (error) {
@@ -773,9 +830,34 @@ export default function Home() {
 
                 {/* Download Button */}
                 <div className="flex flex-col space-y-4 max-w-2xl mx-auto">
-                  {summary.csvData && summary.csvFilename ? (
+                  {summary.totalContacts && summary.totalContacts > 0 ? (
                     <button
-                      onClick={() => downloadCSV(summary.csvData!, summary.csvFilename!)}
+                      onClick={async () => {
+                        if (selectedRunId) {
+                          const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+                          try {
+                            const response = await fetch(`${apiUrl}/runs/${selectedRunId}/download`);
+                            if (response.ok) {
+                              const blob = await response.blob();
+                              const url = window.URL.createObjectURL(blob);
+                              const link = document.createElement("a");
+                              link.href = url;
+                              link.download = summary.csvFilename || `run_${selectedRunId}.csv`;
+                              document.body.appendChild(link);
+                              link.click();
+                              document.body.removeChild(link);
+                              window.URL.revokeObjectURL(url);
+                            } else {
+                              alert("Failed to download CSV");
+                            }
+                          } catch (error) {
+                            console.error("Error downloading CSV:", error);
+                            alert("Failed to download CSV");
+                          }
+                        } else if (summary.csvData && summary.csvFilename) {
+                          downloadCSV(summary.csvData, summary.csvFilename);
+                        }
+                      }}
                       className="w-full px-8 py-5 bg-[#1e3a5f] hover:bg-[#2c5282] text-white rounded-xl text-lg font-semibold transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
                     >
                       Download Leads ({summary.totalContacts || 0} contacts)

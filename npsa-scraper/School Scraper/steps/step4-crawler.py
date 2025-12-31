@@ -25,9 +25,19 @@ from selenium.webdriver.common.action_chains import ActionChains
 import re
 import csv
 import time
+import subprocess
+import gc
+import os
 from typing import List, Dict, Set, Optional
 import pandas as pd
 from collections import defaultdict
+
+# Try to import psutil for process tree killing (optional)
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 
 class ContentCollector:
@@ -195,8 +205,115 @@ class ContentCollector:
                 pass
             self.driver = self._setup_selenium()
     
+    def hard_reset_selenium(self, is_parallel: bool = False):
+        """
+        HARD RESET: Aggressively kill all Chrome/ChromeDriver processes.
+        
+        This is a nuclear option to ensure all Selenium processes are fully terminated.
+        Used after every 2 counties to prevent process accumulation.
+        
+        Args:
+            is_parallel: If True, only kills processes for this worker (parallel-safe).
+                        If False, kills all Chrome processes (nuclear option).
+        """
+        killed_processes = []
+        driver_service_pid = None
+        
+        # Step 1: Graceful quit (but save service PID first)
+        if self.driver:
+            try:
+                # Save service PID before quitting
+                if hasattr(self.driver, 'service'):
+                    service = self.driver.service
+                    if service and hasattr(service, 'process') and service.process:
+                        driver_service_pid = service.process.pid
+                
+                self.driver.quit()
+                print("    ✓ Selenium driver quit (graceful)")
+            except Exception as e:
+                print(f"    Warning: Graceful quit failed: {e}")
+            finally:
+                self.driver = None
+        
+        # Step 2: Kill driver service process (if we saved the PID)
+        if driver_service_pid:
+            try:
+                if HAS_PSUTIL:
+                    try:
+                        parent = psutil.Process(driver_service_pid)
+                        parent.kill()
+                        parent.wait(timeout=5)
+                        killed_processes.append(f"service:{driver_service_pid}")
+                        print(f"    ✓ Killed driver service process {driver_service_pid}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                else:
+                    # Fallback: try to kill by PID directly
+                    try:
+                        os.kill(driver_service_pid, 9)
+                        killed_processes.append(f"service:{driver_service_pid}")
+                        print(f"    ✓ Killed driver service process {driver_service_pid}")
+                    except (ProcessLookupError, PermissionError):
+                        pass
+            except Exception as e:
+                print(f"    Warning: Service kill failed: {e}")
+        
+        # Step 3: Process tree kill (if psutil available and we have a PID)
+        if HAS_PSUTIL and driver_service_pid:
+            try:
+                parent = psutil.Process(driver_service_pid)
+                for child in parent.children(recursive=True):
+                    try:
+                        child.kill()
+                        killed_processes.append(f"child:{child.pid}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                if killed_processes:
+                    child_count = len([p for p in killed_processes if 'child' in p])
+                    if child_count > 0:
+                        print(f"    ✓ Killed {child_count} child processes")
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            except Exception as e:
+                print(f"    Warning: Process tree kill failed: {e}")
+        
+        # Step 4: Nuclear option - kill all Chrome processes (only if not parallel)
+        if not is_parallel:
+            try:
+                # Kill chromedriver processes
+                result = subprocess.run(
+                    ['pkill', '-9', 'chromedriver'],
+                    capture_output=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    print("    ✓ Killed all chromedriver processes")
+                
+                # Kill chrome/chromium processes (headless)
+                result = subprocess.run(
+                    ['pkill', '-9', '-f', 'chrome.*headless'],
+                    capture_output=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    print("    ✓ Killed all headless Chrome processes")
+            except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+                # pkill might not be available or might fail - that's okay
+                print(f"    Note: Nuclear cleanup skipped: {e}")
+        
+        # Step 5: Wait for processes to fully terminate
+        time.sleep(3)
+        
+        # Step 6: Force garbage collection
+        gc.collect()
+        
+        # Step 7: Wait before recreating
+        time.sleep(2)
+        
+        print(f"    ✓ Hard reset complete (killed {len(killed_processes)} tracked processes)")
+    
     def cleanup(self):
-        """Cleanup Selenium driver resources"""
+        """Cleanup Selenium driver resources (standard cleanup)"""
         if self.driver:
             try:
                 self.driver.quit()

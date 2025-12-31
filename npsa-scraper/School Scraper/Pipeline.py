@@ -494,30 +494,54 @@ class StreamingPipeline:
         # Print final summary
         self._print_summary()
     
-    def cleanup(self):
+    def cleanup(self, hard_reset: bool = False, is_parallel: bool = False):
         """
         Cleanup all pipeline resources, especially Selenium drivers.
         
         This is called after each county to ensure resources are fully released.
         Periodic recycling prevents resource accumulation over long runs.
+        
+        Args:
+            hard_reset: If True, perform aggressive hard reset (kills all Chrome processes).
+                       Used after every 2 counties to prevent process accumulation.
+            is_parallel: If True, hard reset is parallel-safe (only kills worker-specific processes).
         """
         try:
             # Cleanup ContentCollector's Selenium driver
             if hasattr(self, 'content_collector') and self.content_collector:
-                self.content_collector.cleanup()
+                if hard_reset and self.content_collector.use_selenium:
+                    # HARD RESET: Aggressively kill all Chrome processes
+                    print("    🔄 Performing hard reset of Selenium processes...")
+                    self.content_collector.hard_reset_selenium(is_parallel=is_parallel)
+                else:
+                    # Standard cleanup
+                    self.content_collector.cleanup()
+                
                 # PERIODIC DRIVER RECYCLING: Recreate driver after cleanup
                 # This ensures a fresh driver for the next county
                 if self.content_collector.use_selenium:
                     try:
                         self.content_collector.driver = self.content_collector._setup_selenium()
-                        print("    ✓ Pipeline cleanup and driver recycling successful")
+                        if hard_reset:
+                            print("    ✓ Pipeline hard reset and driver recycling successful")
+                        else:
+                            print("    ✓ Pipeline cleanup and driver recycling successful")
                     except Exception as recycle_error:
                         print(f"    Warning: Driver recycling failed: {recycle_error}")
-                        print("    ✓ Pipeline cleanup successful (driver recycling skipped)")
+                        if hard_reset:
+                            print("    ✓ Pipeline hard reset successful (driver recycling skipped)")
+                        else:
+                            print("    ✓ Pipeline cleanup successful (driver recycling skipped)")
                 else:
-                    print("    ✓ Pipeline cleanup successful")
+                    if hard_reset:
+                        print("    ✓ Pipeline hard reset successful")
+                    else:
+                        print("    ✓ Pipeline cleanup successful")
             else:
-                print("    ✓ Pipeline cleanup successful (no content collector)")
+                if hard_reset:
+                    print("    ✓ Pipeline hard reset successful (no content collector)")
+                else:
+                    print("    ✓ Pipeline cleanup successful (no content collector)")
         except Exception as e:
             # Silently handle cleanup errors - don't crash if cleanup fails
             print(f"    Warning: Error during pipeline cleanup: {e}")

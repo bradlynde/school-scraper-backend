@@ -206,7 +206,7 @@ def load_counties_from_state(state: str) -> list:
     return counties
 
 
-def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int):
+def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int, hard_reset: bool = False):
     """
     Process a single county through the entire pipeline using StreamingPipeline class
     
@@ -283,8 +283,12 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         if pipeline:
             try:
                 print(f"[{run_id}] Cleaning up resources for {county}...")
-                pipeline.cleanup()
-                print(f"[{run_id}] ✓ Cleanup successful for {county}")
+                # Hard reset after every CHECKPOINT_BATCH_SIZE counties to prevent process accumulation
+                pipeline.cleanup(hard_reset=hard_reset, is_parallel=(MAX_WORKERS > 1))
+                if hard_reset:
+                    print(f"[{run_id}] ✓ Hard reset and cleanup successful for {county}")
+                else:
+                    print(f"[{run_id}] ✓ Cleanup successful for {county}")
                 
                 # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
                 # This ensures Selenium driver and Chrome processes are fully released
@@ -297,7 +301,7 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
             print(f"[{run_id}] No pipeline instance to cleanup for {county}")
 
 
-def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int):
+def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int, hard_reset: bool = False):
     """
     Process a single county and track timing for average calculation.
     Returns tuple: (county_index, result_dict, processing_time_seconds)
@@ -312,7 +316,7 @@ def process_county_with_timing(state: str, run_id: str, county: str, county_inde
         pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
         
         # Process this county
-        result = process_single_county(state, county, run_id, county_index, total_counties)
+        result = process_single_county(state, county, run_id, county_index, total_counties, hard_reset=hard_reset)
         
         processing_time = time.time() - start_time
         
@@ -655,9 +659,12 @@ def run_streaming_pipeline(state: str, run_id: str):
                         return
                     
                     try:
+                        # Determine if this county should trigger hard reset (every CHECKPOINT_BATCH_SIZE)
+                        should_hard_reset = (idx + 1) % CHECKPOINT_BATCH_SIZE == 0
+                        
                         # Process this county with timing
                         county_index, result, processing_time = process_county_with_timing(
-                            state, run_id, county, idx, total_counties
+                            state, run_id, county, idx, total_counties, hard_reset=should_hard_reset
                         )
                         
                         # Mark county as completed
@@ -704,9 +711,13 @@ def run_streaming_pipeline(state: str, run_id: str):
                 def process_with_tracking(idx, county):
                     """Wrapper to add thread-safe tracking for parallel processing"""
                     try:
+                        # Determine if this county should trigger hard reset (every CHECKPOINT_BATCH_SIZE)
+                        # Note: In parallel mode, hard reset is parallel-safe (only kills worker's own processes)
+                        should_hard_reset = (idx + 1) % CHECKPOINT_BATCH_SIZE == 0
+                        
                         # Process this county with timing
                         county_index, result, processing_time = process_county_with_timing(
-                            state, run_id, county, idx, total_counties
+                            state, run_id, county, idx, total_counties, hard_reset=should_hard_reset
                         )
                         
                         # Thread-safe progress update
