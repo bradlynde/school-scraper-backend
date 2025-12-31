@@ -512,8 +512,11 @@ export default function Home() {
                   checkPipelineStatus(runId);
                 } else if (data.status === "completed" || data.status === "error") {
                   // Use data from pipeline-status if available, otherwise use metadata
-                  const summaryData = {
+                  const summaryData: PipelineSummary = {
                     ...data,
+                    steps: data.steps || [],
+                    schoolsFound: data.schoolsFound || data.schoolsProcessed || runMetadata?.schools_processed || 0,
+                    runId: data.runId || runId,
                     totalContacts: data.totalContacts || runMetadata?.total_contacts || 0,
                     schoolsProcessed: data.schoolsProcessed || data.schoolsFound || runMetadata?.schools_processed || 0,
                     countyContacts: data.countyContacts || [],
@@ -540,8 +543,11 @@ export default function Home() {
               } else if (response.status === 410 || response.status === 404) {
                 // Run is completed and status endpoint no longer available, use metadata
                 if (runMetadata) {
-                  const summaryData = {
+                  const summaryData: PipelineSummary = {
                     status: runMetadata.status || "completed",
+                    steps: [], // No step data available from metadata
+                    schoolsFound: runMetadata.schools_processed || 0,
+                    runId: runId,
                     totalContacts: runMetadata.total_contacts || 0,
                     schoolsProcessed: runMetadata.schools_processed || 0,
                     countyContacts: [],
