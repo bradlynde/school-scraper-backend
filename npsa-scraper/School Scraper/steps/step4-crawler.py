@@ -133,19 +133,23 @@ class ContentCollector:
         if retry_count > 0:
             print(f"    🔧 Pre-creation cleanup (attempt {retry_count + 1}/{max_retries + 1})...")
             cleanup_wait = 2 + retry_count  # Longer wait on later retries
+            kill_rounds = 3  # More aggressive on retries
         else:
             # Light cleanup on first attempt (especially important in parallel mode)
-            cleanup_wait = 1
+            cleanup_wait = 2  # Increased from 1 to ensure processes terminate
+            kill_rounds = 2  # More aggressive even on first attempt
         
         try:
-            # Kill chromedriver processes (more aggressive on retries)
-            for _ in range(2 if retry_count > 0 else 1):
+            # Kill chromedriver and chrome processes (more aggressive on retries)
+            for round_num in range(kill_rounds):
+                # Kill chromedriver processes
                 subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
+                # Kill chrome/chromium processes (headless)
                 subprocess.run(['pkill', '-9', '-f', 'chrome.*headless'], capture_output=True, timeout=3)
-                if retry_count > 0:
-                    # Also try to kill any chrome processes (not just headless)
-                    subprocess.run(['pkill', '-9', '-f', 'chromium'], capture_output=True, timeout=3)
-                time.sleep(0.5)  # Brief pause between kill attempts
+                # Also kill chromium processes
+                subprocess.run(['pkill', '-9', '-f', 'chromium'], capture_output=True, timeout=3)
+                if round_num < kill_rounds - 1:  # Don't sleep after last round
+                    time.sleep(0.5)  # Brief pause between kill rounds
             
             time.sleep(cleanup_wait)  # Wait for processes to fully terminate
             gc.collect()
