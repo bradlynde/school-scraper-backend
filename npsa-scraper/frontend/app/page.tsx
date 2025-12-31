@@ -37,7 +37,7 @@ type PipelineSummary = {
   countySchools?: number[];
 };
 
-type ViewState = "start" | "progress" | "summary";
+type ViewState = "start" | "progress" | "summary" | "running" | "finished";
 
 const US_STATES = [
   { value: "alabama", label: "Alabama" },
@@ -95,7 +95,7 @@ const US_STATES = [
 export default function Home() {
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
-  const [selectedType, setSelectedType] = useState<"school" | "church">("school");
+  const [selectedType, setSelectedType] = useState<"school" | "church" | "running" | "finished">("school");
   const [status, setStatus] = useState("");
   const [summary, setSummary] = useState<PipelineSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -108,6 +108,7 @@ export default function Home() {
   const [elapsedTimeDisplay, setElapsedTimeDisplay] = useState<number>(0);
   const [completedCounties, setCompletedCounties] = useState<string[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   function downloadCSV(csvContent: string, filename: string) {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -199,7 +200,15 @@ export default function Home() {
         setProgress(100);
         setEstimatedTime(0);
         setIsRunning(false);
-        setViewState("summary");
+        
+        // If run was selected from Finished tab, show summary; otherwise default behavior
+        if (selectedRunId === runId && selectedType === 'finished') {
+          setViewState("summary");
+        } else if (selectedRunId === runId) {
+          setViewState("summary");
+        } else {
+          setViewState("summary");
+        }
       } else if (data.status === "error") {
         if (pollingInterval) {
           clearInterval(pollingInterval);
@@ -240,6 +249,19 @@ export default function Home() {
           statusMsg = `Processing ${data.currentCounty} County (${countiesProcessed + 1} of ${totalCounties})`;
         }
         setStatus(statusMsg);
+        
+        // If run was selected from Running/Finished tab, switch to progress view
+        if (selectedRunId === runId && (selectedType === 'running' || selectedType === 'finished')) {
+          setViewState("progress");
+          setIsRunning(true);
+          // Start polling if not already polling
+          if (!pollingInterval) {
+            const interval = setInterval(() => {
+              checkPipelineStatus(runId);
+            }, 60000); // Poll every 1 minute
+            setPollingInterval(interval);
+          }
+        }
       }
     } catch (err) {
       console.error("Status check error:", err);
@@ -329,6 +351,13 @@ export default function Home() {
     setStartTime(null);
     setElapsedTimeDisplay(0);
     setCompletedCounties([]);
+    setSelectedRunId(null);
+    setIsRunning(false);
+    
+    // Reset to school tab if on running/finished tabs
+    if (selectedType === 'running' || selectedType === 'finished') {
+      setSelectedType('school');
+    }
     
     if (pollingInterval) {
       clearInterval(pollingInterval);
@@ -416,19 +445,77 @@ export default function Home() {
   // Render views with fade-in transitions
   return (
     <div className="min-h-screen bg-gray-50">
-      <Sidebar 
-        activeTab={selectedType} 
-        onTabChange={setSelectedType}
-        onRunSelect={(runId) => {
-          setSelectedRunId(runId);
-          // Fetch and display the run status
-          checkPipelineStatus(runId);
-          setViewState("summary");
-        }}
-      />
-      <div className="min-h-screen ml-64">
-        {/* START VIEW */}
-        {viewState === "start" && (
+      {/* Mobile Hamburger Menu */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="fixed top-4 left-4 z-50 md:hidden bg-white p-2 rounded-lg shadow-md border border-gray-200"
+      >
+        <svg className="w-6 h-6 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+
+      {/* Sidebar Overlay for Mobile */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <div className={`fixed left-0 top-0 h-full z-50 transition-transform duration-300 md:translate-x-0 ${
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      } md:relative md:translate-x-0`}>
+        <Sidebar 
+          activeTab={selectedType} 
+          onTabChange={(tab) => {
+            setSelectedType(tab);
+            setSidebarOpen(false); // Close mobile menu on tab change
+            // Switch view based on tab
+            if (tab === 'school' || tab === 'church') {
+              setViewState("start");
+              setSelectedRunId(null);
+            } else if (tab === 'running' || tab === 'finished') {
+              setViewState(tab);
+              setSelectedRunId(null);
+            }
+          }}
+          onRunSelect={async (runId) => {
+            setSelectedRunId(runId);
+            setSidebarOpen(false); // Close mobile menu on run select
+            // Fetch run status to determine if it's running or finished
+            const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+            try {
+              const response = await fetch(`${apiUrl}/pipeline-status/${runId}`);
+              if (response.ok) {
+                const data = await response.json();
+                if (data.status === "running") {
+                  setViewState("progress");
+                  setIsRunning(true);
+                  // Start polling
+                  if (pollingInterval) {
+                    clearInterval(pollingInterval);
+                  }
+                  const interval = setInterval(() => {
+                    checkPipelineStatus(runId);
+                  }, 60000);
+                  setPollingInterval(interval);
+                  checkPipelineStatus(runId);
+                } else if (data.status === "completed" || data.status === "error") {
+                  setViewState("summary");
+                  setIsRunning(false);
+                  checkPipelineStatus(runId);
+                }
+              }
+            } catch (error) {
+              console.error("Error fetching run status:", error);
+            }
+          }}
+        />
+      </div>
+      <div className="min-h-screen ml-0 md:ml-64">
+        {/* START VIEW - Only show when school/church tab is active */}
+        {viewState === "start" && (selectedType === "school" || selectedType === "church") && (
           <div className="animate-fade-in">
             <div className="flex items-center justify-center p-12 min-h-screen">
             <div className="w-full max-w-2xl relative">
@@ -442,7 +529,7 @@ export default function Home() {
                 </div>
               )}
               
-              <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-10">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-6 md:p-10">
                 <div className="flex flex-col space-y-8">
                   <div>
                     <h1 className="text-2xl font-semibold text-gray-900 mb-1">Start New Search</h1>
@@ -476,14 +563,14 @@ export default function Home() {
 
                   <button
                     onClick={runPipeline}
-                    disabled={isRunning || !selectedState || selectedType === "church"}
+                    disabled={!selectedState || selectedType === "church"}
                     className={`w-full px-8 py-4 rounded-lg text-base font-semibold text-white transition-all duration-200 shadow-md ${
-                      isRunning || !selectedState || selectedType === "church"
+                      !selectedState || selectedType === "church"
                         ? "bg-gray-400 cursor-not-allowed opacity-60"
                         : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-lg transform hover:-translate-y-0.5"
                     }`}
                   >
-                    {isRunning ? "Starting..." : "Start Search"}
+                    Start Search
                   </button>
                 </div>
               </div>
@@ -492,24 +579,24 @@ export default function Home() {
           </div>
         )}
 
-        {/* PROGRESS VIEW */}
-        {viewState === "progress" && (
+        {/* PROGRESS VIEW - Show when progress state OR when run selected from Running tab */}
+        {viewState === "progress" && summary && (
           <div className="animate-fade-in">
-            <div className="flex items-center justify-center min-h-screen py-12 px-8">
+            <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
             <div className="w-full max-w-7xl">
               {/* Header - Left aligned with cards */}
               <div className="mb-10">
-                <h1 className="text-4xl font-bold text-gray-900">Running Pipeline</h1>
+                <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Running Pipeline</h1>
               </div>
 
               {/* Two Column Layout */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
                 {/* Left Column - Progress Cards */}
                 <div className="lg:col-span-2 space-y-6">
                   {/* 3 Progress Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
                     {/* Card 1: Completed Counties */}
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
                       <div className="flex items-center justify-between mb-5">
                         <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Completed Counties</h3>
                         <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -526,7 +613,7 @@ export default function Home() {
                     </div>
 
                     {/* Card 2: Processed Schools */}
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
                       <div className="flex items-center justify-between mb-5">
                         <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Processed Schools</h3>
                         <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -540,7 +627,7 @@ export default function Home() {
                     </div>
 
                     {/* Card 3: Current County with Pulse */}
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
                       <div className="flex items-center justify-between mb-5">
                         <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Current County</h3>
                         <div className="relative">
@@ -556,7 +643,7 @@ export default function Home() {
                   </div>
 
                   {/* Activity Log */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-6 md:p-8 overflow-x-auto">
                     <div className="mb-6">
                       <h3 className="text-lg font-bold text-gray-900">Activity Log</h3>
                     </div>
@@ -639,22 +726,22 @@ export default function Home() {
           </div>
         )}
 
-        {/* SUMMARY VIEW */}
+        {/* SUMMARY VIEW - Show when summary state */}
         {viewState === "summary" && summary && (
           <div className="animate-fade-in">
-            <div className="flex items-center justify-center min-h-screen py-12 px-8">
+              <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
               <div className="w-full max-w-7xl">
                 {/* Header */}
                 <div className="mb-10 text-center">
-                  <h1 className="text-4xl font-bold text-gray-900 mb-2">Scraping Complete</h1>
+                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">Scraping Complete</h1>
                   <p className="text-lg text-gray-600">Pipeline finished successfully</p>
                 </div>
 
                 {/* 3 Card Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-10">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8 mb-10">
                   
                   {/* Card 1: Total Contacts */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
                     <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Contacts Extracted</h3>
                     <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
                       {summary.totalContacts || 0}
@@ -665,7 +752,7 @@ export default function Home() {
                   </div>
 
                   {/* Card 2: Schools Processed */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
                     <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Schools Processed</h3>
                     <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
                       {summary.schoolsProcessed || summary.schoolsFound || 0}
@@ -676,7 +763,7 @@ export default function Home() {
                   </div>
 
                   {/* Card 3: Processing Time */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-8">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
                     <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Processing Time</h3>
                     <div className="text-6xl font-bold text-[#1e3a5f]">
                       {formatTime(elapsedTimeDisplay || 0)}
@@ -707,6 +794,40 @@ export default function Home() {
                   >
                     Run Another Search
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* RUNNING TAB VIEW - Show empty state when no run selected */}
+        {selectedType === "running" && !selectedRunId && (
+          <div className="animate-fade-in">
+            <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
+              <div className="w-full max-w-7xl">
+                <div className="mb-10">
+                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Running Runs</h1>
+                  <p className="text-base sm:text-lg text-gray-600 mt-2">Select a run from the sidebar to view its progress</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 md:p-12 text-center">
+                  <p className="text-gray-500 text-base sm:text-lg">No run selected. Choose a run from the sidebar to view its progress.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* FINISHED TAB VIEW - Show empty state when no run selected */}
+        {selectedType === "finished" && !selectedRunId && (
+          <div className="animate-fade-in">
+            <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
+              <div className="w-full max-w-7xl">
+                <div className="mb-10">
+                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Finished Runs</h1>
+                  <p className="text-base sm:text-lg text-gray-600 mt-2">Select a run from the sidebar to view its results</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 md:p-12 text-center">
+                  <p className="text-gray-500 text-base sm:text-lg">No run selected. Choose a run from the sidebar to view its results.</p>
                 </div>
               </div>
             </div>

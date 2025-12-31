@@ -19,6 +19,7 @@ from pathlib import Path
 import requests
 import sys
 import gc  # For explicit garbage collection
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add parent directory to path to import Pipeline
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -69,7 +70,16 @@ CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Batch size for checkpointing (save checkpoint every N counties)
-CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "10"))
+# Default to 2 for better recovery with parallel workers
+CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "2"))
+
+# Number of parallel workers for processing counties
+# Default to 2 for 50% time reduction while maintaining stability
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "2"))
+
+# Thread locks for thread-safe operations
+checkpoint_lock = threading.Lock()
+progress_lock = threading.Lock()
 
 
 def save_checkpoint(run_id: str, state: str, completed_counties: list, next_county_index: int, total_counties: int):
@@ -531,15 +541,20 @@ def aggregate_final_results(run_id: str, state: str):
 
 def run_streaming_pipeline(state: str, run_id: str):
     """
-    Initialize the pipeline and process all counties sequentially.
+    Initialize the pipeline and process all counties (sequentially or in parallel).
     
-    Uses true sequential processing (no ThreadPoolExecutor) to prevent:
-    - Thread accumulation over long runs
-    - Resource leaks
-    - Selenium Chrome process buildup
+    Processing mode is controlled by MAX_WORKERS environment variable:
+    - MAX_WORKERS=1: Sequential processing (one county at a time)
+    - MAX_WORKERS=2: Parallel processing with 2 workers (50% time reduction)
+    - MAX_WORKERS=4: Parallel processing with 4 workers (75% time reduction)
     
-    This approach is more resource-efficient for long-running processes
-    and prevents the thread exhaustion issues seen after ~12+ hours.
+    Parallel processing uses ThreadPoolExecutor with thread-safe:
+    - Checkpoint coordination (locks prevent race conditions)
+    - Progress tracking (locks ensure accurate updates)
+    - Out-of-order county completion handling
+    
+    This approach balances speed with resource management and prevents
+    the thread exhaustion issues seen after ~12+ hours.
     """
     # Initialize progress tracking FIRST, before any operations that might fail
     pipeline_runs[run_id] = {
@@ -570,11 +585,14 @@ def run_streaming_pipeline(state: str, run_id: str):
     
     def process_all_counties():
         """
-        Process all counties sequentially with checkpointing.
+        Process all counties (sequentially or in parallel) with checkpointing.
         
-        This eliminates ThreadPoolExecutor overhead and prevents thread accumulation
-        that causes resource exhaustion after long runs (~12+ hours).
-        Uses checkpointing to enable resume after restarts.
+        Processing mode depends on MAX_WORKERS:
+        - Sequential (MAX_WORKERS=1): One county at a time, simple loop
+        - Parallel (MAX_WORKERS>1): Multiple counties simultaneously with ThreadPoolExecutor
+        
+        Uses thread-safe checkpointing to enable resume after restarts.
+        Thread locks ensure safe concurrent access to shared state.
         """
         try:
             # Load counties for state
@@ -610,56 +628,133 @@ def run_streaming_pipeline(state: str, run_id: str):
             pipeline_runs[run_id]["totalCounties"] = total_counties
             pipeline_runs[run_id]["statusMessage"] = f"Processing {state} ({len(completed_counties)}/{total_counties} counties completed, resuming from {start_index})..."
             
-            print(f"[{run_id}] Processing {total_counties} counties sequentially (starting from index {start_index})...")
+            # Determine processing mode based on MAX_WORKERS
+            if MAX_WORKERS == 1:
+                print(f"[{run_id}] Processing {total_counties} counties sequentially (starting from index {start_index})...")
+                processing_mode = "sequential"
+            else:
+                print(f"[{run_id}] Processing {total_counties} counties with {MAX_WORKERS} parallel workers (starting from index {start_index})...")
+                processing_mode = "parallel"
             
-            # TRUE SEQUENTIAL PROCESSING: Process counties one at a time in a simple loop
-            # This eliminates thread pool overhead and prevents thread accumulation
-            for idx in range(start_index, len(counties)):
-                county = counties[idx]
-                try:
-                    # Process this county with timing
-                    county_index, result, processing_time = process_county_with_timing(
-                        state, run_id, county, idx, total_counties
-                    )
-                    
-                    # Mark county as completed
-                    if county not in completed_counties:
-                        completed_counties.append(county)
-                    
-                    # Update progress
-                    completed = len(completed_counties)
-                    progress_pct = int((completed / total_counties) * 100)
-                    pipeline_runs[run_id]["progress"] = progress_pct
-                    pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
-                    
-                    print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                    
-                    # Save checkpoint after every N counties (batch size)
-                    if (idx + 1) % CHECKPOINT_BATCH_SIZE == 0 or (idx + 1) == len(counties):
-                        save_checkpoint(run_id, state, completed_counties, idx + 1, total_counties)
+            # Filter out already completed counties for parallel processing
+            remaining_counties = [(idx, county) for idx, county in enumerate(counties) 
+                                 if idx >= start_index and county not in completed_counties]
+            
+            if processing_mode == "sequential":
+                # SEQUENTIAL PROCESSING: Process counties one at a time
+                for idx, county in remaining_counties:
+                    try:
+                        # Process this county with timing
+                        county_index, result, processing_time = process_county_with_timing(
+                            state, run_id, county, idx, total_counties
+                        )
                         
-                        # Update metadata
-                        metadata = load_run_metadata(run_id) or {}
-                        metadata.update({
-                            "status": "running",
-                            "completed_counties": completed_counties,
-                            "progress": progress_pct,
-                            "last_checkpoint": time.time()
-                        })
-                        save_run_metadata(run_id, metadata)
+                        # Mark county as completed
+                        with checkpoint_lock:
+                            if county not in completed_counties:
+                                completed_counties.append(county)
+                            
+                            # Update progress
+                            completed = len(completed_counties)
+                            progress_pct = int((completed / total_counties) * 100)
+                            
+                            with progress_lock:
+                                pipeline_runs[run_id]["progress"] = progress_pct
+                                pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
+                            
+                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                            
+                            # Save checkpoint after every N counties (batch size)
+                            if completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties:
+                                save_checkpoint(run_id, state, completed_counties, idx + 1, total_counties)
+                                
+                                # Update metadata
+                                metadata = load_run_metadata(run_id) or {}
+                                metadata.update({
+                                    "status": "running",
+                                    "completed_counties": completed_counties,
+                                    "progress": progress_pct,
+                                    "last_checkpoint": time.time()
+                                })
+                                save_run_metadata(run_id, metadata)
+                                
+                                print(f"[{run_id}] Checkpoint saved after {completed} counties")
                         
-                        print(f"[{run_id}] Checkpoint saved after {completed} counties")
+                        # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
+                        gc.collect()
+                        
+                    except Exception as e:
+                        print(f"[{run_id}] County {county} generated an exception: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        continue
+            else:
+                # PARALLEL PROCESSING: Process counties with multiple workers
+                def process_with_tracking(idx, county):
+                    """Wrapper to add thread-safe tracking for parallel processing"""
+                    try:
+                        # Process this county with timing
+                        county_index, result, processing_time = process_county_with_timing(
+                            state, run_id, county, idx, total_counties
+                        )
+                        
+                        # Thread-safe progress update
+                        with checkpoint_lock:
+                            if county not in completed_counties:
+                                completed_counties.append(county)
+                            
+                            completed = len(completed_counties)
+                            progress_pct = int((completed / total_counties) * 100)
+                            
+                            with progress_lock:
+                                pipeline_runs[run_id]["progress"] = progress_pct
+                                pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
+                            
+                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                            
+                            # Save checkpoint after every N counties (batch size)
+                            if completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties:
+                                save_checkpoint(run_id, state, completed_counties, max(idx + 1, len(completed_counties)), total_counties)
+                                
+                                # Update metadata
+                                metadata = load_run_metadata(run_id) or {}
+                                metadata.update({
+                                    "status": "running",
+                                    "completed_counties": completed_counties,
+                                    "progress": progress_pct,
+                                    "last_checkpoint": time.time()
+                                })
+                                save_run_metadata(run_id, metadata)
+                                
+                                print(f"[{run_id}] Checkpoint saved after {completed} counties")
+                        
+                        # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
+                        gc.collect()
+                        
+                        return (county_index, result, processing_time)
+                    except Exception as e:
+                        print(f"[{run_id}] County {county} generated an exception: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        return (idx, {'success': False, 'error': str(e)}, 0)
+                
+                # Process with ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    # Submit all remaining counties to the pool
+                    future_to_county = {
+                        executor.submit(process_with_tracking, idx, county): (idx, county)
+                        for idx, county in remaining_counties
+                    }
                     
-                    # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                    # This prevents memory/thread accumulation over long runs
-                    gc.collect()
-                    
-                except Exception as e:
-                    print(f"[{run_id}] County {county} generated an exception: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    # Continue with next county even if one fails
-                    continue
+                    # Process results as they complete (out-of-order is handled)
+                    for future in as_completed(future_to_county):
+                        idx, county = future_to_county[future]
+                        try:
+                            future.result()  # Wait for completion
+                        except Exception as e:
+                            print(f"[{run_id}] Future for {county} County raised exception: {e}")
+                            import traceback
+                            traceback.print_exc()
             
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed, starting aggregation...")
@@ -690,9 +785,9 @@ def run_streaming_pipeline(state: str, run_id: str):
             error_msg = str(e)[:500]  # Limit error message length
             pipeline_runs[run_id]["status"] = "error"
             pipeline_runs[run_id]["error"] = error_msg
-        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
-        import traceback
-        traceback.print_exc()
+            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            import traceback
+            traceback.print_exc()
     
     # Start processing in a background thread
     thread = threading.Thread(target=process_all_counties)
