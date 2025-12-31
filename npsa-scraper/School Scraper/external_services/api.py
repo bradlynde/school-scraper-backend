@@ -78,14 +78,12 @@ METADATA_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "3"))
 
 # Number of parallel workers for processing counties
-# Reduced to 2 to prevent hitting Railway process limits (ulimit -u)
-# With 3 workers + Chrome processes, we were hitting ~500 process limit
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "2"))
+# Set to 1 for sequential processing (simplified for debugging)
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
 
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
-hard_reset_lock = threading.Lock()  # Lock for coordinating hard resets at checkpoints
 
 
 def save_checkpoint(run_id: str, state: str, completed_counties: list, next_county_index: int, total_counties: int):
@@ -208,7 +206,7 @@ def load_counties_from_state(state: str) -> list:
     return counties
 
 
-def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int, hard_reset: bool = False, use_nuclear: bool = False):
+def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int):
     """
     Process a single county through the entire pipeline using StreamingPipeline class
     
@@ -255,7 +253,7 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         # Pipeline.run() already handles all compilation and writes to output_csv
         # Just verify the file was created
         all_contacts = pipeline.all_contacts
-        print(f"[{run_id}] ✓ {county}: {len(all_contacts)} contacts")
+        print(f"[{run_id}] SUCCESS {county}: {len(all_contacts)} contacts")
         
         # Count contacts with and without emails
         contacts_with_emails = [c for c in all_contacts if c.has_email()]
@@ -280,30 +278,17 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         traceback.print_exc()
         return {'success': False, 'error': error_msg}
     finally:
-        # CRITICAL: Always cleanup pipeline resources (especially Selenium drivers)
-        # This prevents resource leaks that cause degradation after long runs
-        if pipeline:
+        # Basic cleanup: just quit the driver if it exists
+        if pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
             try:
-                print(f"[{run_id}] Cleaning up resources for {county}...")
-                # ALWAYS do hard reset after each county to prevent process accumulation
-                # This is critical in parallel mode where processes can accumulate quickly
-                # At checkpoints, use nuclear option (coordinated across workers)
-                pipeline.cleanup(hard_reset=True, is_parallel=(MAX_WORKERS > 1), use_nuclear=use_nuclear)
-                nuclear_status = " (nuclear)" if use_nuclear else ""
-                print(f"[{run_id}] ✓ Hard reset and cleanup successful for {county}{nuclear_status}")
-                
-                # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                # This ensures Selenium driver and Chrome processes are fully released
-                gc.collect()
-                
-            except Exception as cleanup_error:
-                # Log but don't raise - cleanup failures shouldn't mask original errors
-                print(f"[{run_id}] Warning: Error during pipeline cleanup for {county}: {cleanup_error}")
-        else:
-            print(f"[{run_id}] No pipeline instance to cleanup for {county}")
+                if pipeline.content_collector.driver:
+                    pipeline.content_collector.driver.quit()
+                    pipeline.content_collector.driver = None
+            except Exception:
+                pass  # Ignore cleanup errors
 
 
-def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int, hard_reset: bool = False, use_nuclear: bool = False):
+def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int):
     """
     Process a single county and track timing for average calculation.
     Returns tuple: (county_index, result_dict, processing_time_seconds)
@@ -318,12 +303,12 @@ def process_county_with_timing(state: str, run_id: str, county: str, county_inde
         pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
         
         # Process this county
-        result = process_single_county(state, county, run_id, county_index, total_counties, hard_reset=hard_reset, use_nuclear=use_nuclear)
+        result = process_single_county(state, county, run_id, county_index, total_counties)
         
         processing_time = time.time() - start_time
         
         if not result.get('success'):
-            print(f"[{run_id}] ❌ {county}: {result.get('error', 'Unknown error')}")
+            print(f"[{run_id}] ERROR {county}: {result.get('error', 'Unknown error')}")
             pipeline_runs[run_id]["statusMessage"] = f"Warning: {county} County failed, continuing..."
         
         # Update progress after county completion
@@ -472,7 +457,7 @@ def aggregate_final_results(run_id: str, state: str):
                 )
                 print(f"[{run_id}] Step 12 complete: Enriched {len(contacts_enriched)} contacts with emails")
             except Exception as e:
-                print(f"[{run_id}] ⚠️  Email enrichment failed: {e}")
+                print(f"[{run_id}] WARNING Email enrichment failed: {e}")
                 print(f"[{run_id}]    Continuing without enriched contacts...")
                 import traceback
                 traceback.print_exc()
@@ -661,15 +646,9 @@ def run_streaming_pipeline(state: str, run_id: str):
                         return
                     
                     try:
-                        # ALWAYS do hard reset after each county to prevent process accumulation
-                        # Use nuclear option at checkpoints (every CHECKPOINT_BATCH_SIZE counties)
-                        is_checkpoint = (idx + 1) % CHECKPOINT_BATCH_SIZE == 0
-                        
-                        # Process this county with timing (always hard reset, nuclear at checkpoints)
+                        # Process this county with timing
                         county_index, result, processing_time = process_county_with_timing(
-                            state, run_id, county, idx, total_counties, 
-                            hard_reset=True,  # Always hard reset after each county
-                            use_nuclear=is_checkpoint  # Nuclear only at checkpoints
+                            state, run_id, county, idx, total_counties
                         )
                         
                         # Mark county as completed
@@ -703,9 +682,6 @@ def run_streaming_pipeline(state: str, run_id: str):
                                 
                                 print(f"[{run_id}] Checkpoint saved after {completed} counties")
                         
-                        # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                        gc.collect()
-                        
                     except Exception as e:
                         print(f"[{run_id}] County {county} generated an exception: {e}")
                         import traceback
@@ -716,13 +692,8 @@ def run_streaming_pipeline(state: str, run_id: str):
                 def process_with_tracking(idx, county):
                     """Wrapper to add thread-safe tracking for parallel processing"""
                     try:
-                        # ALWAYS do hard reset after each county to prevent process accumulation
-                        # Nuclear option is coordinated at checkpoints (every 3 counties)
-                        is_checkpoint = (idx + 1) % CHECKPOINT_BATCH_SIZE == 0
                         county_index, result, processing_time = process_county_with_timing(
-                            state, run_id, county, idx, total_counties, 
-                            hard_reset=True,  # Always hard reset after each county
-                            use_nuclear=False  # Nuclear only at coordinated checkpoints
+                            state, run_id, county, idx, total_counties
                         )
                         
                         # Thread-safe progress update
@@ -740,27 +711,8 @@ def run_streaming_pipeline(state: str, run_id: str):
                             print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
                             
                             # Save checkpoint after every N counties (batch size)
-                            # At checkpoints, coordinate a global nuclear hard reset
                             is_checkpoint = completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties
                             if is_checkpoint:
-                                # Coordinate hard reset: only first worker to reach checkpoint does nuclear cleanup
-                                with hard_reset_lock:
-                                    # Check if we're the first to reach this checkpoint
-                                    # (other workers will see completed_counties already updated)
-                                    should_do_nuclear = (completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties)
-                                    
-                                    if should_do_nuclear:
-                                        print(f"[{run_id}] 🔄 Coordinated nuclear hard reset at checkpoint ({completed} counties)...")
-                                        try:
-                                            # Nuclear cleanup: kill all Chrome processes
-                                            subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=5)
-                                            subprocess.run(['pkill', '-9', '-f', 'chrome.*headless'], capture_output=True, timeout=5)
-                                            time.sleep(2)  # Wait for processes to fully terminate
-                                            gc.collect()
-                                            print(f"[{run_id}] ✓ Nuclear hard reset complete at checkpoint")
-                                        except Exception as e:
-                                            print(f"[{run_id}] Warning: Nuclear hard reset failed: {e}")
-                                
                                 save_checkpoint(run_id, state, completed_counties, max(idx + 1, len(completed_counties)), total_counties)
                                 
                                 # Update metadata

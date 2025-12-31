@@ -121,40 +121,12 @@ class ContentCollector:
     
     def _setup_selenium(self, retry_count: int = 0, max_retries: int = 3):
         """
-        Initialize headless Chrome browser with resource limits to prevent crashes.
+        Initialize headless Chrome browser with resource limits.
         
         Args:
             retry_count: Current retry attempt (internal use)
-            max_retries: Maximum number of retry attempts with cleanup
+            max_retries: Maximum number of retry attempts
         """
-        # Pre-creation cleanup: Kill orphaned processes before attempting to create driver
-        # This is critical when previous drivers failed to cleanup properly
-        # Always do cleanup, but more aggressive on retries
-        if retry_count > 0:
-            print(f"    🔧 Pre-creation cleanup (attempt {retry_count + 1}/{max_retries + 1})...")
-            cleanup_wait = 2 + retry_count  # Longer wait on later retries
-            kill_rounds = 3  # More aggressive on retries
-        else:
-            # Light cleanup on first attempt (especially important in parallel mode)
-            cleanup_wait = 2  # Increased from 1 to ensure processes terminate
-            kill_rounds = 2  # More aggressive even on first attempt
-        
-        try:
-            # Kill chromedriver and chrome processes (more aggressive on retries)
-            for round_num in range(kill_rounds):
-                # Kill chromedriver processes
-                subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
-                # Kill chrome/chromium processes (headless)
-                subprocess.run(['pkill', '-9', '-f', 'chrome.*headless'], capture_output=True, timeout=3)
-                # Also kill chromium processes
-                subprocess.run(['pkill', '-9', '-f', 'chromium'], capture_output=True, timeout=3)
-                if round_num < kill_rounds - 1:  # Don't sleep after last round
-                    time.sleep(0.5)  # Brief pause between kill rounds
-            
-            time.sleep(cleanup_wait)  # Wait for processes to fully terminate
-            gc.collect()
-        except Exception:
-            pass  # Ignore cleanup errors
         
         chrome_options = Options()
         chrome_options.add_argument('--headless')
@@ -212,15 +184,15 @@ class ContentCollector:
             return driver
         except Exception as e:
             if retry_count < max_retries:
-                # Retry with exponential backoff and cleanup
+                # Retry with exponential backoff
                 wait_time = 2 ** retry_count  # 1s, 2s, 4s
-                print(f"    ⚠️  Failed to create Chrome driver (attempt {retry_count + 1}/{max_retries + 1}): {e}")
-                print(f"    ⏳ Retrying in {wait_time}s after cleanup...")
+                print(f"    [SELENIUM] Failed to create Chrome driver (attempt {retry_count + 1}/{max_retries + 1}): {e}")
+                print(f"    [SELENIUM] Retrying in {wait_time}s...")
                 time.sleep(wait_time)
                 return self._setup_selenium(retry_count=retry_count + 1, max_retries=max_retries)
             else:
                 # Final attempt with minimal options
-                print(f"    ⚠️  All retries exhausted, trying minimal options...")
+                print(f"    [SELENIUM] All retries exhausted, trying minimal options...")
                 try:
                     minimal_options = Options()
                     minimal_options.add_argument('--headless')
@@ -228,9 +200,10 @@ class ContentCollector:
                     minimal_options.add_argument('--disable-dev-shm-usage')
                     driver = webdriver.Chrome(options=minimal_options)
                     driver.set_page_load_timeout(15)
+                    print(f"    [SELENIUM] Driver created with minimal options")
                     return driver
                 except Exception as e2:
-                    print(f"    ❌ Error: Could not create Chrome driver even with minimal options: {e2}")
+                    print(f"    [SELENIUM] ERROR: Could not create Chrome driver even with minimal options: {e2}")
                     raise
     
     def _ensure_driver_healthy(self):
@@ -241,19 +214,7 @@ class ContentCollector:
         try:
             self.driver.execute_script("return document.readyState")
         except:
-            print("    Selenium driver crashed. Restarting...")
-            driver_service_pid = None
-            
-            # Step 1: Save service PID before quitting (for targeted cleanup)
-            try:
-                if hasattr(self.driver, 'service'):
-                    service = self.driver.service
-                    if service and hasattr(service, 'process') and service.process:
-                        driver_service_pid = service.process.pid
-            except Exception:
-                pass
-            
-            # Step 2: Try graceful quit
+            print("    [SELENIUM] Driver crashed, restarting...")
             try:
                 self.driver.quit()
             except:
@@ -261,255 +222,19 @@ class ContentCollector:
             finally:
                 self.driver = None
             
-            # Step 3: WORKER-SPECIFIC cleanup - only kill THIS driver's processes
-            # This prevents killing other workers' active drivers in parallel mode
-            try:
-                print("    🔧 Cleaning up orphaned Chrome processes before restart...")
-                
-                if driver_service_pid:
-                    # TARGETED CLEANUP: Kill only this driver's process tree
-                    try:
-                        if HAS_PSUTIL:
-                            # Use psutil to kill only this driver's process tree
-                            parent = psutil.Process(driver_service_pid)
-                            # Kill all children first
-                            for child in parent.children(recursive=True):
-                                try:
-                                    child.kill()
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-                            # Then kill the parent
-                            try:
-                                parent.kill()
-                                parent.wait(timeout=2)
-                                print(f"    ✓ Killed driver service process {driver_service_pid} and children")
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                        else:
-                            # Fallback: kill by PID directly
-                            try:
-                                os.kill(driver_service_pid, 9)
-                                print(f"    ✓ Killed driver service process {driver_service_pid}")
-                            except (ProcessLookupError, PermissionError):
-                                pass
-                    except (psutil.NoSuchProcess, ProcessLookupError, PermissionError):
-                        # PID no longer exists, driver already dead
-                        pass
-                    except Exception as e:
-                        print(f"    Warning: Targeted cleanup failed: {e}")
-                    
-                    time.sleep(1)  # Brief wait for process termination
-                else:
-                    # No PID available - use minimal cleanup (only chromedriver, not chrome processes)
-                    # This is safer in parallel mode than killing all chrome processes
-                    print("    ⚠️  No driver PID available, using minimal cleanup...")
-                    subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
-                    time.sleep(1)
-                
-                gc.collect()
-            except Exception as cleanup_error:
-                print(f"    Warning: Cleanup during driver restart failed: {cleanup_error}")
-            
-            # Step 4: Now restart the driver
+            # Restart the driver
             self.driver = self._setup_selenium()
     
-    def hard_reset_selenium(self, is_parallel: bool = False, use_nuclear: bool = False):
-        """
-        HARD RESET: Aggressively kill all Chrome/ChromeDriver processes.
-        
-        This is a nuclear option to ensure all Selenium processes are fully terminated.
-        Used after every N counties to prevent process accumulation.
-        
-        Args:
-            is_parallel: If True, we're in parallel mode (for logging).
-            use_nuclear: If True, always use nuclear option (kill all Chrome processes).
-                        This should be True at checkpoints even in parallel mode.
-        """
-        killed_processes = []
-        driver_service_pid = None
-        
-        # Step 1: Graceful quit (but save service PID first)
-        if self.driver:
-            try:
-                # Save service PID before quitting
-                if hasattr(self.driver, 'service'):
-                    service = self.driver.service
-                    if service and hasattr(service, 'process') and service.process:
-                        driver_service_pid = service.process.pid
-                
-                self.driver.quit()
-                print("    ✓ Selenium driver quit (graceful)")
-            except Exception as e:
-                print(f"    Warning: Graceful quit failed: {e}")
-            finally:
-                self.driver = None
-        
-        # Step 2: Kill driver service process (if we saved the PID)
-        if driver_service_pid:
-            try:
-                if HAS_PSUTIL:
-                    try:
-                        parent = psutil.Process(driver_service_pid)
-                        parent.kill()
-                        parent.wait(timeout=5)
-                        killed_processes.append(f"service:{driver_service_pid}")
-                        print(f"    ✓ Killed driver service process {driver_service_pid}")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                else:
-                    # Fallback: try to kill by PID directly
-                    try:
-                        os.kill(driver_service_pid, 9)
-                        killed_processes.append(f"service:{driver_service_pid}")
-                        print(f"    ✓ Killed driver service process {driver_service_pid}")
-                    except (ProcessLookupError, PermissionError):
-                        pass
-            except Exception as e:
-                print(f"    Warning: Service kill failed: {e}")
-        
-        # Step 3: Process tree kill (if psutil available and we have a PID)
-        if HAS_PSUTIL and driver_service_pid:
-            try:
-                parent = psutil.Process(driver_service_pid)
-                for child in parent.children(recursive=True):
-                    try:
-                        child.kill()
-                        killed_processes.append(f"child:{child.pid}")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                if killed_processes:
-                    child_count = len([p for p in killed_processes if 'child' in p])
-                    if child_count > 0:
-                        print(f"    ✓ Killed {child_count} child processes")
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-            except Exception as e:
-                print(f"    Warning: Process tree kill failed: {e}")
-        
-        # Step 4: Cleanup based on use_nuclear flag
-        # - If use_nuclear=True: Kill ALL Chrome/ChromeDriver processes (nuclear option)
-        # - If use_nuclear=False: Only kill THIS worker's processes (worker-specific)
-        try:
-            killed_any = False
-            if use_nuclear:
-                # NUCLEAR OPTION: Kill ALL Chrome/ChromeDriver processes aggressively
-                # Multiple rounds to ensure everything is killed
-                for round_num in range(3):  # 3 rounds of aggressive killing
-                    # Round 1: Kill chromedriver processes
-                    result1 = subprocess.run(
-                        ['pkill', '-9', 'chromedriver'],
-                        capture_output=True,
-                        timeout=5
-                    )
-                    if result1.returncode == 0:
-                        killed_any = True
-                    
-                    # Round 2: Kill chrome/chromium processes (headless)
-                    result2 = subprocess.run(
-                        ['pkill', '-9', '-f', 'chrome.*headless'],
-                        capture_output=True,
-                        timeout=5
-                    )
-                    if result2.returncode == 0:
-                        killed_any = True
-                    
-                    # Round 3: Kill chromium processes (catch-all)
-                    result3 = subprocess.run(
-                        ['pkill', '-9', '-f', 'chromium'],
-                        capture_output=True,
-                        timeout=5
-                    )
-                    if result3.returncode == 0:
-                        killed_any = True
-                    
-                    # Round 4: Kill any remaining chrome processes (not just headless)
-                    result4 = subprocess.run(
-                        ['pkill', '-9', 'chrome'],
-                        capture_output=True,
-                        timeout=5
-                    )
-                    if result4.returncode == 0:
-                        killed_any = True
-                    
-                    if round_num < 2:  # Don't sleep after last round
-                        time.sleep(0.5)  # Brief pause between rounds
-                
-                if killed_any:
-                    print("    ✓ Killed all Chrome/ChromeDriver processes (nuclear, 3 rounds)")
-            else:
-                # WORKER-SPECIFIC: Only kill THIS worker's driver processes
-                # If we have a driver service PID, we already killed it and its children above
-                # Just do a minimal cleanup to catch any orphaned chromedriver processes
-                # (but don't kill all chrome processes - that would kill other workers' drivers)
-                if driver_service_pid:
-                    # We already killed the specific driver above, just verify
-                    print("    ✓ Worker-specific cleanup complete (killed this worker's driver only)")
-                else:
-                    # No PID available - minimal cleanup (only chromedriver, not chrome processes)
-                    # This is safer in parallel mode than killing all chrome processes
-                    result = subprocess.run(
-                        ['pkill', '-9', 'chromedriver'],
-                        capture_output=True,
-                        timeout=3
-                    )
-                    if result.returncode == 0:
-                        killed_any = True
-                        print("    ✓ Killed orphaned chromedriver processes (worker-specific)")
-                    else:
-                        print("    ✓ Worker-specific cleanup complete (no orphaned processes)")
-        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
-            # pkill might not be available or might fail - that's okay
-            print(f"    Note: Cleanup had issues: {e}")
-        
-        # Step 5: Wait for processes to fully terminate (longer wait for thorough cleanup)
-        time.sleep(5)  # Increased to 5 seconds to ensure processes are fully terminated
-        
-        # Step 6: Verify processes are actually killed (only for nuclear option)
-        # In worker-specific mode, we don't want to kill other workers' processes
-        if use_nuclear:
-            try:
-                # Check if any Chrome/ChromeDriver processes still exist
-                check_result = subprocess.run(
-                    ['pgrep', '-f', 'chrome|chromedriver'],
-                    capture_output=True,
-                    timeout=2
-                )
-                if check_result.returncode == 0:
-                    # Processes still exist, kill again (nuclear mode only)
-                    print("    ⚠️  Some processes still running, killing again...")
-                    subprocess.run(['pkill', '-9', '-f', 'chrome'], capture_output=True, timeout=3)
-                    subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
-                    time.sleep(2)  # Wait again
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                pass  # pgrep might not be available, that's okay
-        
-        # Step 7: Force garbage collection (multiple times for thorough cleanup)
-        gc.collect()
-        time.sleep(1)  # Increased wait
-        gc.collect()
-        
-        # Step 8: Final wait before recreating (critical to prevent immediate failures)
-        time.sleep(3)  # Increased from 2 to 3 seconds
-        
-        # Final status message
-        if use_nuclear:
-            print(f"    ✓ Hard reset complete (nuclear, killed {len(killed_processes)} tracked processes + all Chrome/ChromeDriver)")
-        else:
-            print(f"    ✓ Hard reset complete (worker-specific, killed {len(killed_processes)} tracked processes)")
-    
     def cleanup(self):
-        """Cleanup Selenium driver resources (standard cleanup)"""
+        """Basic cleanup: quit Selenium driver if it exists"""
         if self.driver:
             try:
                 self.driver.quit()
-                print("    ✓ Selenium driver quit successfully")
+                print("    [SELENIUM] Driver quit")
             except Exception as e:
-                # Silently handle cleanup errors - don't crash if cleanup fails
-                print(f"    Warning: Error quitting Selenium driver: {e}")
+                print(f"    [SELENIUM] WARNING: Error quitting driver: {e}")
             finally:
                 self.driver = None
-        else:
-            print("    ✓ No Selenium driver to cleanup")
     
     def __del__(self):
         """Destructor - safety net to ensure driver is cleaned up"""
@@ -635,7 +360,7 @@ class ContentCollector:
             # Check timeout - skip if we've spent too much time
             elapsed = time.time() - page_start_time
             if elapsed > self.page_timeout:
-                print(f"    ⚠️  Page timeout ({elapsed:.1f}s > {self.page_timeout}s) - skipping")
+                print(f"    [TIMEOUT] Page timeout ({elapsed:.1f}s > {self.page_timeout}s) - skipping")
                 return None
             
             # OPTIMIZATION: Fast regex email extraction FIRST (no parsing)
@@ -664,13 +389,13 @@ class ContentCollector:
                 # Check for name patterns in titles as last resort
                 name_pattern = re.search(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', title_text)
                 if not name_pattern:
-                    print(f"    ⚠️  Page doesn't appear relevant (no emails, no admin titles) - skipping")
+                    print(f"    [SKIP] Page doesn't appear relevant (no emails, no admin titles) - skipping")
                     return None
             
             # Check timeout again before heavy processing
             elapsed = time.time() - page_start_time
             if elapsed > self.page_timeout:
-                print(f"    ⚠️  Page timeout ({elapsed:.1f}s > {self.page_timeout}s) - skipping")
+                print(f"    [TIMEOUT] Page timeout ({elapsed:.1f}s > {self.page_timeout}s) - skipping")
                 return None
             
             # Cache full text (expensive operation, only do once)
@@ -698,7 +423,7 @@ class ContentCollector:
                 # Check timeout before Selenium (expensive operation)
                 elapsed = time.time() - page_start_time
                 if elapsed > self.page_timeout * 0.8:  # Use 80% of timeout for Selenium
-                    print(f"    ⚠️  Skipping Selenium (approaching timeout: {elapsed:.1f}s)")
+                    print(f"    [SKIP] Skipping Selenium (approaching timeout: {elapsed:.1f}s)")
                 elif self.use_selenium:
                     if not emails or len(emails) == 0:
                         print(f"    No emails in HTML, trying Selenium (click/hover reveals)...")
@@ -722,7 +447,7 @@ class ContentCollector:
             # Final timeout check
             elapsed = time.time() - page_start_time
             if elapsed > self.page_timeout:
-                print(f"    ⚠️  Page timeout exceeded ({elapsed:.1f}s > {self.page_timeout}s) - returning partial results")
+                print(f"    [TIMEOUT] Page timeout exceeded ({elapsed:.1f}s > {self.page_timeout}s) - returning partial results")
             
             # Count emails found
             email_count = len(emails) if emails else 0

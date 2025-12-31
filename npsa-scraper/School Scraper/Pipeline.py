@@ -214,12 +214,12 @@ class StreamingPipeline:
         
         if not filtered_school:
             reason_msg = f" - {filter_reason}" if filter_reason else ""
-            print(f"  ❌ Filtered out{reason_msg}")
+            print(f"  [FILTER] Filtered out{reason_msg}")
             self.stats['schools_filtered_out'] += 1
             return []
         
         if not filtered_school.website:
-            print("  ⚠️  No website")
+            print("  [SKIP] No website")
             return []
         
         # Step 3: Discover pages
@@ -228,10 +228,10 @@ class StreamingPipeline:
             self.stats['pages_discovered'] += len(pages)
             
             if not pages:
-                print("  ⚠️  No pages found")
+                print("  [SKIP] No pages found")
                 return []
         except Exception as e:
-            print(f"  ❌ Error: {e}")
+            print(f"  [ERROR] Error: {e}")
             traceback.print_exc()
             return []
         
@@ -247,7 +247,7 @@ class StreamingPipeline:
                 continue
         
         if not page_contents:
-            print("  ⚠️  No content collected")
+            print("  [SKIP] No content collected")
             return []
         
         # Step 5: Parse content with LLM
@@ -260,9 +260,9 @@ class StreamingPipeline:
                 continue
         
         if all_contacts:
-            print(f"  ✓ {len(all_contacts)} contacts extracted")
+            print(f"  [SUCCESS] {len(all_contacts)} contacts extracted")
         else:
-            print("  ⚠️  No contacts")
+            print("  [SKIP] No contacts")
         
         self.stats['schools_processed'] += 1
         return all_contacts
@@ -401,7 +401,7 @@ class StreamingPipeline:
             
             return filtered_contacts
         except Exception as e:
-            print(f"  ❌ LLM parsing error: {e}")
+            print(f"  [ERROR] LLM parsing error: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -494,67 +494,17 @@ class StreamingPipeline:
         # Print final summary
         self._print_summary()
     
-    def cleanup(self, hard_reset: bool = False, is_parallel: bool = False, use_nuclear: bool = False):
+    def cleanup(self):
         """
-        Cleanup all pipeline resources, especially Selenium drivers.
-        
-        This is called after each county to ensure resources are fully released.
-        Periodic recycling prevents resource accumulation over long runs.
-        
-        Args:
-            hard_reset: If True, perform aggressive hard reset (kills all Chrome processes).
-                       Used after every N counties to prevent process accumulation.
-            is_parallel: If True, we're in parallel mode (for logging).
-            use_nuclear: If True, use nuclear option (kill all Chrome processes) even in parallel mode.
-                       This should be True at checkpoints when all workers sync up.
+        Basic cleanup: quit Selenium driver if it exists.
         """
         try:
-            # Cleanup ContentCollector's Selenium driver
             if hasattr(self, 'content_collector') and self.content_collector:
-                if hard_reset and self.content_collector.use_selenium:
-                    # HARD RESET: Aggressively kill all Chrome processes
-                    print("    🔄 Performing hard reset of Selenium processes...")
-                    self.content_collector.hard_reset_selenium(is_parallel=is_parallel, use_nuclear=use_nuclear)
-                else:
-                    # Standard cleanup
-                    self.content_collector.cleanup()
-                
-                # PERIODIC DRIVER RECYCLING: Recreate driver after cleanup
-                # This ensures a fresh driver for the next county
-                # Add delay after hard reset to ensure processes are fully terminated
-                if hard_reset:
-                    time.sleep(3)  # Extra delay after aggressive cleanup (hard reset already waits 5s + 3s)
-                
-                if self.content_collector.use_selenium:
-                    try:
-                        self.content_collector.driver = self.content_collector._setup_selenium()
-                        if hard_reset:
-                            nuclear_status = " (nuclear)" if use_nuclear else ""
-                            print(f"    ✓ Pipeline hard reset and driver recycling successful{nuclear_status}")
-                        else:
-                            print("    ✓ Pipeline cleanup and driver recycling successful")
-                    except Exception as recycle_error:
-                        print(f"    Warning: Driver recycling failed: {recycle_error}")
-                        if hard_reset:
-                            nuclear_status = " (nuclear)" if use_nuclear else ""
-                            print(f"    ✓ Pipeline hard reset successful (driver recycling skipped){nuclear_status}")
-                        else:
-                            print("    ✓ Pipeline cleanup successful (driver recycling skipped)")
-                else:
-                    if hard_reset:
-                        nuclear_status = " (nuclear)" if use_nuclear else ""
-                        print(f"    ✓ Pipeline hard reset successful{nuclear_status}")
-                    else:
-                        print("    ✓ Pipeline cleanup successful")
-            else:
-                if hard_reset:
-                    nuclear_status = " (nuclear)" if use_nuclear else ""
-                    print(f"    ✓ Pipeline hard reset successful (no content collector){nuclear_status}")
-                else:
-                    print("    ✓ Pipeline cleanup successful (no content collector)")
-        except Exception as e:
-            # Silently handle cleanup errors - don't crash if cleanup fails
-            print(f"    Warning: Error during pipeline cleanup: {e}")
+                if self.content_collector.driver:
+                    self.content_collector.driver.quit()
+                    self.content_collector.driver = None
+        except Exception:
+            pass  # Ignore cleanup errors
     
     def __del__(self):
         """Destructor - safety net to ensure resources are cleaned up"""
@@ -579,12 +529,12 @@ class StreamingPipeline:
             for contact in contacts:
                 writer.writerow(contact.to_dict())
         
-        print(f"✓ Saved {len(contacts)} contacts to {filename}")
+        print(f"[SAVE] Saved {len(contacts)} contacts to {filename}")
     
     
     def _print_summary(self):
         """Print final pipeline summary"""
-        print(f"\n✓ Pipeline complete: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"\n[COMPLETE] Pipeline complete: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"  Schools: {self.stats['schools_discovered']} discovered, {self.stats['schools_processed']} processed")
         if self.stats['contacts_extracted'] > 0:
             print(f"  Contacts: {self.stats['unique_contacts']} unique ({self.stats['contacts_with_emails']} with emails)")
