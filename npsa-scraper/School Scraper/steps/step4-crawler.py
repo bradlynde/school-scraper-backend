@@ -242,6 +242,18 @@ class ContentCollector:
             self.driver.execute_script("return document.readyState")
         except:
             print("    Selenium driver crashed. Restarting...")
+            driver_service_pid = None
+            
+            # Step 1: Save service PID before quitting (for targeted cleanup)
+            try:
+                if hasattr(self.driver, 'service'):
+                    service = self.driver.service
+                    if service and hasattr(service, 'process') and service.process:
+                        driver_service_pid = service.process.pid
+            except Exception:
+                pass
+            
+            # Step 2: Try graceful quit
             try:
                 self.driver.quit()
             except:
@@ -249,20 +261,56 @@ class ContentCollector:
             finally:
                 self.driver = None
             
-            # CRITICAL: Clean up orphaned processes before restarting
-            # This prevents hitting process limits when drivers crash mid-county
+            # Step 3: WORKER-SPECIFIC cleanup - only kill THIS driver's processes
+            # This prevents killing other workers' active drivers in parallel mode
             try:
                 print("    🔧 Cleaning up orphaned Chrome processes before restart...")
-                # Kill any orphaned Chrome/ChromeDriver processes
-                subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
-                subprocess.run(['pkill', '-9', '-f', 'chrome.*headless'], capture_output=True, timeout=3)
-                subprocess.run(['pkill', '-9', '-f', 'chromium'], capture_output=True, timeout=3)
-                time.sleep(2)  # Wait for processes to terminate
+                
+                if driver_service_pid:
+                    # TARGETED CLEANUP: Kill only this driver's process tree
+                    try:
+                        if HAS_PSUTIL:
+                            # Use psutil to kill only this driver's process tree
+                            parent = psutil.Process(driver_service_pid)
+                            # Kill all children first
+                            for child in parent.children(recursive=True):
+                                try:
+                                    child.kill()
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                            # Then kill the parent
+                            try:
+                                parent.kill()
+                                parent.wait(timeout=2)
+                                print(f"    ✓ Killed driver service process {driver_service_pid} and children")
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                        else:
+                            # Fallback: kill by PID directly
+                            try:
+                                os.kill(driver_service_pid, 9)
+                                print(f"    ✓ Killed driver service process {driver_service_pid}")
+                            except (ProcessLookupError, PermissionError):
+                                pass
+                    except (psutil.NoSuchProcess, ProcessLookupError, PermissionError):
+                        # PID no longer exists, driver already dead
+                        pass
+                    except Exception as e:
+                        print(f"    Warning: Targeted cleanup failed: {e}")
+                    
+                    time.sleep(1)  # Brief wait for process termination
+                else:
+                    # No PID available - use minimal cleanup (only chromedriver, not chrome processes)
+                    # This is safer in parallel mode than killing all chrome processes
+                    print("    ⚠️  No driver PID available, using minimal cleanup...")
+                    subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
+                    time.sleep(1)
+                
                 gc.collect()
             except Exception as cleanup_error:
                 print(f"    Warning: Cleanup during driver restart failed: {cleanup_error}")
             
-            # Now restart the driver
+            # Step 4: Now restart the driver
             self.driver = self._setup_selenium()
     
     def hard_reset_selenium(self, is_parallel: bool = False, use_nuclear: bool = False):
