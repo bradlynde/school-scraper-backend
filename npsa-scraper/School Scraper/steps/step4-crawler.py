@@ -246,6 +246,23 @@ class ContentCollector:
                 self.driver.quit()
             except:
                 pass
+            finally:
+                self.driver = None
+            
+            # CRITICAL: Clean up orphaned processes before restarting
+            # This prevents hitting process limits when drivers crash mid-county
+            try:
+                print("    🔧 Cleaning up orphaned Chrome processes before restart...")
+                # Kill any orphaned Chrome/ChromeDriver processes
+                subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
+                subprocess.run(['pkill', '-9', '-f', 'chrome.*headless'], capture_output=True, timeout=3)
+                subprocess.run(['pkill', '-9', '-f', 'chromium'], capture_output=True, timeout=3)
+                time.sleep(2)  # Wait for processes to terminate
+                gc.collect()
+            except Exception as cleanup_error:
+                print(f"    Warning: Cleanup during driver restart failed: {cleanup_error}")
+            
+            # Now restart the driver
             self.driver = self._setup_selenium()
     
     def hard_reset_selenium(self, is_parallel: bool = False, use_nuclear: bool = False):
