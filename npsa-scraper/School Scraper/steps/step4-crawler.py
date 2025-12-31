@@ -119,8 +119,28 @@ class ContentCollector:
         
         return emails
     
-    def _setup_selenium(self):
-        """Initialize headless Chrome browser with resource limits to prevent crashes"""
+    def _setup_selenium(self, retry_count: int = 0, max_retries: int = 3):
+        """
+        Initialize headless Chrome browser with resource limits to prevent crashes.
+        
+        Args:
+            retry_count: Current retry attempt (internal use)
+            max_retries: Maximum number of retry attempts with cleanup
+        """
+        # Pre-creation cleanup: Kill orphaned processes before attempting to create driver
+        # This is critical when previous drivers failed to cleanup properly
+        if retry_count > 0:
+            print(f"    🔧 Pre-creation cleanup (attempt {retry_count + 1}/{max_retries + 1})...")
+            try:
+                # Kill chromedriver processes
+                subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
+                # Kill chrome/chromium processes (headless)
+                subprocess.run(['pkill', '-9', '-f', 'chrome.*headless'], capture_output=True, timeout=3)
+                time.sleep(2)  # Wait for processes to fully terminate
+                gc.collect()
+            except Exception:
+                pass  # Ignore cleanup errors
+        
         chrome_options = Options()
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
@@ -176,19 +196,27 @@ class ContentCollector:
             driver.implicitly_wait(2)  # Reduce implicit wait time
             return driver
         except Exception as e:
-            print(f"    Warning: Failed to create Chrome driver: {e}")
-            # Retry once with minimal options
-            try:
-                minimal_options = Options()
-                minimal_options.add_argument('--headless')
-                minimal_options.add_argument('--no-sandbox')
-                minimal_options.add_argument('--disable-dev-shm-usage')
-                driver = webdriver.Chrome(options=minimal_options)
-                driver.set_page_load_timeout(15)
-                return driver
-            except Exception as e2:
-                print(f"    Error: Could not create Chrome driver even with minimal options: {e2}")
-                raise
+            if retry_count < max_retries:
+                # Retry with exponential backoff and cleanup
+                wait_time = 2 ** retry_count  # 1s, 2s, 4s
+                print(f"    ⚠️  Failed to create Chrome driver (attempt {retry_count + 1}/{max_retries + 1}): {e}")
+                print(f"    ⏳ Retrying in {wait_time}s after cleanup...")
+                time.sleep(wait_time)
+                return self._setup_selenium(retry_count=retry_count + 1, max_retries=max_retries)
+            else:
+                # Final attempt with minimal options
+                print(f"    ⚠️  All retries exhausted, trying minimal options...")
+                try:
+                    minimal_options = Options()
+                    minimal_options.add_argument('--headless')
+                    minimal_options.add_argument('--no-sandbox')
+                    minimal_options.add_argument('--disable-dev-shm-usage')
+                    driver = webdriver.Chrome(options=minimal_options)
+                    driver.set_page_load_timeout(15)
+                    return driver
+                except Exception as e2:
+                    print(f"    ❌ Error: Could not create Chrome driver even with minimal options: {e2}")
+                    raise
     
     def _ensure_driver_healthy(self):
         """Check and restart Selenium driver if needed"""
@@ -205,16 +233,17 @@ class ContentCollector:
                 pass
             self.driver = self._setup_selenium()
     
-    def hard_reset_selenium(self, is_parallel: bool = False):
+    def hard_reset_selenium(self, is_parallel: bool = False, use_nuclear: bool = False):
         """
         HARD RESET: Aggressively kill all Chrome/ChromeDriver processes.
         
         This is a nuclear option to ensure all Selenium processes are fully terminated.
-        Used after every 2 counties to prevent process accumulation.
+        Used after every N counties to prevent process accumulation.
         
         Args:
-            is_parallel: If True, only kills processes for this worker (parallel-safe).
-                        If False, kills all Chrome processes (nuclear option).
+            is_parallel: If True, we're in parallel mode (for logging).
+            use_nuclear: If True, always use nuclear option (kill all Chrome processes).
+                        This should be True at checkpoints even in parallel mode.
         """
         killed_processes = []
         driver_service_pid = None
@@ -277,8 +306,9 @@ class ContentCollector:
             except Exception as e:
                 print(f"    Warning: Process tree kill failed: {e}")
         
-        # Step 4: Nuclear option - kill all Chrome processes (only if not parallel)
-        if not is_parallel:
+        # Step 4: Nuclear option - kill all Chrome processes
+        # Use nuclear option if explicitly requested OR if not in parallel mode
+        if use_nuclear or not is_parallel:
             try:
                 # Kill chromedriver processes
                 result = subprocess.run(
@@ -287,7 +317,7 @@ class ContentCollector:
                     timeout=5
                 )
                 if result.returncode == 0:
-                    print("    ✓ Killed all chromedriver processes")
+                    print("    ✓ Killed all chromedriver processes (nuclear)")
                 
                 # Kill chrome/chromium processes (headless)
                 result = subprocess.run(
@@ -296,7 +326,7 @@ class ContentCollector:
                     timeout=5
                 )
                 if result.returncode == 0:
-                    print("    ✓ Killed all headless Chrome processes")
+                    print("    ✓ Killed all headless Chrome processes (nuclear)")
             except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
                 # pkill might not be available or might fail - that's okay
                 print(f"    Note: Nuclear cleanup skipped: {e}")
@@ -310,7 +340,8 @@ class ContentCollector:
         # Step 7: Wait before recreating
         time.sleep(2)
         
-        print(f"    ✓ Hard reset complete (killed {len(killed_processes)} tracked processes)")
+        nuclear_status = " (nuclear)" if (use_nuclear or not is_parallel) else ""
+        print(f"    ✓ Hard reset complete{nuclear_status} (killed {len(killed_processes)} tracked processes)")
     
     def cleanup(self):
         """Cleanup Selenium driver resources (standard cleanup)"""

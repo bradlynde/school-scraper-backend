@@ -494,7 +494,7 @@ class StreamingPipeline:
         # Print final summary
         self._print_summary()
     
-    def cleanup(self, hard_reset: bool = False, is_parallel: bool = False):
+    def cleanup(self, hard_reset: bool = False, is_parallel: bool = False, use_nuclear: bool = False):
         """
         Cleanup all pipeline resources, especially Selenium drivers.
         
@@ -503,8 +503,10 @@ class StreamingPipeline:
         
         Args:
             hard_reset: If True, perform aggressive hard reset (kills all Chrome processes).
-                       Used after every 2 counties to prevent process accumulation.
-            is_parallel: If True, hard reset is parallel-safe (only kills worker-specific processes).
+                       Used after every N counties to prevent process accumulation.
+            is_parallel: If True, we're in parallel mode (for logging).
+            use_nuclear: If True, use nuclear option (kill all Chrome processes) even in parallel mode.
+                       This should be True at checkpoints when all workers sync up.
         """
         try:
             # Cleanup ContentCollector's Selenium driver
@@ -512,7 +514,7 @@ class StreamingPipeline:
                 if hard_reset and self.content_collector.use_selenium:
                     # HARD RESET: Aggressively kill all Chrome processes
                     print("    🔄 Performing hard reset of Selenium processes...")
-                    self.content_collector.hard_reset_selenium(is_parallel=is_parallel)
+                    self.content_collector.hard_reset_selenium(is_parallel=is_parallel, use_nuclear=use_nuclear)
                 else:
                     # Standard cleanup
                     self.content_collector.cleanup()
@@ -523,23 +525,27 @@ class StreamingPipeline:
                     try:
                         self.content_collector.driver = self.content_collector._setup_selenium()
                         if hard_reset:
-                            print("    ✓ Pipeline hard reset and driver recycling successful")
+                            nuclear_status = " (nuclear)" if use_nuclear else ""
+                            print(f"    ✓ Pipeline hard reset and driver recycling successful{nuclear_status}")
                         else:
                             print("    ✓ Pipeline cleanup and driver recycling successful")
                     except Exception as recycle_error:
                         print(f"    Warning: Driver recycling failed: {recycle_error}")
                         if hard_reset:
-                            print("    ✓ Pipeline hard reset successful (driver recycling skipped)")
+                            nuclear_status = " (nuclear)" if use_nuclear else ""
+                            print(f"    ✓ Pipeline hard reset successful (driver recycling skipped){nuclear_status}")
                         else:
                             print("    ✓ Pipeline cleanup successful (driver recycling skipped)")
                 else:
                     if hard_reset:
-                        print("    ✓ Pipeline hard reset successful")
+                        nuclear_status = " (nuclear)" if use_nuclear else ""
+                        print(f"    ✓ Pipeline hard reset successful{nuclear_status}")
                     else:
                         print("    ✓ Pipeline cleanup successful")
             else:
                 if hard_reset:
-                    print("    ✓ Pipeline hard reset successful (no content collector)")
+                    nuclear_status = " (nuclear)" if use_nuclear else ""
+                    print(f"    ✓ Pipeline hard reset successful (no content collector){nuclear_status}")
                 else:
                     print("    ✓ Pipeline cleanup successful (no content collector)")
         except Exception as e:
