@@ -74,12 +74,12 @@ CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Batch size for checkpointing (save checkpoint every N counties)
-# Default to 2 for better recovery with parallel workers
-CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "2"))
+# Default to 3 for better recovery with parallel workers
+CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "3"))
 
 # Number of parallel workers for processing counties
-# Default to 2 for 50% time reduction while maintaining stability
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "2"))
+# Default to 3 for faster processing while maintaining stability
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "3"))
 
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()
