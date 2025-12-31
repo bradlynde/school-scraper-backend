@@ -488,6 +488,7 @@ export default function Home() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
               });
+              const data = await response.json().catch(() => ({ error: 'Unknown error' }));
               if (response.ok) {
                 // If this was the selected run, clear it
                 if (selectedRunId === runId) {
@@ -504,12 +505,11 @@ export default function Home() {
                   window.location.reload();
                 }, 500);
               } else {
-                const data = await response.json();
                 alert(`Failed to stop run: ${data.error || 'Unknown error'}`);
               }
             } catch (error) {
               console.error("Error stopping run:", error);
-              alert("Failed to stop run");
+              alert(`Failed to stop run: ${error instanceof Error ? error.message : 'Network error'}`);
             }
           }}
           onRunDelete={async (runId) => {
@@ -520,6 +520,7 @@ export default function Home() {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' }
               });
+              const data = await response.json().catch(() => ({ error: 'Unknown error' }));
               if (response.ok) {
                 // If this was the selected run, clear it
                 if (selectedRunId === runId) {
@@ -531,12 +532,11 @@ export default function Home() {
                   window.location.reload();
                 }, 500);
               } else {
-                const data = await response.json();
                 alert(`Failed to delete run: ${data.error || 'Unknown error'}`);
               }
             } catch (error) {
               console.error("Error deleting run:", error);
-              alert("Failed to delete run");
+              alert(`Failed to delete run: ${error instanceof Error ? error.message : 'Network error'}`);
             }
           }}
           onRunSelect={async (runId) => {

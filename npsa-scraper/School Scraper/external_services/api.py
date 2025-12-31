@@ -1033,30 +1033,32 @@ def stop_run(run_id: str):
         return response, 200
     
     try:
-        # Check if run exists
-        if run_id not in pipeline_runs:
+        # Check metadata first (persistent storage)
+        metadata = load_run_metadata(run_id)
+        if not metadata:
             return jsonify({
                 "status": "error",
                 "error": "Run not found"
             }), 404
         
         # Check if run is actually running
-        if pipeline_runs[run_id].get("status") != "running":
+        current_status = metadata.get("status", pipeline_runs.get(run_id, {}).get("status", "unknown"))
+        if current_status != "running":
             return jsonify({
                 "status": "error",
-                "error": f"Run is not running (current status: {pipeline_runs[run_id].get('status')})"
+                "error": f"Run is not running (current status: {current_status})"
             }), 400
         
         # Set cancellation flag
         if run_id in running_threads:
             running_threads[run_id]['cancelled'] = True
         
-        # Update status
-        pipeline_runs[run_id]["status"] = "cancelled"
-        pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+        # Update in-memory status if present
+        if run_id in pipeline_runs:
+            pipeline_runs[run_id]["status"] = "cancelled"
+            pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
         
         # Update metadata
-        metadata = load_run_metadata(run_id) or {}
         metadata.update({
             "status": "cancelled",
             "cancelled_at": datetime.now().isoformat()
