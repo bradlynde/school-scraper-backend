@@ -372,15 +372,32 @@ class ContentCollector:
             print(f"    Note: Nuclear cleanup had issues: {e}")
         
         # Step 5: Wait for processes to fully terminate (longer wait for thorough cleanup)
-        time.sleep(4)  # Increased from 3 to 4 seconds
+        time.sleep(5)  # Increased to 5 seconds to ensure processes are fully terminated
         
-        # Step 6: Force garbage collection (multiple times for thorough cleanup)
+        # Step 6: Verify processes are actually killed (check with ps if available)
+        try:
+            # Check if any Chrome/ChromeDriver processes still exist
+            check_result = subprocess.run(
+                ['pgrep', '-f', 'chrome|chromedriver'],
+                capture_output=True,
+                timeout=2
+            )
+            if check_result.returncode == 0:
+                # Processes still exist, kill again
+                print("    ⚠️  Some processes still running, killing again...")
+                subprocess.run(['pkill', '-9', '-f', 'chrome'], capture_output=True, timeout=3)
+                subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
+                time.sleep(2)  # Wait again
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass  # pgrep might not be available, that's okay
+        
+        # Step 7: Force garbage collection (multiple times for thorough cleanup)
         gc.collect()
-        time.sleep(0.5)
+        time.sleep(1)  # Increased wait
         gc.collect()
         
-        # Step 7: Final wait before recreating
-        time.sleep(2)
+        # Step 8: Final wait before recreating (critical to prevent immediate failures)
+        time.sleep(3)  # Increased from 2 to 3 seconds
         
         print(f"    ✓ Hard reset complete (nuclear, killed {len(killed_processes)} tracked processes + all Chrome/ChromeDriver)")
     

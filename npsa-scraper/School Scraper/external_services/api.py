@@ -78,8 +78,9 @@ METADATA_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "3"))
 
 # Number of parallel workers for processing counties
-# Default to 3 for faster processing while maintaining stability
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "3"))
+# Reduced to 2 to prevent hitting Railway process limits (ulimit -u)
+# With 3 workers + Chrome processes, we were hitting ~500 process limit
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "2"))
 
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()

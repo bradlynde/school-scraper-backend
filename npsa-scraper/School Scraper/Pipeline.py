@@ -521,6 +521,10 @@ class StreamingPipeline:
                 
                 # PERIODIC DRIVER RECYCLING: Recreate driver after cleanup
                 # This ensures a fresh driver for the next county
+                # Add delay after hard reset to ensure processes are fully terminated
+                if hard_reset:
+                    time.sleep(3)  # Extra delay after aggressive cleanup (hard reset already waits 5s + 3s)
+                
                 if self.content_collector.use_selenium:
                     try:
                         self.content_collector.driver = self.content_collector._setup_selenium()
