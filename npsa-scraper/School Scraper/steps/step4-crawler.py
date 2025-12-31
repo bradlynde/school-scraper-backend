@@ -129,17 +129,28 @@ class ContentCollector:
         """
         # Pre-creation cleanup: Kill orphaned processes before attempting to create driver
         # This is critical when previous drivers failed to cleanup properly
+        # Always do cleanup, but more aggressive on retries
         if retry_count > 0:
             print(f"    🔧 Pre-creation cleanup (attempt {retry_count + 1}/{max_retries + 1})...")
-            try:
-                # Kill chromedriver processes
+            cleanup_wait = 2 + retry_count  # Longer wait on later retries
+        else:
+            # Light cleanup on first attempt (especially important in parallel mode)
+            cleanup_wait = 1
+        
+        try:
+            # Kill chromedriver processes (more aggressive on retries)
+            for _ in range(2 if retry_count > 0 else 1):
                 subprocess.run(['pkill', '-9', 'chromedriver'], capture_output=True, timeout=3)
-                # Kill chrome/chromium processes (headless)
                 subprocess.run(['pkill', '-9', '-f', 'chrome.*headless'], capture_output=True, timeout=3)
-                time.sleep(2)  # Wait for processes to fully terminate
-                gc.collect()
-            except Exception:
-                pass  # Ignore cleanup errors
+                if retry_count > 0:
+                    # Also try to kill any chrome processes (not just headless)
+                    subprocess.run(['pkill', '-9', '-f', 'chromium'], capture_output=True, timeout=3)
+                time.sleep(0.5)  # Brief pause between kill attempts
+            
+            time.sleep(cleanup_wait)  # Wait for processes to fully terminate
+            gc.collect()
+        except Exception:
+            pass  # Ignore cleanup errors
         
         chrome_options = Options()
         chrome_options.add_argument('--headless')
