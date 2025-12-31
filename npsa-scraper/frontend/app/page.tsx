@@ -480,65 +480,6 @@ export default function Home() {
               setSelectedRunId(null);
             }
           }}
-          onRunStop={async (runId) => {
-            setSidebarOpen(false);
-            const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
-            try {
-              const response = await fetch(`${apiUrl}/runs/${runId}/stop`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-              });
-              const data = await response.json().catch(() => ({ error: 'Unknown error' }));
-              if (response.ok) {
-                // If this was the selected run, clear it
-                if (selectedRunId === runId) {
-                  setSelectedRunId(null);
-                  setViewState("start");
-                  setIsRunning(false);
-                  if (pollingInterval) {
-                    clearInterval(pollingInterval);
-                    setPollingInterval(null);
-                  }
-                }
-                // Refresh runs list after a short delay
-                setTimeout(() => {
-                  window.location.reload();
-                }, 500);
-              } else {
-                alert(`Failed to stop run: ${data.error || 'Unknown error'}`);
-              }
-            } catch (error) {
-              console.error("Error stopping run:", error);
-              alert(`Failed to stop run: ${error instanceof Error ? error.message : 'Network error'}`);
-            }
-          }}
-          onRunDelete={async (runId) => {
-            setSidebarOpen(false);
-            const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
-            try {
-              const response = await fetch(`${apiUrl}/runs/${runId}/delete`, {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' }
-              });
-              const data = await response.json().catch(() => ({ error: 'Unknown error' }));
-              if (response.ok) {
-                // If this was the selected run, clear it
-                if (selectedRunId === runId) {
-                  setSelectedRunId(null);
-                  setViewState("start");
-                }
-                // Refresh runs list after a short delay
-                setTimeout(() => {
-                  window.location.reload();
-                }, 500);
-              } else {
-                alert(`Failed to delete run: ${data.error || 'Unknown error'}`);
-              }
-            } catch (error) {
-              console.error("Error deleting run:", error);
-              alert(`Failed to delete run: ${error instanceof Error ? error.message : 'Network error'}`);
-            }
-          }}
           onRunSelect={async (runId) => {
             setSelectedRunId(runId);
             setSidebarOpen(false); // Close mobile menu on run select

@@ -20,11 +20,9 @@ type SidebarProps = {
   activeTab: 'school' | 'church' | 'running' | 'finished';
   onTabChange: (tab: 'school' | 'church' | 'running' | 'finished') => void;
   onRunSelect?: (runId: string) => void;
-  onRunStop?: (runId: string) => Promise<void>;
-  onRunDelete?: (runId: string) => Promise<void>;
 };
 
-const Sidebar = ({ activeTab, onTabChange, onRunSelect, onRunStop, onRunDelete }: SidebarProps) => {
+const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
   const [runs, setRuns] = useState<RunMetadata[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -269,45 +267,17 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onRunStop, onRunDelete }
                           </div>
                         )}
                         
-                        <div className="mt-2 flex gap-2">
-                          {run.status === "running" && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (window.confirm(`Stop the run for ${run.state?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'this state'}?`)) {
-                                  onRunStop?.(run.run_id);
-                                }
-                              }}
-                              className="flex-1 text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
-                            >
-                              Stop
-                            </button>
-                          )}
-                          {run.status === "completed" && run.csv_filename && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                downloadCSV(run.run_id, run.csv_filename);
-                              }}
-                              className="flex-1 text-xs px-2 py-1 bg-[#1e3a5f] text-white rounded hover:bg-[#2a4f7a] transition-colors"
-                            >
-                              Download CSV
-                            </button>
-                          )}
-                          {(run.status === "completed" || run.status === "error" || run.status === "cancelled") && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (window.confirm(`Delete the run for ${run.state?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'this state'}? This cannot be undone.`)) {
-                                  onRunDelete?.(run.run_id);
-                                }
-                              }}
-                              className="flex-1 text-xs px-2 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
+                        {run.status === "completed" && run.csv_filename && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              downloadCSV(run.run_id, run.csv_filename);
+                            }}
+                            className="mt-2 w-full text-xs px-2 py-1 bg-[#1e3a5f] text-white rounded hover:bg-[#2a4f7a] transition-colors"
+                          >
+                            Download CSV
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
