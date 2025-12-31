@@ -552,7 +552,7 @@ export default function Home() {
                     schoolsProcessed: runMetadata.schools_processed || 0,
                     countyContacts: [],
                     countySchools: [],
-                    csvData: null,
+                    csvData: undefined,
                     csvFilename: runMetadata.csv_filename,
                   };
                   
