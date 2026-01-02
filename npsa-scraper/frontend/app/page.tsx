@@ -207,7 +207,7 @@ export default function Home() {
         } else if (selectedRunId === runId) {
           setViewState("summary");
         } else {
-          setViewState("summary");
+        setViewState("summary");
         }
       } else if (data.status === "error") {
         if (pollingInterval) {
