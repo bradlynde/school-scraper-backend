@@ -20,6 +20,15 @@ import requests
 import sys
 import gc  # For explicit garbage collection
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import resource  # For memory monitoring
+import logging  # For logging
+
+# Try to import psutil for process tree killing (optional)
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 # Add parent directory to path to import Pipeline
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -84,6 +93,33 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
+
+
+def check_health():
+    """Health check function to monitor Chrome processes"""
+    try:
+        if HAS_PSUTIL:
+            chrome_processes = [p for p in psutil.process_iter(['name']) 
+                               if 'chrome' in p.info['name'].lower()]
+            if len(chrome_processes) > 5:
+                print(f"[HEALTH] Found {len(chrome_processes)} Chrome processes, killing orphaned processes...")
+                os.system("pkill -9 chrome || true")
+                return False
+        return True
+    except Exception as e:
+        print(f"[HEALTH] Error in health check: {e}")
+        return True  # Don't fail on health check errors
+
+
+def log_resource_usage():
+    """Log resource usage for monitoring"""
+    try:
+        rusage = resource.getrusage(resource.RUSAGE_SELF)
+        memory_mb = rusage.ru_maxrss / 1024  # Convert KB to MB (on Linux)
+        logging.info(f"Memory: {memory_mb:.1f}MB")
+        print(f"[RESOURCE] Memory: {memory_mb:.1f}MB")
+    except Exception as e:
+        print(f"[RESOURCE] Error logging resource usage: {e}")
 
 
 def save_checkpoint(run_id: str, state: str, completed_counties: list, next_county_index: int, total_counties: int):
@@ -279,13 +315,18 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         return {'success': False, 'error': error_msg}
     finally:
         # Basic cleanup: just quit the driver if it exists
-        if pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
-            try:
+        driver = None
+        try:
+            if pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
                 if pipeline.content_collector.driver:
-                    pipeline.content_collector.driver.quit()
+                    driver = pipeline.content_collector.driver
                     pipeline.content_collector.driver = None
-            except Exception:
-                pass  # Ignore cleanup errors
+                    driver.quit()
+        except Exception:
+            pass  # Don't let cleanup fail
+        finally:
+            # Nuclear option - kill any orphaned Chrome
+            os.system("pkill -9 chrome || true")
 
 
 def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int):
@@ -315,6 +356,10 @@ def process_county_with_timing(state: str, run_id: str, county: str, county_inde
         pipeline_runs[run_id]["countiesProcessed"] = pipeline_runs[run_id].get("countiesProcessed", 0) + 1
         pipeline_runs[run_id]["schoolsFound"] = pipeline_runs[run_id].get("schoolsFound", 0) + result.get('schools', 0)
         pipeline_runs[run_id]["schoolsProcessed"] = pipeline_runs[run_id].get("schoolsProcessed", 0) + result.get('schools', 0)
+        
+        # Periodic health check and resource monitoring (every county)
+        check_health()
+        log_resource_usage()
         
         # Track county timing for average calculation
         if "countyTimes" not in pipeline_runs[run_id]:
@@ -647,25 +692,25 @@ def run_streaming_pipeline(state: str, run_id: str):
                     
                     try:
                         # Process this county with timing
-                        county_index, result, processing_time = process_county_with_timing(
-                            state, run_id, county, idx, total_counties
-                        )
+                    county_index, result, processing_time = process_county_with_timing(
+                        state, run_id, county, idx, total_counties
+                    )
                         
                         # Mark county as completed
                         with checkpoint_lock:
                             if county not in completed_counties:
                                 completed_counties.append(county)
-                            
-                            # Update progress
+                    
+                    # Update progress
                             completed = len(completed_counties)
-                            progress_pct = int((completed / total_counties) * 100)
+                    progress_pct = int((completed / total_counties) * 100)
                             
                             with progress_lock:
-                                pipeline_runs[run_id]["progress"] = progress_pct
-                                pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
-                            
-                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                            
+                    pipeline_runs[run_id]["progress"] = progress_pct
+                    pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
+                    
+                    print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                    
                             # Save checkpoint after every N counties (batch size)
                             if completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties:
                                 save_checkpoint(run_id, state, completed_counties, idx + 1, total_counties)
@@ -729,12 +774,12 @@ def run_streaming_pipeline(state: str, run_id: str):
                         
                         # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
                         gc.collect()
-                        
+                    
                         return (county_index, result, processing_time)
-                    except Exception as e:
-                        print(f"[{run_id}] County {county} generated an exception: {e}")
-                        import traceback
-                        traceback.print_exc()
+                except Exception as e:
+                    print(f"[{run_id}] County {county} generated an exception: {e}")
+                    import traceback
+                    traceback.print_exc()
                         return (idx, {'success': False, 'error': str(e)}, 0)
                 
                 # Process with ThreadPoolExecutor
@@ -794,9 +839,9 @@ def run_streaming_pipeline(state: str, run_id: str):
             error_msg = str(e)[:500]  # Limit error message length
             pipeline_runs[run_id]["status"] = "error"
             pipeline_runs[run_id]["error"] = error_msg
-            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
-            import traceback
-            traceback.print_exc()
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+        import traceback
+        traceback.print_exc()
     
     # Start processing in a background thread
     thread = threading.Thread(target=process_all_counties)
@@ -1203,7 +1248,7 @@ if __name__ == "__main__":
         sys.executable, "-m", "waitress",
         "--host=0.0.0.0",
         f"--port={port}",
-        "--threads=1",
+        "--threads=4",
         "--channel-timeout=300",
         "external_services.api:app"
     ])

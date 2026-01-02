@@ -17,6 +17,7 @@ import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -177,10 +178,15 @@ class ContentCollector:
         }
         chrome_options.add_experimental_option('prefs', prefs)
         
+        driver = None
         try:
-            driver = webdriver.Chrome(options=chrome_options)
-            driver.set_page_load_timeout(15)  # 15 second timeout
-            driver.implicitly_wait(2)  # Reduce implicit wait time
+            # Use explicit ChromeDriver path to bypass Selenium Manager network issues
+            service = Service(executable_path=os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            driver.set_page_load_timeout(30)  # 30 second timeout (increased from 15)
+            driver.set_script_timeout(30)  # Script timeout (NEW)
+            # Remove implicit wait, use explicit waits instead
+            # driver.implicitly_wait(2)  # Removed - use explicit waits
             return driver
         except Exception as e:
             if retry_count < max_retries:
@@ -198,8 +204,11 @@ class ContentCollector:
                     minimal_options.add_argument('--headless')
                     minimal_options.add_argument('--no-sandbox')
                     minimal_options.add_argument('--disable-dev-shm-usage')
-                    driver = webdriver.Chrome(options=minimal_options)
-                    driver.set_page_load_timeout(15)
+                    # Use explicit ChromeDriver path to bypass Selenium Manager
+                    service = Service(executable_path=os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
+                    driver = webdriver.Chrome(service=service, options=minimal_options)
+                    driver.set_page_load_timeout(30)
+                    driver.set_script_timeout(30)
                     print(f"    [SELENIUM] Driver created with minimal options")
                     return driver
                 except Exception as e2:
@@ -215,11 +224,15 @@ class ContentCollector:
             self.driver.execute_script("return document.readyState")
         except:
             print("    [SELENIUM] Driver crashed, restarting...")
+            driver = None
             try:
-                self.driver.quit()
+                if self.driver:
+                    self.driver.quit()
             except:
-                pass
+                pass  # Don't let cleanup fail
             finally:
+                # Nuclear option - kill any orphaned Chrome
+                os.system("pkill -9 chrome || true")
                 self.driver = None
             
             # Restart the driver
@@ -227,14 +240,19 @@ class ContentCollector:
     
     def cleanup(self):
         """Basic cleanup: quit Selenium driver if it exists"""
-        if self.driver:
-            try:
-                self.driver.quit()
-                print("    [SELENIUM] Driver quit")
-            except Exception as e:
-                print(f"    [SELENIUM] WARNING: Error quitting driver: {e}")
-            finally:
+        driver = None
+        try:
+            if self.driver:
+                driver = self.driver
                 self.driver = None
+                driver.quit()
+                print("    [SELENIUM] Driver quit")
+        except Exception as e:
+            print(f"    [SELENIUM] WARNING: Error quitting driver: {e}")
+        finally:
+            # Nuclear option - kill any orphaned Chrome
+            os.system("pkill -9 chrome || true")
+            self.driver = None
     
     def __del__(self):
         """Destructor - safety net to ensure driver is cleaned up"""
@@ -268,14 +286,15 @@ class ContentCollector:
         Clicks on profile photos, staff cards, and hovers over elements
         to reveal hidden emails (mailto links that appear on interaction)
         """
+        driver = None
         try:
             self._ensure_driver_healthy()
-            self.driver.get(url)
+            driver = self.driver
+            driver.get(url)
             
-            # Wait for page to load
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
+            # Wait for page to load using explicit wait
+            wait = WebDriverWait(driver, 10)
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
             time.sleep(2)  # Wait for any dynamic content
             
             if interact:
@@ -291,12 +310,12 @@ class ContentCollector:
                 
                 for selector in clickable_selectors:
                     try:
-                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
                         # Increased to 75 clicks per selector type to handle large staff directories
                         for element in elements[:75]:
                             try:
                                 # Scroll element into view
-                                self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                                driver.execute_script("arguments[0].scrollIntoView(true);", element)
                                 time.sleep(0.5)
                                 
                                 # Try clicking
@@ -304,7 +323,7 @@ class ContentCollector:
                                 time.sleep(0.5)
                                 
                                 # Try hovering
-                                ActionChains(self.driver).move_to_element(element).perform()
+                                ActionChains(driver).move_to_element(element).perform()
                                 time.sleep(0.3)
                             except:
                                 continue
@@ -314,11 +333,14 @@ class ContentCollector:
                 # Additional wait for any JavaScript-revealed emails
                 time.sleep(2)
             
-            return self.driver.page_source
+            return driver.page_source
             
         except Exception as e:
             print(f"      Selenium error: {e}")
             return None
+        finally:
+            # Cleanup handled by cleanup() method, but ensure driver reference is maintained
+            pass
     
     def collect_page_content(self, school_name: str, url: str) -> Optional[Dict]:
         """
@@ -597,9 +619,15 @@ if __name__ == "__main__":
     try:
         collector.collect_content_from_pages(args.input, args.output)
     finally:
-        # Cleanup Selenium driver
-        if collector.driver:
-            try:
-                collector.driver.quit()
-            except:
-                pass
+        # Cleanup Selenium driver with nuclear option
+        driver = None
+        try:
+            if collector.driver:
+                driver = collector.driver
+                collector.driver = None
+                driver.quit()
+        except:
+            pass  # Don't let cleanup fail
+        finally:
+            # Nuclear option - kill any orphaned Chrome
+            os.system("pkill -9 chrome || true")

@@ -6,11 +6,14 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Install system dependencies (Chromium + Chromedriver for Selenium)
+# Pin versions to fix Selenium Manager network issues
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl gnupg unzip ca-certificates \
     chromium chromium-driver \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Note: Pinning specific versions requires checking available versions in apt
+# For now, we install latest but Selenium will use explicit path to bypass Manager
 # Environment variables Selenium expects
 ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
@@ -36,5 +39,5 @@ EXPOSE 8080
 # Waitress is a pure-Python WSGI server that uses a fixed thread pool, eliminating thread exhaustion issues
 # It's designed for production workloads and handles long-running processes better than Flask's dev server
 # Using shell form to allow Railway's PORT environment variable to be used
-CMD waitress-serve --host=0.0.0.0 --port=${PORT:-8080} --threads=1 --channel-timeout=300 external_services.api:app
+CMD waitress-serve --host=0.0.0.0 --port=${PORT:-8080} --threads=4 --channel-timeout=300 external_services.api:app
 
