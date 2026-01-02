@@ -692,40 +692,40 @@ def run_streaming_pipeline(state: str, run_id: str):
                     
                     try:
                         # Process this county with timing
-                    county_index, result, processing_time = process_county_with_timing(
-                        state, run_id, county, idx, total_counties
-                    )
+                        county_index, result, processing_time = process_county_with_timing(
+                            state, run_id, county, idx, total_counties
+                        )
                         
                         # Mark county as completed
                         with checkpoint_lock:
                             if county not in completed_counties:
                                 completed_counties.append(county)
-                    
-                    # Update progress
-                            completed = len(completed_counties)
-                    progress_pct = int((completed / total_counties) * 100)
+                        
+                        # Update progress
+                        completed = len(completed_counties)
+                        progress_pct = int((completed / total_counties) * 100)
+                        
+                        with progress_lock:
+                            pipeline_runs[run_id]["progress"] = progress_pct
+                            pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
+                        
+                        print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                        
+                        # Save checkpoint after every N counties (batch size)
+                        if completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties:
+                            save_checkpoint(run_id, state, completed_counties, idx + 1, total_counties)
                             
-                            with progress_lock:
-                    pipeline_runs[run_id]["progress"] = progress_pct
-                    pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
-                    
-                    print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                    
-                            # Save checkpoint after every N counties (batch size)
-                            if completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties:
-                                save_checkpoint(run_id, state, completed_counties, idx + 1, total_counties)
-                                
-                                # Update metadata
-                                metadata = load_run_metadata(run_id) or {}
-                                metadata.update({
-                                    "status": "running",
-                                    "completed_counties": completed_counties,
-                                    "progress": progress_pct,
-                                    "last_checkpoint": time.time()
-                                })
-                                save_run_metadata(run_id, metadata)
-                                
-                                print(f"[{run_id}] Checkpoint saved after {completed} counties")
+                            # Update metadata
+                            metadata = load_run_metadata(run_id) or {}
+                            metadata.update({
+                                "status": "running",
+                                "completed_counties": completed_counties,
+                                "progress": progress_pct,
+                                "last_checkpoint": time.time()
+                            })
+                            save_run_metadata(run_id, metadata)
+                            
+                            print(f"[{run_id}] Checkpoint saved after {completed} counties")
                         
                     except Exception as e:
                         print(f"[{run_id}] County {county} generated an exception: {e}")
@@ -776,10 +776,10 @@ def run_streaming_pipeline(state: str, run_id: str):
                         gc.collect()
                     
                         return (county_index, result, processing_time)
-                except Exception as e:
-                    print(f"[{run_id}] County {county} generated an exception: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    except Exception as e:
+                        print(f"[{run_id}] County {county} generated an exception: {e}")
+                        import traceback
+                        traceback.print_exc()
                         return (idx, {'success': False, 'error': str(e)}, 0)
                 
                 # Process with ThreadPoolExecutor
