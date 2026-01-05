@@ -29,6 +29,7 @@ import time
 import subprocess
 import gc
 import os
+import threading
 from typing import List, Dict, Set, Optional
 import pandas as pd
 from collections import defaultdict
@@ -42,11 +43,11 @@ except ImportError:
 
 
 class ContentCollector:
-    def __init__(self, timeout: int = 10, max_retries: int = 1, use_selenium: bool = True, page_timeout: int = 30):
+    def __init__(self, timeout: int = 10, max_retries: int = 1, use_selenium: bool = True, page_timeout: int = 45):
         self.timeout = timeout  # HTTP request timeout (10 seconds)
         self.max_retries = max_retries  # 1 retry only
         self.use_selenium = use_selenium
-        self.page_timeout = page_timeout  # Max time to spend on a single page (30 seconds)
+        self.page_timeout = page_timeout  # Max time to spend on a single page (45 seconds)
         self.driver = None
         
         self.headers = {
@@ -183,8 +184,8 @@ class ContentCollector:
             # Use explicit ChromeDriver path to bypass Selenium Manager network issues
             service = Service(executable_path=os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.set_page_load_timeout(30)  # 30 second timeout (increased from 15)
-            driver.set_script_timeout(30)  # Script timeout (NEW)
+            driver.set_page_load_timeout(45)  # 45 second timeout
+            driver.set_script_timeout(45)  # Script timeout
             # Remove implicit wait, use explicit waits instead
             # driver.implicitly_wait(2)  # Removed - use explicit waits
             return driver
@@ -207,8 +208,8 @@ class ContentCollector:
                     # Use explicit ChromeDriver path to bypass Selenium Manager
                     service = Service(executable_path=os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
                     driver = webdriver.Chrome(service=service, options=minimal_options)
-                    driver.set_page_load_timeout(30)
-                    driver.set_script_timeout(30)
+                    driver.set_page_load_timeout(45)
+                    driver.set_script_timeout(45)
                     print(f"    [SELENIUM] Driver created with minimal options")
                     return driver
                 except Exception as e2:
@@ -218,6 +219,8 @@ class ContentCollector:
     def _ensure_driver_healthy(self):
         """Check and restart Selenium driver if needed"""
         if not self.driver:
+            # Driver doesn't exist, create it
+            self.driver = self._setup_selenium()
             return
         
         try:
@@ -281,6 +284,51 @@ class ContentCollector:
                     return None  # Return None instead of raising
         return None
     
+    def _get_url_with_timeout(self, driver, url: str, timeout: int = 45) -> bool:
+        """
+        Wrapper for driver.get() with a hard 45-second timeout.
+        If the page load exceeds the timeout, forcefully quits the driver.
+        
+        Returns:
+            True if page loaded successfully, False if timeout occurred
+        """
+        result = [None]  # Use list to allow modification from nested function
+        exception = [None]
+        
+        def get_url():
+            try:
+                driver.get(url)
+                result[0] = True
+            except Exception as e:
+                exception[0] = e
+                result[0] = False
+        
+        # Start driver.get() in a separate thread
+        thread = threading.Thread(target=get_url, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout)
+        
+        # Check if thread is still alive (timed out)
+        if thread.is_alive():
+            # Timeout occurred - forcefully quit driver
+            print(f"      [TIMEOUT] Page load exceeded {timeout}s, forcefully terminating...")
+            try:
+                driver.quit()
+            except:
+                pass
+            # Kill orphaned processes
+            os.system("pkill -9 chrome || true")
+            os.system("pkill -9 chromedriver || true")
+            # Mark driver as dead so it gets recreated
+            self.driver = None
+            return False
+        
+        # Check if an exception occurred
+        if exception[0]:
+            raise exception[0]
+        
+        return result[0] if result[0] is not None else False
+    
     def fetch_with_selenium(self, url: str, interact: bool = True) -> Optional[str]:
         """
         Fetch page using Selenium and interact with it to reveal emails
@@ -292,11 +340,21 @@ class ContentCollector:
         try:
             self._ensure_driver_healthy()
             driver = self.driver
-            driver.get(url)
             
-            # Wait for page to load using explicit wait
-            wait = WebDriverWait(driver, 10)
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            # Use timeout wrapper for driver.get() - 45 second hard limit
+            if not self._get_url_with_timeout(driver, url, timeout=45):
+                print(f"      [TIMEOUT] Failed to load page within 45s timeout")
+                # Driver was killed, need to recreate it
+                self.driver = None
+                return None
+            
+            # Wait for page to load using explicit wait (with shorter timeout since page should be loaded)
+            try:
+                wait = WebDriverWait(driver, 5)
+                wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            except TimeoutException:
+                # Page might be loaded but body not ready - continue anyway
+                pass
             time.sleep(2)  # Wait for any dynamic content
             
             if interact:
