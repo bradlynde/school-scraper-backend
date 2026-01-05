@@ -231,8 +231,9 @@ class ContentCollector:
             except:
                 pass  # Don't let cleanup fail
             finally:
-                # Nuclear option - kill any orphaned Chrome
+                # Nuclear option - kill any orphaned Chrome AND ChromeDriver processes
                 os.system("pkill -9 chrome || true")
+                os.system("pkill -9 chromedriver || true")
                 self.driver = None
             
             # Restart the driver
@@ -250,8 +251,9 @@ class ContentCollector:
         except Exception as e:
             print(f"    [SELENIUM] WARNING: Error quitting driver: {e}")
         finally:
-            # Nuclear option - kill any orphaned Chrome
+            # Nuclear option - kill any orphaned Chrome AND ChromeDriver processes
             os.system("pkill -9 chrome || true")
+            os.system("pkill -9 chromedriver || true")
             self.driver = None
     
     def __del__(self):
@@ -629,5 +631,6 @@ if __name__ == "__main__":
         except:
             pass  # Don't let cleanup fail
         finally:
-            # Nuclear option - kill any orphaned Chrome
+            # Nuclear option - kill any orphaned Chrome AND ChromeDriver processes
             os.system("pkill -9 chrome || true")
+            os.system("pkill -9 chromedriver || true")

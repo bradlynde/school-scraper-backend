@@ -96,14 +96,18 @@ progress_lock = threading.Lock()
 
 
 def check_health():
-    """Health check function to monitor Chrome processes"""
+    """Health check function to monitor Chrome and ChromeDriver processes"""
     try:
         if HAS_PSUTIL:
             chrome_processes = [p for p in psutil.process_iter(['name']) 
                                if 'chrome' in p.info['name'].lower()]
-            if len(chrome_processes) > 5:
-                print(f"[HEALTH] Found {len(chrome_processes)} Chrome processes, killing orphaned processes...")
+            chromedriver_processes = [p for p in psutil.process_iter(['name']) 
+                                     if 'chromedriver' in p.info['name'].lower()]
+            total_processes = len(chrome_processes) + len(chromedriver_processes)
+            if total_processes > 5:
+                print(f"[HEALTH] Found {len(chrome_processes)} Chrome + {len(chromedriver_processes)} ChromeDriver processes ({total_processes} total), killing orphaned processes...")
                 os.system("pkill -9 chrome || true")
+                os.system("pkill -9 chromedriver || true")
                 return False
         return True
     except Exception as e:
@@ -325,8 +329,9 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         except Exception:
             pass  # Don't let cleanup fail
         finally:
-            # Nuclear option - kill any orphaned Chrome
+            # Nuclear option - kill any orphaned Chrome AND ChromeDriver processes
             os.system("pkill -9 chrome || true")
+            os.system("pkill -9 chromedriver || true")
 
 
 def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int):
@@ -829,19 +834,23 @@ def run_streaming_pipeline(state: str, run_id: str):
         except FileNotFoundError as e:
             # State file not found
             error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
-            pipeline_runs[run_id]["status"] = "error"
-            pipeline_runs[run_id]["error"] = error_msg
-            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            # Only update pipeline_runs if run_id still exists (may have been cleaned up)
+            if run_id in pipeline_runs:
+                pipeline_runs[run_id]["status"] = "error"
+                pipeline_runs[run_id]["error"] = error_msg
+                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
             import traceback
             traceback.print_exc()
         except Exception as e:
             # Any other error
             error_msg = str(e)[:500]  # Limit error message length
-            pipeline_runs[run_id]["status"] = "error"
-            pipeline_runs[run_id]["error"] = error_msg
-        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
-        import traceback
-        traceback.print_exc()
+            # Only update pipeline_runs if run_id still exists (may have been cleaned up)
+            if run_id in pipeline_runs:
+                pipeline_runs[run_id]["status"] = "error"
+                pipeline_runs[run_id]["error"] = error_msg
+                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            import traceback
+            traceback.print_exc()
     
     # Start processing in a background thread
     thread = threading.Thread(target=process_all_counties)
