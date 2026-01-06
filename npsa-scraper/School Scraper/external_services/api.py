@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import resource  # For memory monitoring
 import logging  # For logging
 import platform  # For OS detection
+import signal  # For SIGKILL
 
 # Try to import psutil for process tree killing (optional)
 try:
@@ -96,7 +97,7 @@ checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
 
 
-def robust_cleanup_chrome_processes(max_attempts=2, delay_seconds=2.0):
+def robust_cleanup_chrome_processes(max_attempts=3, delay_seconds=3.0):
     """
     Robust cleanup of Chrome and ChromeDriver processes with verification.
     
@@ -133,11 +134,22 @@ def robust_cleanup_chrome_processes(max_attempts=2, delay_seconds=2.0):
                 os.system("killall -9 chromedriver 2>/dev/null || true")
                 os.system("pkill -9 -f chrome 2>/dev/null || true")  # Catch any remaining
             else:
-                # Linux: Use pkill + psutil
-                os.system("pkill -9 chrome || true")
-                os.system("pkill -9 chromedriver || true")
+                # Linux: Use aggressive multi-pattern pkill + killall + psutil
+                # Try multiple process name patterns (chrome, chromium, etc.)
+                kill_commands = [
+                    "pkill -9 -f chrome || true",
+                    "pkill -9 -f chromium || true",
+                    "pkill -9 chrome || true",
+                    "pkill -9 chromium || true",
+                    "pkill -9 chromedriver || true",
+                    "killall -9 chrome 2>/dev/null || true",
+                    "killall -9 chromium 2>/dev/null || true",
+                    "killall -9 chromedriver 2>/dev/null || true",
+                ]
+                for cmd in kill_commands:
+                    os.system(cmd)
                 
-                # Also try psutil for process trees (Linux)
+                # Use psutil to get PIDs and kill directly (more reliable than pkill)
                 if HAS_PSUTIL:
                     try:
                         processes_to_kill = []
@@ -148,23 +160,48 @@ def robust_cleanup_chrome_processes(max_attempts=2, delay_seconds=2.0):
                                     processes_to_kill.append(proc)
                                 elif 'chrome' in name and 'chromedriver' not in name:
                                     processes_to_kill.append(proc)
+                                elif 'chromium' in name:
+                                    processes_to_kill.append(proc)
                             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                                 continue
                         
+                        # Kill processes by PID using os.kill (more reliable)
+                        killed_pids = set()
                         for proc in processes_to_kill:
                             try:
-                                # Kill process tree
-                                children = proc.children(recursive=True)
-                                for child in children:
+                                pid = proc.pid
+                                if pid in killed_pids:
+                                    continue
+                                
+                                # Kill process tree first
+                                try:
+                                    children = proc.children(recursive=True)
+                                    for child in children:
+                                        try:
+                                            child_pid = child.pid
+                                            if child_pid not in killed_pids:
+                                                os.kill(child_pid, signal.SIGKILL)
+                                                killed_pids.add(child_pid)
+                                        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess, psutil.AccessDenied):
+                                            pass
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                                
+                                # Kill parent process
+                                try:
+                                    os.kill(pid, signal.SIGKILL)  # More reliable than proc.kill()
+                                    killed_pids.add(pid)
+                                except (ProcessLookupError, PermissionError):
+                                    # If os.kill fails, try proc.kill() as fallback
                                     try:
-                                        child.kill()
-                                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                        proc.kill()
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
                                         pass
-                                proc.kill()
                             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                                 pass
-                    except Exception:
-                        pass  # Fallback to pkill only
+                    except Exception as e:
+                        # Log but don't fail - fallback to pkill only
+                        print(f"[CLEANUP] Warning: psutil kill failed: {e}")
             
             # Wait for processes to terminate
             time.sleep(delay_seconds)
@@ -222,7 +259,7 @@ def check_health():
             total_processes = len(chrome_processes) + len(chromedriver_processes)
             if total_processes > 5:
                 print(f"[HEALTH] Found {len(chrome_processes)} Chrome + {len(chromedriver_processes)} ChromeDriver processes ({total_processes} total), killing orphaned processes...")
-                chrome_count, chromedriver_count, total_count = robust_cleanup_chrome_processes(max_attempts=2, delay_seconds=1.0)
+                chrome_count, chromedriver_count, total_count = robust_cleanup_chrome_processes()
                 if total_count > 5:
                     print(f"[HEALTH] After cleanup: {chrome_count} Chrome + {chromedriver_count} ChromeDriver processes remain")
                 return False
@@ -447,7 +484,7 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
             pass  # Don't let cleanup fail
         finally:
             # Robust cleanup - kill any orphaned Chrome AND ChromeDriver processes with verification
-            robust_cleanup_chrome_processes(max_attempts=2, delay_seconds=1.0)
+            robust_cleanup_chrome_processes()
 
 
 def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int):
