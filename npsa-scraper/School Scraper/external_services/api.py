@@ -22,6 +22,7 @@ import gc  # For explicit garbage collection
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import resource  # For memory monitoring
 import logging  # For logging
+import platform  # For OS detection
 
 # Try to import psutil for process tree killing (optional)
 try:
@@ -95,6 +96,121 @@ checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
 
 
+def robust_cleanup_chrome_processes(max_attempts=2, delay_seconds=2.0):
+    """
+    Robust cleanup of Chrome and ChromeDriver processes with verification.
+    
+    Uses platform-specific commands for maximum reliability:
+    - macOS: killall (more reliable than psutil on macOS)
+    - Linux: pkill + psutil (dual approach)
+    
+    Steps:
+    1. Use platform-specific kill commands (killall on macOS, pkill on Linux)
+    2. Also try psutil kill for process trees (Linux)
+    3. Wait for processes to terminate
+    4. Verify cleanup worked by checking process count
+    5. Retry if processes remain (up to max_attempts)
+    
+    Args:
+        max_attempts: Maximum number of cleanup attempts (default: 2)
+        delay_seconds: Delay between cleanup and verification (default: 2.0)
+    
+    Returns:
+        tuple: (chrome_count, chromedriver_count, total_count) after cleanup
+    """
+    is_macos = platform.system() == 'Darwin'
+    
+    for attempt in range(max_attempts):
+        try:
+            # Platform-specific cleanup commands
+            if is_macos:
+                # macOS: Use killall (more reliable than psutil on macOS)
+                os.system("killall -9 'Google Chrome' 2>/dev/null || true")
+                os.system("killall -9 'Google Chrome Helper' 2>/dev/null || true")
+                os.system("killall -9 'Google Chrome Helper (Renderer)' 2>/dev/null || true")
+                os.system("killall -9 'Google Chrome Helper (GPU)' 2>/dev/null || true")
+                os.system("killall -9 'Google Chrome Helper (Plugin)' 2>/dev/null || true")
+                os.system("killall -9 chromedriver 2>/dev/null || true")
+                os.system("pkill -9 -f chrome 2>/dev/null || true")  # Catch any remaining
+            else:
+                # Linux: Use pkill + psutil
+                os.system("pkill -9 chrome || true")
+                os.system("pkill -9 chromedriver || true")
+                
+                # Also try psutil for process trees (Linux)
+                if HAS_PSUTIL:
+                    try:
+                        processes_to_kill = []
+                        for proc in psutil.process_iter(['name', 'pid', 'ppid']):
+                            try:
+                                name = proc.info['name'].lower()
+                                if 'chromedriver' in name:
+                                    processes_to_kill.append(proc)
+                                elif 'chrome' in name and 'chromedriver' not in name:
+                                    processes_to_kill.append(proc)
+                            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                continue
+                        
+                        for proc in processes_to_kill:
+                            try:
+                                # Kill process tree
+                                children = proc.children(recursive=True)
+                                for child in children:
+                                    try:
+                                        child.kill()
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                        pass
+                                proc.kill()
+                            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                pass
+                    except Exception:
+                        pass  # Fallback to pkill only
+            
+            # Wait for processes to terminate
+            time.sleep(delay_seconds)
+            
+            # Verify cleanup worked
+            if HAS_PSUTIL:
+                try:
+                    chrome_processes = [p for p in psutil.process_iter(['name']) 
+                                       if 'chrome' in p.info['name'].lower() and 'chromedriver' not in p.info['name'].lower()]
+                    chromedriver_processes = [p for p in psutil.process_iter(['name']) 
+                                             if 'chromedriver' in p.info['name'].lower()]
+                    chrome_count = len(chrome_processes)
+                    chromedriver_count = len(chromedriver_processes)
+                    total_count = chrome_count + chromedriver_count
+                    
+                    # If cleanup successful (≤5 processes) or last attempt, return
+                    if total_count <= 5 or attempt == max_attempts - 1:
+                        if attempt > 0 and total_count > 5:
+                            print(f"[CLEANUP] Attempt {attempt + 1}: {chrome_count} Chrome + {chromedriver_count} ChromeDriver processes remain")
+                        return (chrome_count, chromedriver_count, total_count)
+                except Exception:
+                    pass
+            
+            # If psutil not available, just return after delay
+            if not HAS_PSUTIL:
+                return (0, 0, 0)
+                
+        except Exception as e:
+            # Fallback to basic pkill on error
+            os.system("pkill -9 chrome || true")
+            os.system("pkill -9 chromedriver || true")
+            time.sleep(delay_seconds)
+    
+    # Final verification
+    if HAS_PSUTIL:
+        try:
+            chrome_processes = [p for p in psutil.process_iter(['name']) 
+                               if 'chrome' in p.info['name'].lower() and 'chromedriver' not in p.info['name'].lower()]
+            chromedriver_processes = [p for p in psutil.process_iter(['name']) 
+                                     if 'chromedriver' in p.info['name'].lower()]
+            return (len(chrome_processes), len(chromedriver_processes), len(chrome_processes) + len(chromedriver_processes))
+        except Exception:
+            return (0, 0, 0)
+    return (0, 0, 0)
+
+
 def check_health():
     """Health check function to monitor Chrome and ChromeDriver processes"""
     try:
@@ -106,8 +222,9 @@ def check_health():
             total_processes = len(chrome_processes) + len(chromedriver_processes)
             if total_processes > 5:
                 print(f"[HEALTH] Found {len(chrome_processes)} Chrome + {len(chromedriver_processes)} ChromeDriver processes ({total_processes} total), killing orphaned processes...")
-                os.system("pkill -9 chrome || true")
-                os.system("pkill -9 chromedriver || true")
+                chrome_count, chromedriver_count, total_count = robust_cleanup_chrome_processes(max_attempts=2, delay_seconds=1.0)
+                if total_count > 5:
+                    print(f"[HEALTH] After cleanup: {chrome_count} Chrome + {chromedriver_count} ChromeDriver processes remain")
                 return False
         return True
     except Exception as e:
@@ -329,9 +446,8 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         except Exception:
             pass  # Don't let cleanup fail
         finally:
-            # Nuclear option - kill any orphaned Chrome AND ChromeDriver processes
-            os.system("pkill -9 chrome || true")
-            os.system("pkill -9 chromedriver || true")
+            # Robust cleanup - kill any orphaned Chrome AND ChromeDriver processes with verification
+            robust_cleanup_chrome_processes(max_attempts=2, delay_seconds=1.0)
 
 
 def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int):
@@ -715,7 +831,7 @@ def run_streaming_pipeline(state: str, run_id: str):
                             pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
                         
                         print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                        
+                    
                         # Save checkpoint after every N counties (batch size)
                         if completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties:
                             save_checkpoint(run_id, state, completed_counties, idx + 1, total_counties)
