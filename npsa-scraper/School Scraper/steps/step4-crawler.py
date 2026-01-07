@@ -201,11 +201,11 @@ class ContentCollector:
             else:
                 # Final attempt with minimal options
                 print(f"    [SELENIUM] All retries exhausted, trying minimal options...")
-            try:
-                minimal_options = Options()
-                minimal_options.add_argument('--headless')
-                minimal_options.add_argument('--no-sandbox')
-                minimal_options.add_argument('--disable-dev-shm-usage')
+                try:
+                    minimal_options = Options()
+                    minimal_options.add_argument('--headless')
+                    minimal_options.add_argument('--no-sandbox')
+                    minimal_options.add_argument('--disable-dev-shm-usage')
                     # Use explicit ChromeDriver path to bypass Selenium Manager
                     chromedriver_path = os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver')
                     if os.path.exists(chromedriver_path):
@@ -213,14 +213,14 @@ class ContentCollector:
                         driver = webdriver.Chrome(service=service, options=minimal_options)
                     else:
                         # Path doesn't exist (e.g., local dev), let Selenium Manager handle it
-                driver = webdriver.Chrome(options=minimal_options)
+                        driver = webdriver.Chrome(options=minimal_options)
                     driver.set_page_load_timeout(45)
                     driver.set_script_timeout(45)
                     print(f"    [SELENIUM] Driver created with minimal options")
-                return driver
-            except Exception as e2:
+                    return driver
+                except Exception as e2:
                     print(f"    [SELENIUM] ERROR: Could not create Chrome driver even with minimal options: {e2}")
-                raise
+                    raise
     
     def _ensure_driver_healthy(self):
         """Check and restart Selenium driver if needed"""
