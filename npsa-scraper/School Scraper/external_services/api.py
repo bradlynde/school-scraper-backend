@@ -400,8 +400,9 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
             pass
         return results
     finally:
-        # Basic cleanup: quit driver if it exists
+        # Aggressive cleanup: quit driver and kill all Chrome processes
         try:
+            # First, try to quit the driver properly
             if 'pipeline' in locals() and pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
                 if pipeline.content_collector.driver:
                     driver = pipeline.content_collector.driver
@@ -411,7 +412,58 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
                     except:
                         pass
         except Exception:
-            pass  # Don't let cleanup fail
+            pass
+        
+        # Kill Chrome processes using psutil
+        if HAS_PSUTIL:
+            try:
+                current_pid = os.getpid()
+                killed_count = 0
+                
+                for proc in psutil.process_iter(['name', 'pid', 'ppid']):
+                    try:
+                        name = proc.info['name'].lower()
+                        pid = proc.info['pid']
+                        ppid = proc.info.get('ppid')
+                        
+                        # Only kill processes that are children of this process or Chrome-related
+                        is_chrome = ('chrome' in name or 'chromium' in name or 'chromedriver' in name)
+                        is_child = (ppid == current_pid) if ppid else False
+                        
+                        if is_chrome and (is_child or 'chromedriver' in name):
+                            try:
+                                proc.kill()
+                                killed_count += 1
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+                
+                if killed_count > 0:
+                    print(f"[CLEANUP] Killed {killed_count} Chrome processes using psutil")
+            except Exception as e:
+                print(f"[CLEANUP] Error killing Chrome processes with psutil: {e}")
+        
+        # Fallback: Use pkill to kill Chrome processes
+        try:
+            import subprocess
+            # Kill chromedriver
+            subprocess.run(['pkill', '-f', 'chromedriver'], 
+                          stdout=subprocess.DEVNULL, 
+                          stderr=subprocess.DEVNULL, 
+                          timeout=2)
+            # Kill chrome/chromium processes (be more careful - only kill if they're children)
+            # Use pkill with parent PID filter if available
+            subprocess.run(['pkill', '-P', str(os.getpid()), '-f', 'chrome'], 
+                          stdout=subprocess.DEVNULL, 
+                          stderr=subprocess.DEVNULL, 
+                          timeout=2)
+            subprocess.run(['pkill', '-P', str(os.getpid()), '-f', 'chromium'], 
+                          stdout=subprocess.DEVNULL, 
+                          stderr=subprocess.DEVNULL, 
+                          timeout=2)
+        except Exception:
+            pass  # pkill may not be available or may fail
 
 
 def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int):
