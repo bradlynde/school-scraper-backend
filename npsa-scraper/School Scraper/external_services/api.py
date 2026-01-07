@@ -196,6 +196,65 @@ def log_resource_usage():
         print(f"[RESOURCE] Error logging resource usage: {e}")
 
 
+def should_restart_container() -> bool:
+    """
+    Check if Chrome process count exceeds threshold and container restart is needed.
+    Returns True if restart is needed, False otherwise.
+    """
+    CHROME_PROCESS_THRESHOLD = int(os.getenv("CHROME_PROCESS_THRESHOLD", "25"))
+    
+    if not HAS_PSUTIL:
+        return False  # Can't check without psutil
+    
+    try:
+        process_info = list_chrome_processes()
+        total_chrome = process_info['total_count']
+        
+        if total_chrome >= CHROME_PROCESS_THRESHOLD:
+            print(f"[RESTART] Chrome process count ({total_chrome}) exceeds threshold ({CHROME_PROCESS_THRESHOLD})")
+            print(f"[RESTART] Container restart required to clean up processes")
+            return True
+        return False
+    except Exception as e:
+        print(f"[RESTART] Error checking process count: {e}")
+        return False
+
+
+def trigger_container_restart(run_id: str, state: str, completed_counties: list, current_county_index: int, total_counties: int):
+    """
+    Trigger a container restart by saving checkpoint and exiting the process.
+    Railway will automatically restart the container, and the pipeline will resume from checkpoint.
+    """
+    try:
+        print(f"[RESTART] Preparing for container restart...")
+        
+        # Save checkpoint before restarting
+        save_checkpoint(run_id, state, completed_counties, current_county_index, total_counties)
+        
+        # Update metadata to indicate restart
+        metadata = load_run_metadata(run_id) or {}
+        metadata.update({
+            "status": "running",
+            "completed_counties": completed_counties,
+            "restart_triggered": True,
+            "restart_reason": "Chrome process accumulation",
+            "restart_at": datetime.now().isoformat(),
+            "last_checkpoint": time.time()
+        })
+        save_run_metadata(run_id, metadata)
+        
+        print(f"[RESTART] Checkpoint saved. Exiting to trigger container restart...")
+        print(f"[RESTART] Pipeline will resume from checkpoint after restart.")
+        
+        # Exit the process - Railway will restart the container
+        # Use exit code 0 to indicate normal restart (not an error)
+        os._exit(0)
+    except Exception as e:
+        print(f"[RESTART] Error during restart preparation: {e}")
+        # Still exit even if checkpoint save failed
+        os._exit(0)
+
+
 def save_checkpoint(run_id: str, state: str, completed_counties: list, next_county_index: int, total_counties: int):
     """Save checkpoint to persistent storage"""
     checkpoint_path = CHECKPOINTS_DIR / f"{run_id}.json"
@@ -874,6 +933,11 @@ def run_streaming_pipeline(state: str, run_id: str):
                             if county not in completed_counties:
                                 completed_counties.append(county)
                         
+                        # Check if container restart is needed due to Chrome process accumulation
+                        if should_restart_container():
+                            trigger_container_restart(run_id, state, completed_counties, idx + 1, total_counties)
+                            # This will exit the process, so code below won't execute
+                        
                         # Update progress
                         completed = len(completed_counties)
                         progress_pct = int((completed / total_counties) * 100)
@@ -947,6 +1011,10 @@ def run_streaming_pipeline(state: str, run_id: str):
                         
                         # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
                         gc.collect()
+                        
+                        # Check if container restart is needed (in main thread after county completes)
+                        # Note: This check happens in the main thread, not in the worker thread
+                        # The actual restart will be triggered after the future completes
                     
                         return (county_index, result, processing_time)
                     except Exception as e:
@@ -978,6 +1046,14 @@ def run_streaming_pipeline(state: str, run_id: str):
                         idx, county = future_to_county[future]
                         try:
                             future.result()  # Wait for completion
+                            
+                            # Check if container restart is needed after county completes
+                            if should_restart_container():
+                                # Get current completed counties count
+                                with checkpoint_lock:
+                                    current_completed = len(completed_counties)
+                                trigger_container_restart(run_id, state, completed_counties, current_completed, total_counties)
+                                # This will exit the process, so code below won't execute
                         except Exception as e:
                             print(f"[{run_id}] Future for {county} County raised exception: {e}")
                             import traceback
