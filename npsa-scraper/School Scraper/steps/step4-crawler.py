@@ -236,7 +236,7 @@ class ContentCollector:
             driver = None
             try:
                 if self.driver:
-                self.driver.quit()
+                    self.driver.quit()
             except:
                 pass  # Don't let cleanup fail
             finally:
