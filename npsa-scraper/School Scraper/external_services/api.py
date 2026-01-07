@@ -468,6 +468,9 @@ def process_county_worker_multiprocessing(args):
     Processes a single county and returns results.
     Does NOT update global state - that's handled in main process.
     
+    This function runs in a Pool worker process, which provides the isolation.
+    We call _county_worker directly (no nested subprocess needed).
+    
     Args:
         args: tuple of (idx, county, state, run_id, total_counties)
     
@@ -476,9 +479,29 @@ def process_county_worker_multiprocessing(args):
     """
     idx, county, state, run_id, total_counties = args
     start_time = time.time()
+    
+    # Create result file for worker to write to
+    run_dir = RUNS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    result_file = str(run_dir / f"{county.replace(' ', '_')}_result.json")
+    
     try:
-        # Process this county (no global state updates here)
-        result = process_single_county(state, county, run_id, idx, total_counties)
+        # Call _county_worker directly - the Pool worker IS the isolation we need
+        # No need for nested multiprocessing.Process since we're already in a worker
+        _county_worker(state, county, run_id, idx, total_counties, result_file)
+        
+        # Read results from file
+        if os.path.exists(result_file):
+            with open(result_file, 'r') as f:
+                result = json.load(f)
+            # Clean up result file
+            try:
+                os.remove(result_file)
+            except:
+                pass
+        else:
+            result = {'success': False, 'error': 'Worker did not write results file'}
+        
         processing_time = time.time() - start_time
         
         if not result.get('success'):
