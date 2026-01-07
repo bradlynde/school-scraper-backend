@@ -95,7 +95,7 @@ const US_STATES = [
 export default function Home() {
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
-  const [selectedType, setSelectedType] = useState<"school" | "church" | "running" | "finished">("school");
+  const [selectedType, setSelectedType] = useState<"school" | "church" | "running" | "finished" | "archive">("school");
   const [status, setStatus] = useState("");
   const [summary, setSummary] = useState<PipelineSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +107,7 @@ export default function Home() {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [elapsedTimeDisplay, setElapsedTimeDisplay] = useState<number>(0);
   const [completedCounties, setCompletedCounties] = useState<string[]>([]);
+  const [completedCountiesSet, setCompletedCountiesSet] = useState<Set<string>>(new Set());
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -230,7 +231,7 @@ export default function Home() {
         
         setEstimatedTime(data.estimatedTimeRemaining || null);
         
-        // Track completed counties for activity log
+        // Track completed counties for activity log using Set to prevent duplicates
         // When countiesProcessed increases, the previous county is completed
         // We track this by comparing with previous summary state
         if (summary && summary.countiesProcessed !== undefined) {
@@ -238,7 +239,12 @@ export default function Home() {
           if (countiesProcessed > prevCountiesProcessed) {
             // A county just completed - use the previous currentCounty
             const completedCounty = summary.currentCounty;
-            if (completedCounty && !completedCounties.includes(completedCounty)) {
+            if (completedCounty && !completedCountiesSet.has(completedCounty)) {
+              setCompletedCountiesSet(prev => {
+                const newSet = new Set(prev);
+                newSet.add(completedCounty);
+                return newSet;
+              });
               setCompletedCounties(prev => [...prev, completedCounty]);
             }
           }
@@ -312,6 +318,12 @@ export default function Home() {
       console.log("Pipeline response:", data);
       
       if (data.runId) {
+        const now = Date.now();
+        setStartTime(now);
+        // Store start time in localStorage for persistence across page reloads
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`run_startTime_${data.runId}`, now.toString());
+        }
         const interval = setInterval(() => {
           checkPipelineStatus(data.runId);
         }, 60000); // Poll every 1 minute
@@ -365,6 +377,19 @@ export default function Home() {
     }
   }
 
+  // Restore elapsed time from localStorage on page load
+  useEffect(() => {
+    if (typeof window !== 'undefined' && selectedRunId && !startTime) {
+      const storedStartTime = localStorage.getItem(`run_startTime_${selectedRunId}`);
+      if (storedStartTime) {
+        const start = parseInt(storedStartTime, 10);
+        setStartTime(start);
+        const elapsed = (Date.now() - start) / 1000;
+        setElapsedTimeDisplay(elapsed);
+      }
+    }
+  }, [selectedRunId]);
+
   // Update elapsed time display every second (real-time counter)
   // Stop updating when run completes (viewState === "summary")
   useEffect(() => {
@@ -392,7 +417,7 @@ export default function Home() {
   const countiesProcessed = summary?.countiesProcessed || 0;
   const totalCounties = summary?.totalCounties || 0;
   const schoolsProcessed = summary?.schoolsProcessed || summary?.schoolsFound || 0;
-  const currentCounty = summary?.currentCounty || "Initializing...";
+  const currentCounty = summary?.currentCounty || (countiesProcessed > 0 ? "Processing..." : "Initializing...");
 
   // Helper function to create cumulative line graph
   const createLineGraph = (data: number[], width: number = 200, height: number = 80, color: string = "#6b8e23") => {
@@ -475,7 +500,7 @@ export default function Home() {
             if (tab === 'school' || tab === 'church') {
               setViewState("start");
               setSelectedRunId(null);
-            } else if (tab === 'running' || tab === 'finished') {
+            } else if (tab === 'running' || tab === 'finished' || tab === 'archive') {
               setViewState(tab);
               setSelectedRunId(null);
             }
@@ -708,7 +733,7 @@ export default function Home() {
                   {/* Activity Log */}
                   <div className="bg-white rounded-xl border border-gray-200 shadow-md p-6 md:p-8 overflow-x-auto">
                     <div className="mb-6">
-                      <h3 className="text-lg font-bold text-gray-900">Activity Log</h3>
+                      <h3 className="text-lg font-bold text-[#1e3a5f] border-l-4 border-[#1e3a5f] pl-3">Activity Log</h3>
                     </div>
                     <div className="space-y-3 max-h-96 overflow-y-auto">
                       {summary?.currentCounty && (
@@ -894,7 +919,7 @@ export default function Home() {
             <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
               <div className="w-full max-w-7xl">
                 <div className="mb-10">
-                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Running Runs</h1>
+                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">In Progress</h1>
                   <p className="text-base sm:text-lg text-gray-600 mt-2">Select a run from the sidebar to view its progress</p>
                 </div>
                 <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 md:p-12 text-center">

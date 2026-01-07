@@ -269,6 +269,9 @@ def list_all_runs() -> list:
                 with open(metadata_file, 'r') as f:
                     metadata = json.load(f)
                     metadata["run_id"] = metadata_file.stem  # Add run_id from filename
+                    # Ensure archived field exists (default to False for backwards compatibility)
+                    if "archived" not in metadata:
+                        metadata["archived"] = False
                     runs.append(metadata)
             except Exception as e:
                 print(f"Error reading metadata file {metadata_file}: {e}")
@@ -455,7 +458,7 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
                 
                 # Give processes a moment to die, then force kill any remaining
                 if killed_count > 0:
-                    time.sleep(0.2)
+                    time.sleep(1.0)  # Reduced from 3×3s to 1×1s after dumb-init fix
                     try:
                         current_process = psutil.Process(current_pid)
                         for child in current_process.children(recursive=True):
@@ -489,6 +492,9 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
                     print(f"{bold('[CLEANUP]')} Killed {killed_count} Chrome processes using psutil")
             except Exception as e:
                 print(f"{bold('[CLEANUP]')} Error killing Chrome processes with psutil: {e}")
+        
+        # 2-second delay after cleanup to provide buffer
+        time.sleep(2.0)
         
         # Fallback: Use pkill to kill Chrome processes
         try:
@@ -996,6 +1002,10 @@ def run_streaming_pipeline(state: str, run_id: str):
                         # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
                         gc.collect()
                         
+                        # 2-second delay between counties to provide buffer for cleanup
+                        if completed < total_counties:
+                            time.sleep(2.0)
+                        
                 except KeyboardInterrupt:
                     print(f"[{run_id}] Interrupted by user, cleaning up...")
                     pool.terminate()
@@ -1376,6 +1386,82 @@ def delete_run(run_id: str):
         response = jsonify({
             "status": "success",
             "message": "Run deleted successfully"
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
+@app.route("/runs/<run_id>/archive", methods=["POST", "OPTIONS"])
+def archive_run(run_id: str):
+    """Archive a completed run"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    try:
+        metadata = load_run_metadata(run_id)
+        if not metadata:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        # Update metadata to mark as archived
+        metadata["archived"] = True
+        save_run_metadata(run_id, metadata)
+        
+        print(f"[{run_id}] Run archived")
+        
+        response = jsonify({
+            "status": "success",
+            "message": "Run archived successfully"
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
+@app.route("/runs/<run_id>/unarchive", methods=["POST", "OPTIONS"])
+def unarchive_run(run_id: str):
+    """Unarchive a run"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    try:
+        metadata = load_run_metadata(run_id)
+        if not metadata:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        # Update metadata to remove archived flag
+        metadata["archived"] = False
+        save_run_metadata(run_id, metadata)
+        
+        print(f"[{run_id}] Run unarchived")
+        
+        response = jsonify({
+            "status": "success",
+            "message": "Run unarchived successfully"
         })
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 200

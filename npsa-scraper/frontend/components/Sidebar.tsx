@@ -17,8 +17,8 @@ type RunMetadata = {
 };
 
 type SidebarProps = {
-  activeTab: 'school' | 'church' | 'running' | 'finished';
-  onTabChange: (tab: 'school' | 'church' | 'running' | 'finished') => void;
+  activeTab: 'school' | 'church' | 'running' | 'finished' | 'archive';
+  onTabChange: (tab: 'school' | 'church' | 'running' | 'finished' | 'archive') => void;
   onRunSelect?: (runId: string) => void;
 };
 
@@ -52,7 +52,18 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     if (!dateString) return "Unknown";
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      // Convert to US Central Time
+      return date.toLocaleDateString('en-US', { 
+        timeZone: 'America/Chicago',
+        month: 'numeric',
+        day: 'numeric',
+        year: 'numeric'
+      }) + " " + date.toLocaleTimeString('en-US', { 
+        timeZone: 'America/Chicago',
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: true
+      });
     } catch {
       return dateString;
     }
@@ -208,30 +219,58 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
             />
           </svg>
           <span>Finished</span>
-        </button>
+          </button>
+
+          <button
+            onClick={() => onTabChange('archive')}
+            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+              activeTab === 'archive'
+                ? 'bg-[#1e3a5f] text-white shadow-md'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            <svg
+              className="w-5 h-5 flex-shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+              />
+            </svg>
+            <span>Archive</span>
+          </button>
         </nav>
 
       {/* Run List Section */}
-      {(activeTab === 'running' || activeTab === 'finished') && (
+      {(activeTab === 'running' || activeTab === 'finished' || activeTab === 'archive') && (
         <div className="flex-1 overflow-y-auto">
           <div className="p-4">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-              {activeTab === 'running' ? 'Active Runs' : 'Completed Runs'}
+              {activeTab === 'running' ? 'Active Runs' : activeTab === 'archive' ? 'Archived Runs' : 'Completed Runs'}
             </h3>
             {loading ? (
               <div className="text-center text-gray-500 py-4">Loading...</div>
             ) : (
               (() => {
-                const filteredRuns = runs.filter(run => 
-                  activeTab === 'running' 
-                    ? run.status === 'running' 
-                    : (run.status === 'completed' || run.status === 'error')
-                );
+                const filteredRuns = runs.filter(run => {
+                  if (activeTab === 'running') {
+                    return run.status === 'running' && !run.archived;
+                  } else if (activeTab === 'archive') {
+                    return run.archived === true;
+                  } else {
+                    return (run.status === 'completed' || run.status === 'error') && !run.archived;
+                  }
+                });
                 
                 if (filteredRuns.length === 0) {
                   return (
                     <div className="text-center text-gray-500 py-4 text-sm">
-                      {activeTab === 'running' ? 'No active runs' : 'No completed runs'}
+                      {activeTab === 'running' ? 'No active runs' : activeTab === 'archive' ? 'No archived runs' : 'No completed runs'}
                     </div>
                   );
                 }
@@ -241,43 +280,137 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                     {filteredRuns.map((run) => (
                       <div
                         key={run.run_id}
-                        className="p-3 bg-gray-50 rounded-lg border border-gray-200 hover:border-gray-300 transition-colors cursor-pointer"
-                        onClick={() => onRunSelect?.(run.run_id)}
+                        className="p-3 bg-gray-50 rounded-lg border border-gray-200 hover:border-gray-300 transition-colors relative group"
                       >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1">
-                            <div className="font-medium text-sm text-gray-900">
-                              {run.state?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown State'}
+                        <div 
+                          className="cursor-pointer"
+                          onClick={() => onRunSelect?.(run.run_id)}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex-1">
+                              <div className="font-medium text-sm text-gray-900">
+                                {run.state?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown State'}
+                              </div>
+                              <div className="text-xs text-gray-500 mt-1">
+                                {formatDate(run.created_at)}
+                              </div>
                             </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              {formatDate(run.created_at)}
-                            </div>
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(run.status)}`}>
+                              {run.status}
+                            </span>
                           </div>
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(run.status)}`}>
-                            {run.status}
-                          </span>
+                          
+                          {run.total_contacts !== undefined && (
+                            <div className="text-xs text-gray-600 mt-2">
+                              {run.total_contacts} contacts
+                              {run.total_contacts_with_emails !== undefined && (
+                                <span className="ml-2">({run.total_contacts_with_emails} with emails)</span>
+                              )}
+                            </div>
+                          )}
                         </div>
                         
-                        {run.total_contacts !== undefined && (
-                          <div className="text-xs text-gray-600 mt-2">
-                            {run.total_contacts} contacts
-                            {run.total_contacts_with_emails !== undefined && (
-                              <span className="ml-2">({run.total_contacts_with_emails} with emails)</span>
-                            )}
-                          </div>
-                        )}
-                        
-                        {run.status === "completed" && run.csv_filename && (
+                        <div className="flex items-center gap-2 mt-2">
+                          {/* Delete button - trash icon */}
                           <button
-                            onClick={(e) => {
+                            onClick={async (e) => {
                               e.stopPropagation();
-                              downloadCSV(run.run_id, run.csv_filename);
+                              if (confirm(`Are you sure you want to delete this run? This action cannot be undone.`)) {
+                                try {
+                                  const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+                                  const response = await fetch(`${apiUrl}/runs/${run.run_id}`, {
+                                    method: 'DELETE',
+                                  });
+                                  if (response.ok) {
+                                    fetchRuns();
+                                  } else {
+                                    alert('Failed to delete run');
+                                  }
+                                } catch (error) {
+                                  console.error('Error deleting run:', error);
+                                  alert('Failed to delete run');
+                                }
+                              }
                             }}
-                            className="mt-2 w-full text-xs px-2 py-1 bg-[#1e3a5f] text-white rounded hover:bg-[#2a4f7a] transition-colors"
+                            className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                            title="Delete run"
                           >
-                            Download CSV
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
                           </button>
-                        )}
+                          
+                          {/* Archive button - only in finished tab */}
+                          {activeTab === 'finished' && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+                                  const response = await fetch(`${apiUrl}/runs/${run.run_id}/archive`, {
+                                    method: 'POST',
+                                  });
+                                  if (response.ok) {
+                                    fetchRuns();
+                                  } else {
+                                    alert('Failed to archive run');
+                                  }
+                                } catch (error) {
+                                  console.error('Error archiving run:', error);
+                                  alert('Failed to archive run');
+                                }
+                              }}
+                              className="p-1.5 text-gray-600 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+                              title="Archive run"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                              </svg>
+                            </button>
+                          )}
+                          
+                          {/* Unarchive button - only in archive tab */}
+                          {activeTab === 'archive' && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+                                  const response = await fetch(`${apiUrl}/runs/${run.run_id}/unarchive`, {
+                                    method: 'POST',
+                                  });
+                                  if (response.ok) {
+                                    fetchRuns();
+                                  } else {
+                                    alert('Failed to unarchive run');
+                                  }
+                                } catch (error) {
+                                  console.error('Error unarchiving run:', error);
+                                  alert('Failed to unarchive run');
+                                }
+                              }}
+                              className="p-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors"
+                              title="Unarchive run"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                            </button>
+                          )}
+                          
+                          {/* Download CSV button */}
+                          {run.status === "completed" && run.csv_filename && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                downloadCSV(run.run_id, run.csv_filename);
+                              }}
+                              className="ml-auto text-xs px-2 py-1 bg-[#1e3a5f] text-white rounded hover:bg-[#2a4f7a] transition-colors"
+                            >
+                              Download CSV
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
