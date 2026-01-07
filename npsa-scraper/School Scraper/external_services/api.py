@@ -460,64 +460,6 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         return {'success': False, 'error': f'Error reading results: {str(e)}'}
 
 
-def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int):
-    """
-    Process a single county and track timing for average calculation.
-    Returns tuple: (county_index, result_dict, processing_time_seconds)
-    """
-    start_time = time.time()
-    try:
-        # Update progress
-        progress_pct = int((county_index / total_counties) * 100)
-        pipeline_runs[run_id]["progress"] = progress_pct
-        pipeline_runs[run_id]["currentCounty"] = county
-        pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
-        pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
-        
-        # Process this county
-        result = process_single_county(state, county, run_id, county_index, total_counties)
-        
-        processing_time = time.time() - start_time
-        
-        if not result.get('success'):
-            print(f"[{run_id}] ERROR {county}: {result.get('error', 'Unknown error')}")
-            pipeline_runs[run_id]["statusMessage"] = f"Warning: {county} County failed, continuing..."
-        
-        # Update progress after county completion
-        pipeline_runs[run_id]["countiesProcessed"] = pipeline_runs[run_id].get("countiesProcessed", 0) + 1
-        pipeline_runs[run_id]["schoolsFound"] = pipeline_runs[run_id].get("schoolsFound", 0) + result.get('schools', 0)
-        pipeline_runs[run_id]["schoolsProcessed"] = pipeline_runs[run_id].get("schoolsProcessed", 0) + result.get('schools', 0)
-        
-        # Health check runs in main process after subprocess dies (in process_all_counties)
-        # Resource monitoring
-        log_resource_usage()
-        
-        # Track county timing for average calculation
-        if "countyTimes" not in pipeline_runs[run_id]:
-            pipeline_runs[run_id]["countyTimes"] = []
-        pipeline_runs[run_id]["countyTimes"].append(processing_time)
-        
-        # Track per-county contacts and schools for graphs
-        if "countyContacts" not in pipeline_runs[run_id]:
-            pipeline_runs[run_id]["countyContacts"] = []
-        if "countySchools" not in pipeline_runs[run_id]:
-            pipeline_runs[run_id]["countySchools"] = []
-        
-        pipeline_runs[run_id]["countyContacts"].append(result.get('contacts', 0))
-        pipeline_runs[run_id]["countySchools"].append(result.get('schools', 0))
-        
-        print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
-        
-        return (county_index, result, processing_time)
-        
-    except Exception as e:
-        processing_time = time.time() - start_time
-        error_msg = f"Pipeline failed at county {county_index}: {str(e)}"
-        print(f"[{run_id}] {error_msg}")
-        pipeline_runs[run_id]["statusMessage"] = f"Warning: {county} County failed, continuing..."
-        import traceback
-        traceback.print_exc()
-        return (county_index, {'success': False, 'error': str(e)}, processing_time)
 
 
 def process_county_worker_multiprocessing(args):
@@ -750,14 +692,15 @@ def run_streaming_pipeline(state: str, run_id: str):
     - MAX_WORKERS=2: Parallel processing with 2 workers (50% time reduction)
     - MAX_WORKERS=4: Parallel processing with 4 workers (75% time reduction)
     
-    Parallel processing uses multiprocessing.Pool with maxtasksperchild=1:
+    Both sequential and parallel modes use multiprocessing.Pool with maxtasksperchild=1:
     - Each worker process terminates after one county, automatically cleaning up Chrome processes
+    - When worker dies, OS automatically reaps all child processes (Chrome/ChromeDriver)
     - Checkpoint coordination (locks prevent race conditions)
     - Progress tracking (locks ensure accurate updates)
-    - Out-of-order county completion handling
+    - Out-of-order county completion handling (for parallel mode)
     
-    This approach balances speed with resource management and prevents
-    Chrome process accumulation by ensuring workers die after each task.
+    This unified approach prevents Chrome process accumulation by ensuring workers
+    die after each task, eliminating zombie processes in both sequential and parallel modes.
     """
     # Initialize progress tracking FIRST, before any operations that might fail
     pipeline_runs[run_id] = {
@@ -831,160 +774,108 @@ def run_streaming_pipeline(state: str, run_id: str):
             pipeline_runs[run_id]["totalCounties"] = total_counties
             pipeline_runs[run_id]["statusMessage"] = f"Processing {state} ({len(completed_counties)}/{total_counties} counties completed, resuming from {start_index})..."
             
-            # Determine processing mode based on MAX_WORKERS
+            # Determine processing mode message
             if MAX_WORKERS == 1:
                 print(f"[{run_id}] Processing {total_counties} counties sequentially (starting from index {start_index})...")
-                processing_mode = "sequential"
             else:
                 print(f"[{run_id}] Processing {total_counties} counties with {MAX_WORKERS} parallel workers (starting from index {start_index})...")
-                processing_mode = "parallel"
             
-            # Filter out already completed counties for parallel processing
+            # Filter out already completed counties
             remaining_counties = [(idx, county) for idx, county in enumerate(counties) 
                                  if idx >= start_index and county not in completed_counties]
             
-            if processing_mode == "sequential":
-                # SEQUENTIAL PROCESSING: Process counties one at a time in subprocesses
-                for idx, county in remaining_counties:
-                    # Check for cancellation before each county
-                    if running_threads.get(run_id, {}).get('cancelled', False):
-                        pipeline_runs[run_id]["status"] = "cancelled"
-                        pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
-                        print(f"[{run_id}] Pipeline cancelled during processing")
-                        return
-                    
-                    try:
-                        # Process this county with timing (runs in subprocess)
-                        county_index, result, processing_time = process_county_with_timing(
-                            state, run_id, county, idx, total_counties
-                        )
+            # UNIFIED PROCESSING: Use Pool for both sequential (MAX_WORKERS=1) and parallel (MAX_WORKERS>1)
+            # maxtasksperchild=1 forces each worker to terminate after one county,
+            # which automatically cleans up all Chrome child processes when the worker dies
+            with Pool(processes=MAX_WORKERS, maxtasksperchild=1) as pool:
+                # Submit all remaining counties to the pool
+                pool_args = [(idx, county, state, run_id, total_counties) for idx, county in remaining_counties]
+                
+                # Use imap_unordered to get results as they complete (out-of-order is handled)
+                try:
+                    for idx, county, result, processing_time in pool.imap_unordered(process_county_worker_multiprocessing, pool_args):
+                        # Check for cancellation
+                        if running_threads.get(run_id, {}).get('cancelled', False):
+                            pool.terminate()  # Force kill all workers
+                            pool.join()
+                            pipeline_runs[run_id]["status"] = "cancelled"
+                            pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+                            print(f"[{run_id}] Pipeline cancelled during processing")
+                            return
                         
-                        # Health check after subprocess dies (lists remaining processes)
-                        check_health()
-                        log_resource_usage()
-                        
-                        # Mark county as completed
+                        # Update progress in main process (thread-safe)
                         with checkpoint_lock:
                             if county not in completed_counties:
                                 completed_counties.append(county)
+                            
+                            completed = len(completed_counties)
+                            progress_pct = int((completed / total_counties) * 100)
+                            
+                            # Update pipeline_runs state
+                            with progress_lock:
+                                pipeline_runs[run_id]["progress"] = progress_pct
+                                pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
+                                pipeline_runs[run_id]["countiesProcessed"] = pipeline_runs[run_id].get("countiesProcessed", 0) + 1
+                                pipeline_runs[run_id]["schoolsFound"] = pipeline_runs[run_id].get("schoolsFound", 0) + result.get('schools', 0)
+                                pipeline_runs[run_id]["schoolsProcessed"] = pipeline_runs[run_id].get("schoolsProcessed", 0) + result.get('schools', 0)
+                                
+                                # Track county timing for average calculation
+                                if "countyTimes" not in pipeline_runs[run_id]:
+                                    pipeline_runs[run_id]["countyTimes"] = []
+                                pipeline_runs[run_id]["countyTimes"].append(processing_time)
+                                
+                                # Track per-county contacts and schools for graphs
+                                if "countyContacts" not in pipeline_runs[run_id]:
+                                    pipeline_runs[run_id]["countyContacts"] = []
+                                if "countySchools" not in pipeline_runs[run_id]:
+                                    pipeline_runs[run_id]["countySchools"] = []
+                                
+                                pipeline_runs[run_id]["countyContacts"].append(result.get('contacts', 0))
+                                pipeline_runs[run_id]["countySchools"].append(result.get('schools', 0))
+                            
+                            print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
+                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                            
+                            # Save checkpoint after every N counties (batch size)
+                            is_checkpoint = completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties
+                            if is_checkpoint:
+                                save_checkpoint(run_id, state, completed_counties, max(idx + 1, len(completed_counties)), total_counties)
+                                
+                                # Update metadata
+                                metadata = load_run_metadata(run_id) or {}
+                                metadata.update({
+                                    "status": "running",
+                                    "completed_counties": completed_counties,
+                                    "progress": progress_pct,
+                                    "last_checkpoint": time.time()
+                                })
+                                save_run_metadata(run_id, metadata)
+                                
+                                print(f"[{run_id}] Checkpoint saved after {completed} counties")
                         
-                        # Update progress
-                        completed = len(completed_counties)
-                        progress_pct = int((completed / total_counties) * 100)
+                        # Health check after each county (lists remaining processes)
+                        check_health()
                         
-                        with progress_lock:
-                            pipeline_runs[run_id]["progress"] = progress_pct
-                            pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
+                        # Resource monitoring
+                        log_resource_usage()
                         
-                        print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                    
-                        # Save checkpoint after every N counties (batch size)
-                        if completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties:
-                            save_checkpoint(run_id, state, completed_counties, idx + 1, total_counties)
-                            
-                            # Update metadata
-                            metadata = load_run_metadata(run_id) or {}
-                            metadata.update({
-                                "status": "running",
-                                "completed_counties": completed_counties,
-                                "progress": progress_pct,
-                                "last_checkpoint": time.time()
-                            })
-                            save_run_metadata(run_id, metadata)
-                            
-                            print(f"[{run_id}] Checkpoint saved after {completed} counties")
-                    
-                    except Exception as e:
-                        print(f"[{run_id}] County {county} generated an exception: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        continue
-            else:
-                # PARALLEL PROCESSING: Process counties with multiprocessing.Pool
-                # maxtasksperchild=1 forces each worker to terminate after one task,
-                # which automatically cleans up all Chrome child processes
-                # Process with multiprocessing.Pool (maxtasksperchild=1 ensures workers die after each task)
-                with Pool(processes=MAX_WORKERS, maxtasksperchild=1) as pool:
-                    # Submit all remaining counties to the pool
-                    # Pass state, run_id, total_counties as part of args for worker function
-                    pool_args = [(idx, county, state, run_id, total_counties) for idx, county in remaining_counties]
-                    
-                    # Use imap_unordered to get results as they complete (out-of-order is handled)
-                    try:
-                        for idx, county, result, processing_time in pool.imap_unordered(process_county_worker_multiprocessing, pool_args):
-                            # Check for cancellation
-                            if running_threads.get(run_id, {}).get('cancelled', False):
-                                pool.terminate()  # Force kill all workers
-                                pool.join()
-                                pipeline_runs[run_id]["status"] = "cancelled"
-                                pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
-                                print(f"[{run_id}] Pipeline cancelled during parallel processing")
-                                return
-                            
-                            # Update progress in main process (thread-safe)
-                            with checkpoint_lock:
-                                if county not in completed_counties:
-                                    completed_counties.append(county)
-                                
-                                completed = len(completed_counties)
-                                progress_pct = int((completed / total_counties) * 100)
-                                
-                                # Update pipeline_runs state
-                                with progress_lock:
-                                    pipeline_runs[run_id]["progress"] = progress_pct
-                                    pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
-                                    pipeline_runs[run_id]["countiesProcessed"] = pipeline_runs[run_id].get("countiesProcessed", 0) + 1
-                                    pipeline_runs[run_id]["schoolsFound"] = pipeline_runs[run_id].get("schoolsFound", 0) + result.get('schools', 0)
-                                    pipeline_runs[run_id]["schoolsProcessed"] = pipeline_runs[run_id].get("schoolsProcessed", 0) + result.get('schools', 0)
-                                    
-                                    # Track county timing for average calculation
-                                    if "countyTimes" not in pipeline_runs[run_id]:
-                                        pipeline_runs[run_id]["countyTimes"] = []
-                                    pipeline_runs[run_id]["countyTimes"].append(processing_time)
-                                    
-                                    # Track per-county contacts and schools for graphs
-                                    if "countyContacts" not in pipeline_runs[run_id]:
-                                        pipeline_runs[run_id]["countyContacts"] = []
-                                    if "countySchools" not in pipeline_runs[run_id]:
-                                        pipeline_runs[run_id]["countySchools"] = []
-                                    
-                                    pipeline_runs[run_id]["countyContacts"].append(result.get('contacts', 0))
-                                    pipeline_runs[run_id]["countySchools"].append(result.get('schools', 0))
-                                
-                                print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
-                                print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                                
-                                # Save checkpoint after every N counties (batch size)
-                                is_checkpoint = completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties
-                                if is_checkpoint:
-                                    save_checkpoint(run_id, state, completed_counties, max(idx + 1, len(completed_counties)), total_counties)
-                                    
-                                    # Update metadata
-                                    metadata = load_run_metadata(run_id) or {}
-                                    metadata.update({
-                                        "status": "running",
-                                        "completed_counties": completed_counties,
-                                        "progress": progress_pct,
-                                        "last_checkpoint": time.time()
-                                    })
-                                    save_run_metadata(run_id, metadata)
-                                    
-                                    print(f"[{run_id}] Checkpoint saved after {completed} counties")
-                            
-                            # Health check after each county
-                            check_health()
-                            
-                            # Resource monitoring
-                            log_resource_usage()
-                            
-                            # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                            gc.collect()
-                    except Exception as e:
-                        print(f"[{run_id}] Error in parallel processing: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        pool.terminate()
-                        pool.join()
+                        # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
+                        gc.collect()
+                        
+                except KeyboardInterrupt:
+                    print(f"[{run_id}] Interrupted by user, cleaning up...")
+                    pool.terminate()
+                    pool.join()
+                    pipeline_runs[run_id]["status"] = "cancelled"
+                    pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+                    return
+                except Exception as e:
+                    print(f"[{run_id}] Error in pool processing: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    pool.terminate()
+                    pool.join()
+                    # Continue to aggregation if possible, don't crash the entire pipeline
             
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed, starting aggregation...")
