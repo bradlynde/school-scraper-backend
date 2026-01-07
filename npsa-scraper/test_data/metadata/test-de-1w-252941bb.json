@@ -1,0 +1,10 @@
+{
+  "run_id": "test-de-1w-252941bb",
+  "state": "delaware",
+  "status": "running",
+  "total_counties": 3,
+  "completed_counties": [],
+  "start_time": 1767738525.7547898,
+  "created_at": "2026-01-06T17:28:45.754792",
+  "updated_at": "2026-01-06T17:28:45.754805"
+}

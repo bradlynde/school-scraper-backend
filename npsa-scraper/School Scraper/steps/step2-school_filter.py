@@ -17,6 +17,14 @@ try:
 except ImportError:
     OPENAI_AVAILABLE = False
 
+# ANSI escape codes for bold text
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def bold(text: str) -> str:
+    """Make text bold in terminal output"""
+    return f"{BOLD}{text}{RESET}"
+
 
 # Exclusion keywords (churches, camps, etc.)
 EXCLUDE_KEYWORDS = [
@@ -370,7 +378,7 @@ class LLMSchoolFilter:
         
         except Exception as e:
             # On error, default to False (safer to exclude)
-            print(f"  ⚠️  LLM filter error: {e}")
+            print(f"  {bold('[LLM]')} Filter error: {e}")
             for school in batch:
                 self.cache[school.name.lower().strip()] = False
     

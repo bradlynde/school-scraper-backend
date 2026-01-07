@@ -12,6 +12,14 @@ import time
 from typing import List, Dict
 import re
 
+# ANSI escape codes for bold text
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def bold(text: str) -> str:
+    """Make text bold in terminal output"""
+    return f"{BOLD}{text}{RESET}"
+
 
 # Step 7: Extract ALL contacts (NO filtering - that happens in Step 10)
 CONTACT_EXTRACTION_PROMPT = """
@@ -149,7 +157,7 @@ HTML CONTENT:
                 # Check if it's a timeout error
                 is_timeout = 'timeout' in error_str.lower() or 'timed out' in error_str.lower()
                 if is_timeout:
-                    print(f"      ⚠️  Request timed out (attempt {attempt + 1}/{max_retries})")
+                    print(f"      {bold('[LLM]')} Request timed out (attempt {attempt + 1}/{max_retries})")
                     if attempt < max_retries - 1:
                         time.sleep(1.0)
                         continue
@@ -173,20 +181,20 @@ HTML CONTENT:
                     
                     # For rate limits, wait longer and retry
                     if attempt < max_retries - 1:
-                        print(f"      ⚠️  Rate limit hit (attempt {attempt + 1}/{max_retries}), waiting {wait_seconds:.1f}s...")
+                        print(f"      {bold('[LLM]')} Rate limit hit (attempt {attempt + 1}/{max_retries}), waiting {wait_seconds:.1f}s...")
                         time.sleep(wait_seconds)
                         continue
                     else:
-                        print(f"      ❌ Rate limit exceeded after {max_retries} attempts. Skipping this chunk.")
+                        print(f"      {bold('[LLM]')} Rate limit exceeded after {max_retries} attempts. Skipping this chunk.")
                         return ""
                 else:
                     # For other errors, use exponential backoff
                     if attempt < max_retries - 1:
                         wait_time = 2 ** attempt
-                        print(f"      WARNING: LLM error (attempt {attempt + 1}/{max_retries}): {e}, retrying in {wait_time}s...")
+                        print(f"      {bold('[LLM]')} Error (attempt {attempt + 1}/{max_retries}): {e}, retrying in {wait_time}s...")
                         time.sleep(wait_time)
                         continue
-                    print(f"      ERROR: LLM error: {e}")
+                    print(f"      {bold('[LLM]')} Error: {e}")
                     return ""
         
         return ""

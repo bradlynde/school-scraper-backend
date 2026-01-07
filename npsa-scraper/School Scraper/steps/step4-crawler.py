@@ -42,6 +42,14 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+# ANSI escape codes for bold text
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def bold(text: str) -> str:
+    """Make text bold in terminal output"""
+    return f"{BOLD}{text}{RESET}"
+
 
 class ContentCollector:
     def __init__(self, timeout: int = 10, max_retries: int = 1, use_selenium: bool = True, page_timeout: int = 45):
@@ -194,13 +202,13 @@ class ContentCollector:
             if retry_count < max_retries:
                 # Retry with exponential backoff
                 wait_time = 2 ** retry_count  # 1s, 2s, 4s
-                print(f"    [SELENIUM] Failed to create Chrome driver (attempt {retry_count + 1}/{max_retries + 1}): {e}")
-                print(f"    [SELENIUM] Retrying in {wait_time}s...")
+                print(f"    {bold('[SELENIUM]')} Failed to create Chrome driver (attempt {retry_count + 1}/{max_retries + 1}): {e}")
+                print(f"    {bold('[SELENIUM]')} Retrying in {wait_time}s...")
                 time.sleep(wait_time)
                 return self._setup_selenium(retry_count=retry_count + 1, max_retries=max_retries)
             else:
                 # Final attempt with minimal options
-                print(f"    [SELENIUM] All retries exhausted, trying minimal options...")
+                print(f"    {bold('[SELENIUM]')} All retries exhausted, trying minimal options...")
             try:
                 minimal_options = Options()
                 minimal_options.add_argument('--headless')
@@ -212,10 +220,10 @@ class ContentCollector:
                 driver = webdriver.Chrome(service=service, options=minimal_options)
                 driver.set_page_load_timeout(45)
                 driver.set_script_timeout(45)
-                print(f"    [SELENIUM] Driver created with minimal options")
+                print(f"    {bold('[SELENIUM]')} Driver created with minimal options")
                 return driver
             except Exception as e2:
-                print(f"    [SELENIUM] ERROR: Could not create Chrome driver even with minimal options: {e2}")
+                print(f"    {bold('[SELENIUM]')} ERROR: Could not create Chrome driver even with minimal options: {e2}")
                 raise
     
     def _ensure_driver_healthy(self):
@@ -228,11 +236,11 @@ class ContentCollector:
         try:
             self.driver.execute_script("return document.readyState")
         except:
-            print("    [SELENIUM] Driver crashed, restarting...")
+            print(f"    {bold('[SELENIUM]')} Driver crashed, restarting...")
             driver = None
             try:
                 if self.driver:
-                self.driver.quit()
+                    self.driver.quit()
             except:
                 pass  # Don't let cleanup fail
             finally:
@@ -246,13 +254,13 @@ class ContentCollector:
         """Basic cleanup: quit Selenium driver if it exists"""
         driver = None
         try:
-        if self.driver:
+            if self.driver:
                 driver = self.driver
                 self.driver = None
                 driver.quit()
-                print("    [SELENIUM] Driver quit")
+                print(f"    {bold('[SELENIUM]')} Driver quit")
         except Exception as e:
-            print(f"    [SELENIUM] WARNING: Error quitting driver: {e}")
+            print(f"    {bold('[SELENIUM]')} WARNING: Error quitting driver: {e}")
         finally:
             # No cleanup needed - subprocess will die naturally and take children with it
             self.driver = None
@@ -563,17 +571,9 @@ class ContentCollector:
             input_csv: CSV from Step 3 with discovered pages
             output_csv: Output CSV with collected page content
         """
-        print("\n" + "="*70)
-        print("STEP 4: COLLECTING PAGE CONTENT")
-        print("="*70)
-        print("Using FALLBACK approach: Beautiful Soup → Selenium")
-        print("="*70)
-        
         # Read discovered pages
         df = pd.read_csv(input_csv)
-        
-        print(f"Processing {len(df)} pages from {df['school_name'].nunique()} schools")
-        print("="*70 + "\n")
+        print(f"{bold('[STEP 4]')} Processing {len(df)} pages from {df['school_name'].nunique()} schools")
         
         all_content = []
         
@@ -581,22 +581,20 @@ class ContentCollector:
             school_name = row['school_name']
             url = row['url']
             
-            print(f"\n[{idx+1}/{len(df)}] {school_name}")
-            print(f"  URL: {url[:70]}...")
-            
             # Collect content from this page
             content = self.collect_page_content(school_name, url)
             
             if content:
                 all_content.append(content)
-                print(f"  Collected content ({content['fetch_method']}) - {content['email_count']} emails found")
+                if (idx + 1) % 10 == 0:
+                    print(f"{bold('[STEP 4]')} Progress: {idx+1}/{len(df)} pages, {len(all_content)} collected, {sum(c.get('email_count', 0) for c in all_content)} emails")
             else:
-                print(f"  ERROR: Failed to collect content")
+                if (idx + 1) % 10 == 0:
+                    print(f"{bold('[STEP 4]')} Progress: {idx+1}/{len(df)} pages, {len(all_content)} collected")
             
             # Save progress every 10 pages
             if (idx + 1) % 10 == 0:
                 self._save_content(all_content, output_csv)
-                print(f"\n  Progress saved: {len(all_content)} pages collected so far")
             
             time.sleep(0.5)  # Polite delay
         
@@ -637,27 +635,7 @@ class ContentCollector:
         total_emails = df['email_count'].sum()
         pages_with_emails = df[df['has_emails'] == True]
         
-        print("\n" + "="*70)
-        print("CONTENT COLLECTION COMPLETE")
-        print("="*70)
-        print(f"Pages processed: {len(pages_df)}")
-        print(f"Pages with content collected: {len(df)}")
-        print(f"Schools processed: {schools_processed}")
-        print(f"Schools with content: {schools_with_content}/{schools_processed} ({schools_with_content/schools_processed*100:.1f}%)")
-        print(f"Pages with emails: {len(pages_with_emails)} ({len(pages_with_emails)/len(df)*100:.1f}%)")
-        print(f"Total emails found: {total_emails}")
-        
-        # Breakdown by fetch method
-        if 'fetch_method' in df.columns:
-            method_counts = df['fetch_method'].value_counts()
-            print(f"\nFetch method breakdown:")
-            for method, count in method_counts.items():
-                print(f"  {method}: {count} pages ({count/len(df)*100:.1f}%)")
-        
-        print(f"\nOutput file: {output_file}")
-        print("="*70)
-        print("📝 Next step: Run Step 5 to parse content with LLM")
-        print("="*70)
+        print(f"{bold('[STEP 4]')} Complete: {len(df)}/{len(pages_df)} pages collected, {schools_with_content}/{schools_processed} schools, {total_emails} emails")
 
 
 if __name__ == "__main__":
@@ -678,12 +656,12 @@ if __name__ == "__main__":
         # Cleanup Selenium driver with nuclear option
         driver = None
         try:
-        if collector.driver:
+            if collector.driver:
                 driver = collector.driver
                 collector.driver = None
                 driver.quit()
-            except:
+        except:
             pass  # Don't let cleanup fail
         finally:
             # No cleanup needed - subprocess will die naturally and take children with it
-                pass
+            pass

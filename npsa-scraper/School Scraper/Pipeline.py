@@ -544,8 +544,6 @@ class StreamingPipeline:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Streaming Pipeline - One Lead Through Entire System')
-    parser.add_argument('--google-api-key', required=True, help='Google Places API key (legacy)')
-    parser.add_argument('--openai-api-key', required=True, help='OpenAI API key')
     parser.add_argument('--state', required=True, help='State to search (e.g., texas, california) - loads counties from assets/data/state_counties/{state}.txt')
     parser.add_argument('--global-max-api-calls', type=int, default=3000, help='Global API call cap (default: 3000 for full Texas run, ~254 counties × 5 terms + pagination + Place Details)')
     parser.add_argument('--max-schools', type=int, default=None, help='Maximum number of schools to discover (default: unlimited)')
@@ -556,16 +554,23 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # Debug: Check if API keys are being parsed correctly
-    if not args.google_api_key or len(args.google_api_key) < 10:
-        print(f"ERROR: Google API key not provided or invalid (length: {len(args.google_api_key) if args.google_api_key else 0})")
-        print(f"DEBUG: args.google_api_key value: '{args.google_api_key[:20] if args.google_api_key else 'None'}...'")
+    # Get API keys from environment variables only
+    google_api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
+    openai_api_key = os.getenv("OPENAI_API_KEY", "")
+    
+    # Validate API keys
+    if not google_api_key or len(google_api_key) < 10:
+        print(f"ERROR: GOOGLE_PLACES_API_KEY environment variable not set or invalid")
+        sys.exit(1)
+    
+    if not openai_api_key or len(openai_api_key) < 10:
+        print(f"ERROR: OPENAI_API_KEY environment variable not set or invalid")
         sys.exit(1)
     
     # Create pipeline
     pipeline = StreamingPipeline(
-        google_api_key=args.google_api_key,
-        openai_api_key=args.openai_api_key,
+        google_api_key=google_api_key,
+        openai_api_key=openai_api_key,
         global_max_api_calls=args.global_max_api_calls,
         max_pages_per_school=args.max_pages_per_school,
         state=args.state,

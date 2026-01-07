@@ -96,6 +96,14 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
 checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
 
+# ANSI escape codes for bold text
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def bold(text: str) -> str:
+    """Make text bold in terminal output"""
+    return f"{BOLD}{text}{RESET}"
+
 
 def list_chrome_processes():
     """
@@ -146,7 +154,7 @@ def list_chrome_processes():
             'chromedriver_processes': chromedriver_processes
         }
     except Exception as e:
-        print(f"[HEALTH] Error listing processes: {e}")
+        print(f"{bold('[HEALTH]')} Error listing processes: {e}")
         return {
             'chrome_count': 0,
             'chromedriver_count': 0,
@@ -163,25 +171,11 @@ def check_health():
     """
     try:
         process_info = list_chrome_processes()
-        
-        print(f"[HEALTH] Process status:")
-        print(f"  Chrome: {process_info['chrome_count']} processes")
-        print(f"  ChromeDriver: {process_info['chromedriver_count']} processes")
-        print(f"  Total: {process_info['total_count']} processes")
-        
-        if process_info['chrome_processes']:
-            print(f"  Chrome process names:")
-            for proc in process_info['chrome_processes']:
-                print(f"    - PID {proc['pid']}: {proc['name']}")
-        
-        if process_info['chromedriver_processes']:
-            print(f"  ChromeDriver process names:")
-            for proc in process_info['chromedriver_processes']:
-                print(f"    - PID {proc['pid']}: {proc['name']}")
+        print(f"{bold('[HEALTH]')} Chrome: {process_info['chrome_count']}, ChromeDriver: {process_info['chromedriver_count']}, Total: {process_info['total_count']}")
         
         return True
     except Exception as e:
-        print(f"[HEALTH] Error in health check: {e}")
+        print(f"{bold('[HEALTH]')} Error in health check: {e}")
         return True  # Don't fail on health check errors
 
 
@@ -191,9 +185,9 @@ def log_resource_usage():
         rusage = resource.getrusage(resource.RUSAGE_SELF)
         memory_mb = rusage.ru_maxrss / 1024  # Convert KB to MB (on Linux)
         logging.info(f"Memory: {memory_mb:.1f}MB")
-        print(f"[RESOURCE] Memory: {memory_mb:.1f}MB")
+        print(f"{bold('[RESOURCE]')} Memory: {memory_mb:.1f}MB")
     except Exception as e:
-        print(f"[RESOURCE] Error logging resource usage: {e}")
+        print(f"{bold('[RESOURCE]')} Error logging resource usage: {e}")
 
 
 
@@ -492,9 +486,9 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
                             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                                 continue
                     
-                    print(f"[CLEANUP] Killed {killed_count} Chrome processes using psutil")
+                    print(f"{bold('[CLEANUP]')} Killed {killed_count} Chrome processes using psutil")
             except Exception as e:
-                print(f"[CLEANUP] Error killing Chrome processes with psutil: {e}")
+                print(f"{bold('[CLEANUP]')} Error killing Chrome processes with psutil: {e}")
         
         # Fallback: Use pkill to kill Chrome processes
         try:
@@ -1051,8 +1045,8 @@ def run_streaming_pipeline(state: str, run_id: str):
                 pipeline_runs[run_id]["status"] = "error"
                 pipeline_runs[run_id]["error"] = error_msg
                 pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
-        import traceback
-        traceback.print_exc()
+            import traceback
+            traceback.print_exc()
     
     # Start processing in a background thread
     thread = threading.Thread(target=process_all_counties)

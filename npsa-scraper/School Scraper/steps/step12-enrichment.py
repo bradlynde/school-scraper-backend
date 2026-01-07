@@ -18,6 +18,14 @@ from urllib.parse import urlparse
 import re
 from assets.shared.models import Contact
 
+# ANSI escape codes for bold text
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def bold(text: str) -> str:
+    """Make text bold in terminal output"""
+    return f"{BOLD}{text}{RESET}"
+
 
 class HunterIOEnricher:
     """
@@ -133,7 +141,7 @@ class HunterIOEnricher:
                             'score': score  # Only used for threshold check and logging, not stored
                         }
                     else:
-                        print(f"      ⚠️  Email found but score too low ({score} < {self.score_threshold}): {email_data['email']}")
+                        print(f"      {bold('[ENRICH]')} Email score too low ({score} < {self.score_threshold}): {email_data['email']}")
                         return None
                 else:
                     # Email not found
@@ -145,7 +153,7 @@ class HunterIOEnricher:
                 
             elif response.status_code == 429:
                 # Rate limit exceeded
-                print(f"      ⚠️  Rate limit exceeded, waiting 60 seconds...")
+                print(f"      {bold('[ENRICH]')} Rate limit exceeded, waiting 60 seconds...")
                 time.sleep(60)
                 # Retry once
                 response = requests.get(url, params=params, timeout=10)
@@ -165,21 +173,21 @@ class HunterIOEnricher:
                 return None
                 
             elif response.status_code == 401:
-                print(f"      ❌ Invalid Hunter.io API key")
+                print(f"      {bold('[ENRICH]')} Invalid Hunter.io API key")
                 self.stats['errors'] += 1
                 return None
                 
             else:
-                print(f"      ⚠️  Hunter.io API error: {response.status_code}")
+                print(f"      {bold('[ENRICH]')} Hunter.io API error: {response.status_code}")
                 self.stats['errors'] += 1
                 return None
                 
         except requests.exceptions.Timeout:
-            print(f"      ⚠️  Hunter.io API timeout")
+            print(f"      {bold('[ENRICH]')} Hunter.io API timeout")
             self.stats['errors'] += 1
             return None
         except Exception as e:
-            print(f"      ⚠️  Hunter.io API error: {str(e)}")
+            print(f"      {bold('[ENRICH]')} Hunter.io API error: {str(e)}")
             self.stats['errors'] += 1
             return None
     
@@ -206,7 +214,7 @@ class HunterIOEnricher:
         print("="*70)
         
         if not contacts:
-            print(f"  ✓ No contacts to enrich")
+            print(f"  {bold('[STEP 12]')} No contacts to enrich")
             return []
         
         print(f"  📧 Processing {len(contacts)} contacts without emails")
@@ -222,12 +230,12 @@ class HunterIOEnricher:
             
             for contact in batch:
                 if not contact.first_name or not contact.last_name:
-                    print(f"    ⚠️  Skipping: missing name")
+                    print(f"    [ENRICH] Skipping: missing name")
                     continue
                 
                 domain = self.extract_domain_from_url(contact.source_url)
                 if not domain:
-                    print(f"    ⚠️  Skipping {contact.first_name} {contact.last_name}: invalid domain from {contact.source_url}")
+                    print(f"    [ENRICH] Skipping {contact.first_name} {contact.last_name}: invalid domain")
                     continue
                 
                 print(f"    🔍 Searching for: {contact.first_name} {contact.last_name} @ {domain}")
@@ -243,7 +251,7 @@ class HunterIOEnricher:
                     # Only extract email - ignore score and sources from Hunter.io
                     email = email_result['email']
                     score = email_result.get('score', 0)  # Only for logging
-                    print(f"      ✓ Found: {email} (score: {score})")
+                    print(f"      {bold('[ENRICH]')} Found: {email} (score: {score})")
                     
                     # Update contact with ONLY the email field - no other Hunter.io data
                     contact.email = email
@@ -301,13 +309,13 @@ class HunterIOEnricher:
         print("="*70)
         
         if not os.path.exists(csv_path):
-            print(f"  ❌ CSV file not found: {csv_path}")
+            print(f"  {bold('[STEP 12]')} CSV file not found: {csv_path}")
             return csv_path
         
         try:
             # Read CSV
             df = pd.read_csv(csv_path)
-            print(f"  📊 Loaded {len(df)} contacts from CSV")
+            print(f"  {bold('[STEP 12]')} Loaded {len(df)} contacts from CSV")
             
             # Identify contacts without emails
             # Check for email column (try different variations)
@@ -318,7 +326,7 @@ class HunterIOEnricher:
                     break
             
             if not email_col:
-                print(f"  ⚠️  No email column found in CSV, skipping enrichment")
+                print(f"  {bold('[STEP 12]')} No email column found in CSV, skipping enrichment")
                 return csv_path
             
             # Find contacts without emails
@@ -329,7 +337,7 @@ class HunterIOEnricher:
             ].copy()
             
             if len(contacts_without_emails) == 0:
-                print(f"  ✓ All contacts already have emails, no enrichment needed")
+                print(f"  {bold('[STEP 12]')} All contacts already have emails, no enrichment needed")
                 return csv_path
             
             print(f"  📧 Found {len(contacts_without_emails)} contacts without emails")
@@ -342,7 +350,7 @@ class HunterIOEnricher:
                     break
             
             if not source_url_col:
-                print(f"  ⚠️  No source_url column found, cannot extract domains")
+                print(f"  {bold('[STEP 12]')} No source_url column found, cannot extract domains")
                 return csv_path
             
             # Process contacts in batches
@@ -365,7 +373,7 @@ class HunterIOEnricher:
                     
                     domain = self.extract_domain_from_url(source_url)
                     if not domain:
-                        print(f"    ⚠️  Skipping {first_name} {last_name}: invalid domain from {source_url}")
+                        print(f"    [ENRICH] Skipping {first_name} {last_name}: invalid domain")
                         continue
                     
                     print(f"    🔍 Searching for: {first_name} {last_name} @ {domain}")
@@ -377,7 +385,7 @@ class HunterIOEnricher:
                         # Only extract email - ignore score and sources from Hunter.io
                         email = email_result['email']
                         score = email_result.get('score', 0)  # Only for logging
-                        print(f"      ✓ Found: {email} (score: {score})")
+                        print(f"      {bold('[ENRICH]')} Found: {email} (score: {score})")
                         
                         # Update DataFrame with ONLY the email - no other Hunter.io data
                         df.loc[idx, email_col] = email
@@ -403,20 +411,12 @@ class HunterIOEnricher:
             df.to_csv(output_csv_path, index=False)
             
             # Print summary
-            print(f"\n" + "="*70)
-            print(f"EMAIL ENRICHMENT COMPLETE")
-            print(f"="*70)
-            print(f"  Contacts processed: {self.stats['contacts_processed']}")
-            print(f"  Emails found: {self.stats['emails_found']} ({enriched_count} added)")
-            print(f"  API calls: {self.stats['api_calls']}")
-            print(f"  Errors: {self.stats['errors']}")
-            print(f"  Success rate: {(self.stats['emails_found'] / max(1, self.stats['contacts_processed'])) * 100:.1f}%")
-            print(f"  ✓ Saved enriched CSV to: {output_csv_path}")
+            print(f"{bold('[STEP 12]')} Complete: {self.stats['contacts_processed']} processed, {self.stats['emails_found']} emails found ({enriched_count} added), {enriched_count} contacts saved")
             
             return output_csv_path
             
         except Exception as e:
-            print(f"\n  ❌ Error during email enrichment: {str(e)}")
+            print(f"  {bold('[STEP 12]')} Error during email enrichment: {str(e)}")
             import traceback
             traceback.print_exc()
             # Return original CSV path on error
@@ -449,7 +449,7 @@ def enrich_csv_with_hunter_io(
         api_key = os.getenv('HUNTER_IO_API_KEY')
     
     if not api_key:
-        print("  ⚠️  HUNTER_IO_API_KEY not set, skipping email enrichment")
+        print("  {bold('[STEP 12]')} HUNTER_IO_API_KEY not set, skipping email enrichment")
         return csv_path
     
     enricher = HunterIOEnricher(
@@ -471,16 +471,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Enrich CSV contacts with Hunter.io')
     parser.add_argument('input_csv', help='Input CSV file path')
     parser.add_argument('--output', '-o', help='Output CSV file path (default: overwrites input)')
-    parser.add_argument('--api-key', help='Hunter.io API key (or set HUNTER_IO_API_KEY env var)')
     parser.add_argument('--verify', action='store_true', help='Verify found emails (uses more credits)')
     parser.add_argument('--score-threshold', type=int, default=70, help='Minimum email score (0-100)')
     parser.add_argument('--batch-size', type=int, default=10, help='Contacts per batch')
     
     args = parser.parse_args()
     
+    # API key must come from environment variable only
     enrich_csv_with_hunter_io(
         csv_path=args.input_csv,
-        api_key=args.api_key,
+        api_key=None,  # Will get from HUNTER_IO_API_KEY env var
         output_csv_path=args.output,
         verify_emails=args.verify,
         score_threshold=args.score_threshold,

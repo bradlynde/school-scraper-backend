@@ -18,6 +18,14 @@ import random
 import re
 from assets.shared.models import School
 
+# ANSI escape codes for bold text
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def bold(text: str) -> str:
+    """Make text bold in terminal output"""
+    return f"{BOLD}{text}{RESET}"
+
 class SchoolSearcher:
     """Search for schools using New Google Places API Essentials tier, yields School objects"""
     
@@ -392,24 +400,15 @@ class SchoolSearcher:
         if state is None:
             state = self.full_state_name
         
-        print("\n" + "="*70)
-        print(f"STREAMING SCHOOL DISCOVERY - {state.upper()}")
-        print("="*70)
-        print(f"Start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Global API call cap: {self.global_max_api_calls or 'None'}")
-        
         # Shuffle counties for randomness
         shuffled_counties = counties.copy()
         random.shuffle(shuffled_counties)
         
         if batch_size and 0 < batch_size < len(counties):
             counties_to_search = shuffled_counties[:batch_size]
-            print(f"Batch size: {batch_size} counties (randomized)")
         else:
             counties_to_search = shuffled_counties
-            print(f"Batch size: ALL {len(counties)} counties (randomized)")
-        
-        print("="*70 + "\n")
+        print(f"{bold('[STEP 1]')} Starting discovery: {len(counties_to_search)} counties, API cap: {self.global_max_api_calls or 'None'}")
         
         start_time = time.time()
         
@@ -429,23 +428,14 @@ class SchoolSearcher:
                 yield school
             
             county_time = time.time() - county_start
-            print(f"    Found {schools_found} schools in {county} County ({county_time:.1f}s)")
-            print(f"    Total: {self.stats['total_schools_found']} schools | API calls: {self.stats['total_api_calls']}")
+            if schools_found > 0 or (i % 5 == 0):
+                print(f"{bold('[STEP 1]')} {county}: {schools_found} schools ({county_time:.1f}s) | Total: {self.stats['total_schools_found']} schools, {self.stats['total_api_calls']} API calls")
             
             if self._hit_global_limit():
                 break
         
         elapsed = time.time() - start_time
-        print("\n" + "="*70)
-        print("DISCOVERY COMPLETE")
-        print("="*70)
-        print(f"Counties searched: {self.stats['counties_searched']}")
-        print(f"Total schools found: {self.stats['total_schools_found']}")
-        print(f"Schools with websites: {self.stats['schools_with_websites']}")
-        print(f"Non-{state} skipped: {self.stats['non_state_skipped']}")
-        print(f"Total API calls: {self.stats['total_api_calls']}")
-        print(f"Time elapsed: {elapsed/60:.1f} minutes")
-        print("="*70)
+        print(f"{bold('[STEP 1]')} Complete: {self.stats['counties_searched']} counties, {self.stats['total_schools_found']} schools, {self.stats['total_api_calls']} API calls, {elapsed/60:.1f} min")
 
 # County and city lists have been moved to assets/data/state_counties/{state}.txt files
 # Use load_counties_from_state() helper in Pipeline.py to load them

@@ -18,6 +18,14 @@ from pathlib import Path
 import shutil
 from assets.shared.models import Contact
 
+# ANSI escape codes for bold text
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def bold(text: str) -> str:
+    """Make text bold in terminal output"""
+    return f"{BOLD}{text}{RESET}"
+
 
 class FinalCompiler:
     def __init__(self):
@@ -329,10 +337,6 @@ class FinalCompiler:
             output_csv: Optional output CSV filename
             state: State name for filename generation
         """
-        print("\n" + "="*70)
-        print("STEP 13: COMPILING FINAL CSV")
-        print("="*70)
-        
         # Generate output filename with state name if not provided
         if not output_csv:
             state_name = (state or 'Texas').title()
@@ -343,12 +347,10 @@ class FinalCompiler:
         
         # Combine all contacts
         all_contacts = contacts_with_emails + contacts_enriched
-        print(f"  Contacts with emails: {len(contacts_with_emails)}")
-        print(f"  Enriched contacts: {len(contacts_enriched)}")
-        print(f"  Total contacts: {len(all_contacts)}")
+        print(f"{bold('[STEP 13]')} Compiling: {len(contacts_with_emails)} with emails, {len(contacts_enriched)} enriched, {len(all_contacts)} total")
         
         if not all_contacts:
-            print(f"  ⚠️  No contacts to compile")
+            print(f"  {bold('[STEP 13]')} No contacts to compile")
             # Create empty CSV with headers
             empty_df = pd.DataFrame(columns=['first_name', 'last_name', 'title', 'email', 'phone', 
                                             'school_name', 'source_url'])
@@ -404,10 +406,7 @@ class FinalCompiler:
         df_with_emails = final_df[final_df['email'].notna() & (final_df['email'] != '') & (final_df['email'].str.strip() != '')]
         df_without_emails = final_df[final_df['email'].isna() | (final_df['email'] == '') | (final_df['email'].str.strip() == '')]
         
-        print(f"\n✓ Saved {len(final_df)} total contacts to: {output_csv}")
-        print(f"  - With emails: {len(df_with_emails)}")
-        print(f"  - Without emails: {len(df_without_emails)}")
-        print("="*70)
+        print(f"{bold('[STEP 13]')} Saved {len(final_df)} contacts ({len(df_with_emails)} with emails, {len(df_without_emails)} without)")
         
         return output_csv
     
@@ -534,14 +533,12 @@ class FinalCompiler:
         if not final_df.empty:
             final_df.to_csv(output_csv, index=False)
             self._copy_to_downloads(output_csv)
-            print(f"\n✓ Saved {len(final_df)} total contacts to: {output_csv}")
-            print(f"  - With emails: {len(df_with_emails)}")
-            print(f"  - Without emails: {len(df_without_emails)}")
+            print(f"{bold('[STEP 13]')} Saved {len(final_df)} contacts ({len(df_with_emails)} with emails, {len(df_without_emails)} without)")
         else:
             # Create empty CSV with headers if no contacts
             pd.DataFrame(columns=final_df.columns).to_csv(output_csv, index=False)
             self._copy_to_downloads(output_csv)
-            print(f"\n⚠️  No contacts found")
+            print(f"{bold('[STEP 13]')} No contacts found")
         
         # Print summary (using combined data)
         self._print_summary(final_df, output_csv, df_with_emails, df_without_emails)

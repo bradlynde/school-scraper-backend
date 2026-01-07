@@ -14,8 +14,18 @@ import pandas as pd
 import csv
 import io
 import time
+import os
+import sys
 from typing import List, Dict, Optional
 import re
+
+# ANSI escape codes for bold text
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def bold(text: str) -> str:
+    """Make text bold in terminal output"""
+    return f"{BOLD}{text}{RESET}"
 
 
 # Title filtering prompt - determines if a contact is administrative
@@ -173,11 +183,11 @@ Title: {title}"""
                             wait_seconds = wait_value + 0.5
                     
                     if attempt < max_retries - 1:
-                        print(f"      ⚠️  Rate limit hit (attempt {attempt + 1}/{max_retries}), waiting {wait_seconds:.1f}s...")
+                        print(f"      {bold('[LLM]')} Rate limit hit (attempt {attempt + 1}/{max_retries}), waiting {wait_seconds:.1f}s...")
                         time.sleep(wait_seconds)
                         continue
                     else:
-                        print(f"      ❌ Rate limit exceeded. Excluding contact.")
+                        print(f"      {bold('[LLM]')} Rate limit exceeded. Excluding contact.")
                         return False
                 else:
                     if attempt < max_retries - 1:
@@ -199,18 +209,9 @@ Title: {title}"""
             output_csv: Output CSV with filtered contacts (administrative only)
             output_excluded_csv: Optional CSV with excluded contacts (for review)
         """
-        print("\n" + "="*70)
-        print("STEP 10: FILTERING CONTACTS BY TITLE")
-        print("="*70)
-        print(f"Model: {self.model}")
-        print("Filtering contacts to keep only administrative/leadership roles")
-        print("="*70 + "\n")
-        
         # Read contacts from Step 9
         df = pd.read_csv(input_csv)
-        
-        print(f"Processing {len(df)} contacts from Step 9")
-        print("="*70 + "\n")
+        print(f"{bold('[STEP 10]')} Processing {len(df)} contacts")
         
         kept_contacts = []
         excluded_contacts = []
@@ -226,8 +227,8 @@ Title: {title}"""
                 'source_url': row.get('source_url', '')
             }
             
-            if (idx + 1) % 10 == 0:
-                print(f"  Processing contact {idx + 1}/{len(df)}...")
+            if (idx + 1) % 50 == 0:
+                print(f"{bold('[STEP 10]')} Progress: {idx + 1}/{len(df)} contacts")
             
             # Filter by title
             should_keep = self.filter_contact(contact, max_retries=5)
@@ -245,28 +246,15 @@ Title: {title}"""
         if kept_contacts:
             df_kept = pd.DataFrame(kept_contacts)
             df_kept.to_csv(output_csv, index=False)
-            print(f"\n✓ Kept {len(kept_contacts)} administrative contacts")
         else:
             # Create empty CSV with headers
             pd.DataFrame(columns=['first_name', 'last_name', 'title', 'email', 'phone', 'school_name', 'source_url']).to_csv(output_csv, index=False)
-            print(f"\n⚠️  No administrative contacts found")
         
         if output_excluded_csv and excluded_contacts:
             df_excluded = pd.DataFrame(excluded_contacts)
             df_excluded.to_csv(output_excluded_csv, index=False)
-            print(f"✓ Excluded {len(excluded_contacts)} non-administrative contacts")
         
-        # Print summary
-        print("\n" + "="*70)
-        print("FILTERING COMPLETE")
-        print("="*70)
-        print(f"Total contacts processed: {len(df)}")
-        print(f"Contacts kept (administrative): {len(kept_contacts)}")
-        print(f"Contacts excluded (non-administrative): {len(excluded_contacts)}")
-        print(f"Output file: {output_csv}")
-        if output_excluded_csv:
-            print(f"Excluded contacts file: {output_excluded_csv}")
-        print("="*70)
+        print(f"{bold('[STEP 10]')} Complete: {len(kept_contacts)} kept, {len(excluded_contacts)} excluded from {len(df)} total")
 
 
 if __name__ == "__main__":
@@ -276,9 +264,14 @@ if __name__ == "__main__":
     parser.add_argument('--input', required=True, help='Input CSV from Step 5')
     parser.add_argument('--output', default='step10_contacts_filtered.csv', help='Output CSV filename for filtered contacts')
     parser.add_argument('--output-excluded', default=None, help='Output CSV filename for excluded contacts (optional)')
-    parser.add_argument('--api-key', required=True, help='OpenAI API key')
     parser.add_argument('--model', default='gpt-4o-mini', help='Model to use (default: gpt-4o-mini)')
     args = parser.parse_args()
     
-    filterer = TitleFilter(api_key=args.api_key, model=args.model)
+    # API key must come from OPENAI_API_KEY environment variable
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        print("ERROR: OPENAI_API_KEY environment variable not set")
+        sys.exit(1)
+    
+    filterer = TitleFilter(api_key=api_key, model=args.model)
     filterer.filter_contacts(args.input, args.output, args.output_excluded)

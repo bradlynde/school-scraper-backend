@@ -16,6 +16,14 @@ from typing import List, Dict, Set
 import re
 import pandas as pd
 
+# ANSI escape codes for bold text
+BOLD = '\033[1m'
+RESET = '\033[0m'
+
+def bold(text: str) -> str:
+    """Make text bold in terminal output"""
+    return f"{BOLD}{text}{RESET}"
+
 
 class PageDiscoverer:
     def __init__(self, timeout: int = 10, max_retries: int = 1):
@@ -490,7 +498,7 @@ class PageDiscoverer:
                 if high_value_page_found and len(discovered_pages) >= min_sufficient_pages:
                     # We have enough pages, stop crawling
                     sufficient_pages_found = True
-                    print(f"    ✓ Found {len(discovered_pages)} sufficient pages - stopping crawl (early exit)")
+                    print(f"    {bold('[STEP 3]')} Found {len(discovered_pages)} sufficient pages - stopping crawl")
                     break
                 
                 # Extract links for next level crawl (if not at max depth and not at page limit)
@@ -569,7 +577,7 @@ class PageDiscoverer:
                                     'priority_score': total_score,
                                     'school_name': school_name
                                 })
-                                print(f"    ✓ Found fallback page: {path} (score: {total_score})")
+                                print(f"    {bold('[STEP 3]')} Found fallback page: {path} (score: {total_score})")
                     except:
                         pass  # Silently skip if fallback fails
         
@@ -579,7 +587,7 @@ class PageDiscoverer:
         discovered_pages = valid_pages[:top_pages_limit]
         
         if discovered_pages:
-            print(f"    ✓ Found {len(discovered_pages)} page(s):")
+            print(f"    {bold('[STEP 3]')} Found {len(discovered_pages)} page(s)")
             for page in discovered_pages:
                 print(f"      - {page['title'][:60]}")
         else:

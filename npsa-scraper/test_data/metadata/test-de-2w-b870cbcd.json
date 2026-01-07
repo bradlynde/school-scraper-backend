@@ -1,0 +1,16 @@
+{
+  "run_id": "test-de-2w-b870cbcd",
+  "state": "delaware",
+  "status": "running",
+  "total_counties": 3,
+  "completed_counties": [
+    "Kent",
+    "New Castle",
+    "Sussex"
+  ],
+  "start_time": 1767655582.527499,
+  "created_at": "2026-01-05T18:26:22.527501",
+  "updated_at": "2026-01-05T18:50:07.338802",
+  "progress": 100,
+  "last_checkpoint": 1767657007.338777
+}
