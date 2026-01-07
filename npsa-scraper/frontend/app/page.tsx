@@ -37,7 +37,7 @@ type PipelineSummary = {
   countySchools?: number[];
 };
 
-type ViewState = "start" | "progress" | "summary" | "running" | "finished";
+type ViewState = "start" | "progress" | "summary" | "running" | "finished" | "archive";
 
 const US_STATES = [
   { value: "alabama", label: "Alabama" },
