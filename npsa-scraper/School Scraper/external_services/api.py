@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import resource  # For memory monitoring
 import logging  # For logging
 import platform  # For OS detection
-import signal  # For SIGKILL
+import multiprocessing  # For subprocess isolation
 
 # Try to import psutil for process tree killing (optional)
 try:
@@ -97,172 +97,88 @@ checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
 
 
-def robust_cleanup_chrome_processes(max_attempts=3, delay_seconds=3.0):
+def list_chrome_processes():
     """
-    Robust cleanup of Chrome and ChromeDriver processes with verification.
-    
-    Uses platform-specific commands for maximum reliability:
-    - macOS: killall (more reliable than psutil on macOS)
-    - Linux: pkill + psutil (dual approach)
-    
-    Steps:
-    1. Use platform-specific kill commands (killall on macOS, pkill on Linux)
-    2. Also try psutil kill for process trees (Linux)
-    3. Wait for processes to terminate
-    4. Verify cleanup worked by checking process count
-    5. Retry if processes remain (up to max_attempts)
-    
-    Args:
-        max_attempts: Maximum number of cleanup attempts (default: 2)
-        delay_seconds: Delay between cleanup and verification (default: 2.0)
+    Health check function that lists all Chrome and ChromeDriver processes.
+    Does NOT kill processes - only reports what exists.
     
     Returns:
-        tuple: (chrome_count, chromedriver_count, total_count) after cleanup
+        dict with process information: {
+            'chrome_count': int,
+            'chromedriver_count': int,
+            'total_count': int,
+            'chrome_processes': list of {'pid': int, 'name': str},
+            'chromedriver_processes': list of {'pid': int, 'name': str}
+        }
     """
-    is_macos = platform.system() == 'Darwin'
+    if not HAS_PSUTIL:
+        return {
+            'chrome_count': 0,
+            'chromedriver_count': 0,
+            'total_count': 0,
+            'chrome_processes': [],
+            'chromedriver_processes': []
+        }
     
-    for attempt in range(max_attempts):
-        try:
-            # Platform-specific cleanup commands
-            if is_macos:
-                # macOS: Use killall (more reliable than psutil on macOS)
-                os.system("killall -9 'Google Chrome' 2>/dev/null || true")
-                os.system("killall -9 'Google Chrome Helper' 2>/dev/null || true")
-                os.system("killall -9 'Google Chrome Helper (Renderer)' 2>/dev/null || true")
-                os.system("killall -9 'Google Chrome Helper (GPU)' 2>/dev/null || true")
-                os.system("killall -9 'Google Chrome Helper (Plugin)' 2>/dev/null || true")
-                os.system("killall -9 chromedriver 2>/dev/null || true")
-                os.system("pkill -9 -f chrome 2>/dev/null || true")  # Catch any remaining
-            else:
-                # Linux: Use aggressive multi-pattern pkill + killall + psutil
-                # Try multiple process name patterns (chrome, chromium, etc.)
-                kill_commands = [
-                    "pkill -9 -f chrome || true",
-                    "pkill -9 -f chromium || true",
-                    "pkill -9 chrome || true",
-                    "pkill -9 chromium || true",
-                    "pkill -9 chromedriver || true",
-                    "killall -9 chrome 2>/dev/null || true",
-                    "killall -9 chromium 2>/dev/null || true",
-                    "killall -9 chromedriver 2>/dev/null || true",
-                ]
-                for cmd in kill_commands:
-                    os.system(cmd)
+    try:
+        chrome_processes = []
+        chromedriver_processes = []
+        
+        for proc in psutil.process_iter(['name', 'pid']):
+            try:
+                name = proc.info['name'].lower()
+                pid = proc.info['pid']
                 
-                # Use psutil to get PIDs and kill directly (more reliable than pkill)
-                if HAS_PSUTIL:
-                    try:
-                        processes_to_kill = []
-                        for proc in psutil.process_iter(['name', 'pid', 'ppid']):
-                            try:
-                                name = proc.info['name'].lower()
-                                if 'chromedriver' in name:
-                                    processes_to_kill.append(proc)
-                                elif 'chrome' in name and 'chromedriver' not in name:
-                                    processes_to_kill.append(proc)
-                                elif 'chromium' in name:
-                                    processes_to_kill.append(proc)
-                            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                                continue
-                        
-                        # Kill processes by PID using os.kill (more reliable)
-                        killed_pids = set()
-                        for proc in processes_to_kill:
-                            try:
-                                pid = proc.pid
-                                if pid in killed_pids:
-                                    continue
-                                
-                                # Kill process tree first
-                                try:
-                                    children = proc.children(recursive=True)
-                                    for child in children:
-                                        try:
-                                            child_pid = child.pid
-                                            if child_pid not in killed_pids:
-                                                os.kill(child_pid, signal.SIGKILL)
-                                                killed_pids.add(child_pid)
-                                        except (ProcessLookupError, PermissionError, psutil.NoSuchProcess, psutil.AccessDenied):
-                                            pass
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-                                
-                                # Kill parent process
-                                try:
-                                    os.kill(pid, signal.SIGKILL)  # More reliable than proc.kill()
-                                    killed_pids.add(pid)
-                                except (ProcessLookupError, PermissionError):
-                                    # If os.kill fails, try proc.kill() as fallback
-                                    try:
-                                        proc.kill()
-                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                        pass
-                            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                                pass
-                    except Exception as e:
-                        # Log but don't fail - fallback to pkill only
-                        print(f"[CLEANUP] Warning: psutil kill failed: {e}")
-            
-            # Wait for processes to terminate
-            time.sleep(delay_seconds)
-            
-            # Verify cleanup worked
-            if HAS_PSUTIL:
-                try:
-                    chrome_processes = [p for p in psutil.process_iter(['name']) 
-                                       if 'chrome' in p.info['name'].lower() and 'chromedriver' not in p.info['name'].lower()]
-                    chromedriver_processes = [p for p in psutil.process_iter(['name']) 
-                                             if 'chromedriver' in p.info['name'].lower()]
-                    chrome_count = len(chrome_processes)
-                    chromedriver_count = len(chromedriver_processes)
-                    total_count = chrome_count + chromedriver_count
-                    
-                    # If cleanup successful (≤5 processes) or last attempt, return
-                    if total_count <= 5 or attempt == max_attempts - 1:
-                        if attempt > 0 and total_count > 5:
-                            print(f"[CLEANUP] Attempt {attempt + 1}: {chrome_count} Chrome + {chromedriver_count} ChromeDriver processes remain")
-                        return (chrome_count, chromedriver_count, total_count)
-                except Exception:
-                    pass
-            
-            # If psutil not available, just return after delay
-            if not HAS_PSUTIL:
-                return (0, 0, 0)
-                
-        except Exception as e:
-            # Fallback to basic pkill on error
-            os.system("pkill -9 chrome || true")
-            os.system("pkill -9 chromedriver || true")
-            time.sleep(delay_seconds)
-    
-    # Final verification
-    if HAS_PSUTIL:
-        try:
-            chrome_processes = [p for p in psutil.process_iter(['name']) 
-                               if 'chrome' in p.info['name'].lower() and 'chromedriver' not in p.info['name'].lower()]
-            chromedriver_processes = [p for p in psutil.process_iter(['name']) 
-                                     if 'chromedriver' in p.info['name'].lower()]
-            return (len(chrome_processes), len(chromedriver_processes), len(chrome_processes) + len(chromedriver_processes))
-        except Exception:
-            return (0, 0, 0)
-    return (0, 0, 0)
+                if 'chromedriver' in name:
+                    chromedriver_processes.append({'pid': pid, 'name': proc.info['name']})
+                elif 'chrome' in name and 'chromedriver' not in name:
+                    chrome_processes.append({'pid': pid, 'name': proc.info['name']})
+                elif 'chromium' in name:
+                    chrome_processes.append({'pid': pid, 'name': proc.info['name']})
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        
+        return {
+            'chrome_count': len(chrome_processes),
+            'chromedriver_count': len(chromedriver_processes),
+            'total_count': len(chrome_processes) + len(chromedriver_processes),
+            'chrome_processes': chrome_processes,
+            'chromedriver_processes': chromedriver_processes
+        }
+    except Exception as e:
+        print(f"[HEALTH] Error listing processes: {e}")
+        return {
+            'chrome_count': 0,
+            'chromedriver_count': 0,
+            'total_count': 0,
+            'chrome_processes': [],
+            'chromedriver_processes': []
+        }
 
 
 def check_health():
-    """Health check function to monitor Chrome and ChromeDriver processes"""
+    """
+    Health check function that lists Chrome and ChromeDriver processes.
+    Does NOT kill processes - only reports what exists.
+    """
     try:
-        if HAS_PSUTIL:
-            chrome_processes = [p for p in psutil.process_iter(['name']) 
-                               if 'chrome' in p.info['name'].lower()]
-            chromedriver_processes = [p for p in psutil.process_iter(['name']) 
-                                     if 'chromedriver' in p.info['name'].lower()]
-            total_processes = len(chrome_processes) + len(chromedriver_processes)
-            if total_processes > 5:
-                print(f"[HEALTH] Found {len(chrome_processes)} Chrome + {len(chromedriver_processes)} ChromeDriver processes ({total_processes} total), killing orphaned processes...")
-                chrome_count, chromedriver_count, total_count = robust_cleanup_chrome_processes()
-                if total_count > 5:
-                    print(f"[HEALTH] After cleanup: {chrome_count} Chrome + {chromedriver_count} ChromeDriver processes remain")
-                return False
+        process_info = list_chrome_processes()
+        
+        print(f"[HEALTH] Process status:")
+        print(f"  Chrome: {process_info['chrome_count']} processes")
+        print(f"  ChromeDriver: {process_info['chromedriver_count']} processes")
+        print(f"  Total: {process_info['total_count']} processes")
+        
+        if process_info['chrome_processes']:
+            print(f"  Chrome process names:")
+            for proc in process_info['chrome_processes']:
+                print(f"    - PID {proc['pid']}: {proc['name']}")
+        
+        if process_info['chromedriver_processes']:
+            print(f"  ChromeDriver process names:")
+            for proc in process_info['chromedriver_processes']:
+                print(f"    - PID {proc['pid']}: {proc['name']}")
+        
         return True
     except Exception as e:
         print(f"[HEALTH] Error in health check: {e}")
@@ -400,24 +316,22 @@ def load_counties_from_state(state: str) -> list:
     return counties
 
 
-def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int):
+def _county_worker(state: str, county: str, run_id: str, county_index: int, total_counties: int, result_file: str):
     """
-    Process a single county through the entire pipeline using StreamingPipeline class
+    Worker function that runs in a subprocess to process a single county.
+    When this subprocess dies, all its children (Chrome processes) die automatically.
     
-    Returns:
-        dict with results: {'schools': count, 'contacts': count, 'contacts_no_emails': count, 'success': bool, 'csv_path': str}
+    Args:
+        state: State name
+        county: County name
+        run_id: Run ID
+        county_index: Index of county
+        total_counties: Total number of counties
+        result_file: Path to JSON file to write results to
     """
-    county_run_id = f"{run_id}_county_{county_index}"
-    county_path_prefix = f"runs/{run_id}/counties/{county.replace(' ', '_')}"
-    
-    pipeline = None
     try:
         # Update progress for this county
         print(f"[{run_id}] {county} County ({county_index + 1}/{total_counties})")
-        pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
-        pipeline_runs[run_id]["currentCounty"] = county
-        pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
-        pipeline_runs[run_id]["currentStep"] = 1
         
         # Create persistent output directory for this run
         run_dir = RUNS_DIR / run_id
@@ -463,6 +377,10 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
             'csv_path': output_csv if os.path.exists(output_csv) else None
         }
         
+        # Write results to file for main process to read
+        with open(result_file, 'w') as f:
+            json.dump(results, f)
+        
         return results
             
     except Exception as e:
@@ -470,21 +388,72 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
         error_msg = str(e)[:500]
         print(f"Error processing {county}: {error_msg}")
         traceback.print_exc()
-        return {'success': False, 'error': error_msg}
+        
+        results = {'success': False, 'error': error_msg}
+        # Write error results to file
+        try:
+            with open(result_file, 'w') as f:
+                json.dump(results, f)
+        except:
+            pass
+        return results
     finally:
         # Basic cleanup: just quit the driver if it exists
-        driver = None
         try:
-            if pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
+            if 'pipeline' in locals() and pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
                 if pipeline.content_collector.driver:
                     driver = pipeline.content_collector.driver
                     pipeline.content_collector.driver = None
                     driver.quit()
         except Exception:
             pass  # Don't let cleanup fail
-        finally:
-            # Robust cleanup - kill any orphaned Chrome AND ChromeDriver processes with verification
-            robust_cleanup_chrome_processes()
+        # Subprocess will die naturally, taking all children (Chrome processes) with it
+
+
+def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int):
+    """
+    Process a single county in a subprocess.
+    The subprocess will die naturally after completion, taking all Chrome processes with it.
+    
+    Returns:
+        dict with results: {'schools': count, 'contacts': count, 'contacts_no_emails': count, 'success': bool, 'csv_path': str}
+    """
+    # Create result file for subprocess to write to
+    run_dir = RUNS_DIR / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    result_file = str(run_dir / f"{county.replace(' ', '_')}_result.json")
+    
+    # Update progress
+    pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
+    pipeline_runs[run_id]["currentCounty"] = county
+    pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
+    pipeline_runs[run_id]["currentStep"] = 1
+    
+    # Start subprocess to run county
+    # Use multiprocessing.Process to isolate the county processing
+    # When the process dies, all its children (Chrome processes) die automatically
+    process = multiprocessing.Process(
+        target=_county_worker,
+        args=(state, county, run_id, county_index, total_counties, result_file)
+    )
+    process.start()
+    process.join()  # Wait for subprocess to complete
+    
+    # Read results from file
+    try:
+        if os.path.exists(result_file):
+            with open(result_file, 'r') as f:
+                results = json.load(f)
+            # Clean up result file
+            try:
+                os.remove(result_file)
+            except:
+                pass
+            return results
+        else:
+            return {'success': False, 'error': 'Subprocess did not write results file'}
+    except Exception as e:
+        return {'success': False, 'error': f'Error reading results: {str(e)}'}
 
 
 def process_county_with_timing(state: str, run_id: str, county: str, county_index: int, total_counties: int):
@@ -515,8 +484,8 @@ def process_county_with_timing(state: str, run_id: str, county: str, county_inde
         pipeline_runs[run_id]["schoolsFound"] = pipeline_runs[run_id].get("schoolsFound", 0) + result.get('schools', 0)
         pipeline_runs[run_id]["schoolsProcessed"] = pipeline_runs[run_id].get("schoolsProcessed", 0) + result.get('schools', 0)
         
-        # Periodic health check and resource monitoring (every county)
-        check_health()
+        # Health check runs in main process after subprocess dies (in process_all_counties)
+        # Resource monitoring
         log_resource_usage()
         
         # Track county timing for average calculation
@@ -839,7 +808,7 @@ def run_streaming_pipeline(state: str, run_id: str):
                                  if idx >= start_index and county not in completed_counties]
             
             if processing_mode == "sequential":
-                # SEQUENTIAL PROCESSING: Process counties one at a time
+                # SEQUENTIAL PROCESSING: Process counties one at a time in subprocesses
                 for idx, county in remaining_counties:
                     # Check for cancellation before each county
                     if running_threads.get(run_id, {}).get('cancelled', False):
@@ -849,10 +818,14 @@ def run_streaming_pipeline(state: str, run_id: str):
                         return
                     
                     try:
-                        # Process this county with timing
+                        # Process this county with timing (runs in subprocess)
                         county_index, result, processing_time = process_county_with_timing(
                             state, run_id, county, idx, total_counties
                         )
+                        
+                        # Health check after subprocess dies (lists remaining processes)
+                        check_health()
+                        log_resource_usage()
                         
                         # Mark county as completed
                         with checkpoint_lock:
@@ -884,7 +857,7 @@ def run_streaming_pipeline(state: str, run_id: str):
                             save_run_metadata(run_id, metadata)
                             
                             print(f"[{run_id}] Checkpoint saved after {completed} counties")
-                        
+                    
                     except Exception as e:
                         print(f"[{run_id}] County {county} generated an exception: {e}")
                         import traceback
