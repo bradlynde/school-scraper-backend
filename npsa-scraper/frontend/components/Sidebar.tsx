@@ -14,6 +14,7 @@ type RunMetadata = {
   created_at?: string;
   completed_at?: string;
   csv_filename?: string;
+  archived?: boolean;
 };
 
 type SidebarProps = {
