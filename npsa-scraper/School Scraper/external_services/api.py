@@ -398,16 +398,58 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
             pass
         return results
     finally:
-        # Basic cleanup: just quit the driver if it exists
+        # Explicit cleanup: quit driver and kill all Chrome processes
         try:
             if 'pipeline' in locals() and pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
                 if pipeline.content_collector.driver:
                     driver = pipeline.content_collector.driver
                     pipeline.content_collector.driver = None
-                    driver.quit()
+                    try:
+                        driver.quit()
+                    except:
+                        pass
         except Exception:
             pass  # Don't let cleanup fail
-        # Subprocess will die naturally, taking all children (Chrome processes) with it
+        
+        # CRITICAL: Explicitly kill all Chrome processes before subprocess exits
+        # Chrome processes can survive subprocess termination, so we must kill them explicitly
+        # Since we're running sequentially (MAX_WORKERS=1), it's safe to kill all Chrome processes
+        try:
+            if HAS_PSUTIL:
+                # Find and kill all Chrome/ChromeDriver processes
+                chrome_processes = []
+                for proc in psutil.process_iter(['pid', 'name']):
+                    try:
+                        name = proc.info['name'].lower()
+                        if 'chrome' in name or 'chromium' in name or 'chromedriver' in name:
+                            chrome_processes.append(proc)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+                
+                # Kill all Chrome processes
+                for proc in chrome_processes:
+                    try:
+                        proc.kill()  # SIGKILL
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                
+                # Wait briefly for processes to die
+                time.sleep(0.2)
+                
+                # Force terminate any remaining processes
+                for proc in chrome_processes:
+                    try:
+                        if proc.is_running():
+                            proc.terminate()  # SIGTERM
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            else:
+                # Fallback: use pkill if psutil not available
+                subprocess.run(['pkill', '-9', '-f', 'chrome'], timeout=1, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                subprocess.run(['pkill', '-9', '-f', 'chromium'], timeout=1, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                subprocess.run(['pkill', '-9', '-f', 'chromedriver'], timeout=1, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        except Exception:
+            pass  # Don't let cleanup failures crash the subprocess
 
 
 def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int):
