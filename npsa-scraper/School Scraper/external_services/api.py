@@ -400,7 +400,8 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
             pass
         return results
     finally:
-        # Aggressive cleanup: quit driver and kill all Chrome processes
+        # CRITICAL: Aggressive cleanup to prevent Chrome process accumulation
+        # Chrome processes can be reparented to PID 1 in containers, so we need to be thorough
         try:
             # First, try to quit the driver properly
             if 'pipeline' in locals() and pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
@@ -414,32 +415,83 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         except Exception:
             pass
         
-        # Kill Chrome processes using psutil
+        # Kill Chrome processes using psutil - be aggressive since processes may be reparented
         if HAS_PSUTIL:
             try:
                 current_pid = os.getpid()
                 killed_count = 0
+                max_workers = int(os.getenv("MAX_WORKERS", "1"))
                 
-                for proc in psutil.process_iter(['name', 'pid', 'ppid']):
-                    try:
-                        name = proc.info['name'].lower()
-                        pid = proc.info['pid']
-                        ppid = proc.info.get('ppid')
-                        
-                        # Only kill processes that are children of this process or Chrome-related
-                        is_chrome = ('chrome' in name or 'chromium' in name or 'chromedriver' in name)
-                        is_child = (ppid == current_pid) if ppid else False
-                        
-                        if is_chrome and (is_child or 'chromedriver' in name):
-                            try:
-                                proc.kill()
+                # First pass: Kill direct children (always safe)
+                try:
+                    current_process = psutil.Process(current_pid)
+                    for child in current_process.children(recursive=True):
+                        try:
+                            name = child.info['name'].lower()
+                            if 'chrome' in name or 'chromium' in name or 'chromedriver' in name:
+                                child.kill()
                                 killed_count += 1
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                        continue
+                        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                            continue
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
                 
+                # Second pass: Kill ALL Chrome processes (only in sequential mode)
+                # In sequential mode (MAX_WORKERS=1), we're the only worker, so safe to kill all
+                # In parallel mode, only kill direct children to avoid killing other workers' Chrome
+                if max_workers == 1:
+                    for proc in psutil.process_iter(['name', 'pid']):
+                        try:
+                            name = proc.info['name'].lower()
+                            pid = proc.info['pid']
+                            
+                            # Skip our own process
+                            if pid == current_pid:
+                                continue
+                            
+                            # Kill all Chrome-related processes
+                            if 'chrome' in name or 'chromium' in name or 'chromedriver' in name:
+                                try:
+                                    proc.kill()
+                                    killed_count += 1
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                            continue
+                
+                # Give processes a moment to die, then force kill any remaining
                 if killed_count > 0:
+                    time.sleep(0.2)
+                    try:
+                        current_process = psutil.Process(current_pid)
+                        for child in current_process.children(recursive=True):
+                            try:
+                                name = child.info['name'].lower()
+                                if 'chrome' in name or 'chromium' in name or 'chromedriver' in name:
+                                    if child.is_running():
+                                        child.terminate()  # SIGTERM for graceful shutdown
+                            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                continue
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                    
+                    if max_workers == 1:
+                        # In sequential mode, also check all processes
+                        for proc in psutil.process_iter(['name', 'pid']):
+                            try:
+                                name = proc.info['name'].lower()
+                                pid = proc.info['pid']
+                                if pid == current_pid:
+                                    continue
+                                if ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
+                                    try:
+                                        if proc.is_running():
+                                            proc.terminate()  # SIGTERM for graceful shutdown
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                        pass
+                            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                continue
+                    
                     print(f"[CLEANUP] Killed {killed_count} Chrome processes using psutil")
             except Exception as e:
                 print(f"[CLEANUP] Error killing Chrome processes with psutil: {e}")
@@ -447,21 +499,34 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         # Fallback: Use pkill to kill Chrome processes
         try:
             import subprocess
-            # Kill chromedriver
-            subprocess.run(['pkill', '-f', 'chromedriver'], 
+            max_workers = int(os.getenv("MAX_WORKERS", "1"))
+            
+            # Always kill chromedriver (should be safe)
+            subprocess.run(['pkill', '-9', '-f', 'chromedriver'], 
                           stdout=subprocess.DEVNULL, 
                           stderr=subprocess.DEVNULL, 
                           timeout=2)
-            # Kill chrome/chromium processes (be more careful - only kill if they're children)
-            # Use pkill with parent PID filter if available
-            subprocess.run(['pkill', '-P', str(os.getpid()), '-f', 'chrome'], 
-                          stdout=subprocess.DEVNULL, 
-                          stderr=subprocess.DEVNULL, 
-                          timeout=2)
-            subprocess.run(['pkill', '-P', str(os.getpid()), '-f', 'chromium'], 
-                          stdout=subprocess.DEVNULL, 
-                          stderr=subprocess.DEVNULL, 
-                          timeout=2)
+            
+            # Only kill all Chrome in sequential mode
+            if max_workers == 1:
+                subprocess.run(['pkill', '-9', '-f', 'chrome'], 
+                              stdout=subprocess.DEVNULL, 
+                              stderr=subprocess.DEVNULL, 
+                              timeout=2)
+                subprocess.run(['pkill', '-9', '-f', 'chromium'], 
+                              stdout=subprocess.DEVNULL, 
+                              stderr=subprocess.DEVNULL, 
+                              timeout=2)
+            else:
+                # In parallel mode, only kill children of this process
+                subprocess.run(['pkill', '-9', '-P', str(os.getpid()), '-f', 'chrome'], 
+                              stdout=subprocess.DEVNULL, 
+                              stderr=subprocess.DEVNULL, 
+                              timeout=2)
+                subprocess.run(['pkill', '-9', '-P', str(os.getpid()), '-f', 'chromium'], 
+                              stdout=subprocess.DEVNULL, 
+                              stderr=subprocess.DEVNULL, 
+                              timeout=2)
         except Exception:
             pass  # pkill may not be available or may fail
 
@@ -531,7 +596,7 @@ def process_county_worker_multiprocessing(args):
     """
     idx, county, state, run_id, total_counties = args
     start_time = time.time()
-    
+        
     # Create result file for worker to write to
     run_dir = RUNS_DIR / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -986,8 +1051,8 @@ def run_streaming_pipeline(state: str, run_id: str):
                 pipeline_runs[run_id]["status"] = "error"
                 pipeline_runs[run_id]["error"] = error_msg
                 pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
-            import traceback
-            traceback.print_exc()
+        import traceback
+        traceback.print_exc()
     
     # Start processing in a background thread
     thread = threading.Thread(target=process_all_counties)
