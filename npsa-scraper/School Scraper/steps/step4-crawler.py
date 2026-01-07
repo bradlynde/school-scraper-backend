@@ -206,14 +206,10 @@ class ContentCollector:
                 minimal_options.add_argument('--headless')
                 minimal_options.add_argument('--no-sandbox')
                 minimal_options.add_argument('--disable-dev-shm-usage')
-                # Use explicit ChromeDriver path to bypass Selenium Manager
+                # Always use explicit ChromeDriver path to bypass Selenium Manager network lookups
                 chromedriver_path = os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver')
-                if os.path.exists(chromedriver_path):
-                    service = Service(executable_path=chromedriver_path)
-                    driver = webdriver.Chrome(service=service, options=minimal_options)
-                else:
-                    # Path doesn't exist (e.g., local dev), let Selenium Manager handle it
-                    driver = webdriver.Chrome(options=minimal_options)
+                service = Service(executable_path=chromedriver_path)
+                driver = webdriver.Chrome(service=service, options=minimal_options)
                 driver.set_page_load_timeout(45)
                 driver.set_script_timeout(45)
                 print(f"    [SELENIUM] Driver created with minimal options")
@@ -236,7 +232,7 @@ class ContentCollector:
             driver = None
             try:
                 if self.driver:
-                    self.driver.quit()
+                self.driver.quit()
             except:
                 pass  # Don't let cleanup fail
             finally:
@@ -250,7 +246,7 @@ class ContentCollector:
         """Basic cleanup: quit Selenium driver if it exists"""
         driver = None
         try:
-            if self.driver:
+        if self.driver:
                 driver = self.driver
                 self.driver = None
                 driver.quit()
@@ -682,12 +678,12 @@ if __name__ == "__main__":
         # Cleanup Selenium driver with nuclear option
         driver = None
         try:
-            if collector.driver:
+        if collector.driver:
                 driver = collector.driver
                 collector.driver = None
                 driver.quit()
-        except:
+            except:
             pass  # Don't let cleanup fail
         finally:
             # No cleanup needed - subprocess will die naturally and take children with it
-            pass
+                pass
