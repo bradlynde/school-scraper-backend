@@ -1330,6 +1330,70 @@ def stop_run(run_id: str):
         return error_response, 500
 
 
+@app.route("/runs/<run_id>/resume", methods=["POST", "OPTIONS"])
+def resume_run(run_id: str):
+    """Resume a stopped or stuck run from its checkpoint"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    try:
+        # Check if checkpoint exists
+        checkpoint = load_checkpoint(run_id)
+        if not checkpoint:
+            return jsonify({
+                "status": "error",
+                "error": "No checkpoint found for this run. Cannot resume."
+            }), 404
+        
+        state = checkpoint.get("state", "").lower()
+        if not state:
+            return jsonify({
+                "status": "error",
+                "error": "Invalid checkpoint: missing state"
+            }), 400
+        
+        # Check if run is already running
+        if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "running":
+            return jsonify({
+                "status": "error",
+                "error": "Run is already in progress"
+            }), 400
+        
+        # Start pipeline in background thread (will auto-resume from checkpoint)
+        thread = threading.Thread(target=run_streaming_pipeline, args=(state, run_id))
+        thread.daemon = True
+        thread.start()
+        
+        # Track the thread
+        running_threads[run_id] = {'thread': thread, 'cancelled': False}
+        
+        print(f"[{run_id}] Resume requested - restarting pipeline from checkpoint")
+        
+        response = jsonify({
+            "status": "success",
+            "message": "Run resumed from checkpoint",
+            "runId": run_id,
+            "checkpoint": {
+                "completed_counties": len(checkpoint.get("completed_counties", [])),
+                "total_counties": checkpoint.get("total_counties", 0),
+                "next_county_index": checkpoint.get("next_county_index", 0)
+            }
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+        
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
 @app.route("/runs/<run_id>/delete", methods=["DELETE", "OPTIONS"])
 def delete_run(run_id: str):
     """Delete a finished run (metadata, checkpoint, CSV files)"""
