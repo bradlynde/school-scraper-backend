@@ -1355,12 +1355,20 @@ def resume_run(run_id: str):
                 "error": "Invalid checkpoint: missing state"
             }), 400
         
-        # Check if run is already running
+        # Check if run is actually running (thread must be alive)
         if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "running":
-            return jsonify({
-                "status": "error",
-                "error": "Run is already in progress"
-            }), 400
+            # Check if thread is actually alive - if dead, allow resume
+            if run_id in running_threads:
+                thread = running_threads[run_id].get('thread')
+                if thread and thread.is_alive():
+                    return jsonify({
+                        "status": "error",
+                        "error": "Run is already in progress"
+                    }), 400
+            # Thread is dead but status is still "running" - clear it and allow resume
+            print(f"[{run_id}] Thread appears dead but status is 'running' - clearing and allowing resume")
+            pipeline_runs[run_id]["status"] = "cancelled"
+            running_threads.pop(run_id, None)
         
         # Start pipeline in background thread (will auto-resume from checkpoint)
         thread = threading.Thread(target=run_streaming_pipeline, args=(state, run_id))
