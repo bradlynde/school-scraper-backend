@@ -304,9 +304,6 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                           {run.total_contacts !== undefined && (
                             <div className="text-xs text-gray-600 mt-2">
                               {run.total_contacts} contacts
-                              {run.total_contacts_with_emails !== undefined && (
-                                <span className="ml-2">({run.total_contacts_with_emails} with emails)</span>
-                              )}
                             </div>
                           )}
                         </div>
@@ -319,7 +316,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                               if (confirm(`Are you sure you want to delete this run? This action cannot be undone.`)) {
                                 try {
                                   const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
-                                  const response = await fetch(`${apiUrl}/runs/${run.run_id}`, {
+                                  const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
                                     method: 'DELETE',
                                   });
                                   if (response.ok) {
