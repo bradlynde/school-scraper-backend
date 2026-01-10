@@ -310,8 +310,25 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Backend responded with ${response.status}: ${errorText || response.statusText}`);
+        // Try to parse error response as JSON
+        let errorMessage = `Backend responded with ${response.status}: ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorData.message || errorMessage;
+        } catch {
+          // If JSON parse fails, use text response
+          const errorText = await response.text();
+          if (errorText) {
+            errorMessage = errorText;
+          }
+        }
+        
+        // Handle specific error codes
+        if (response.status === 409) {
+          errorMessage = errorMessage || "Another run is already in progress. Please wait for it to complete or stop it first.";
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();

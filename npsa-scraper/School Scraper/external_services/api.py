@@ -69,6 +69,10 @@ running_threads = {}
 # Format: {run_id: (first_404_time, count)}
 not_found_runs = {}
 
+# Global flag to prevent multiple container restart attempts
+_container_restart_scheduled = False
+_container_restart_lock = threading.Lock()
+
 # Persistent storage configuration
 # Use /data for Railway volume, fallback to /tmp for local development
 PERSISTENT_DATA_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
@@ -1091,8 +1095,52 @@ def run_streaming_pipeline(state: str, run_id: str):
                 if pipeline_runs[run_id].get("status") != "error":
                     pipeline_runs[run_id]["status"] = "completed"
                     pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed"
+                    pipeline_runs[run_id]["containerResetRequested"] = True
+                    
+                    # Only schedule container restart on successful completion (not errors)
+                    # Update metadata with container reset status
+                    final_metadata = load_run_metadata(run_id) or {}
+                    final_metadata["container_reset_requested"] = True
+                    final_metadata["container_reset_requested_at"] = datetime.now().isoformat()
+                    save_run_metadata(run_id, final_metadata)
+                    
+                    print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
+                    print(f"[{run_id}] Container reset requested - will restart after 30 second grace period")
+                    
+                    # Schedule container restart after completion (30 second delay to allow final API calls)
+                    # Use global flag to prevent multiple restart attempts
+                    global _container_restart_scheduled
+                    with _container_restart_lock:
+                        if _container_restart_scheduled:
+                            print(f"[{run_id}] Container restart already scheduled, skipping...")
+                        else:
+                            _container_restart_scheduled = True
+                            
+                            def schedule_container_restart():
+                                """Schedule container restart after grace period"""
+                                time.sleep(30)  # Wait 30 seconds for final API calls
+                                print(f"[{run_id}] Container reset: Exiting process to trigger Railway restart...")
+                                # Update metadata with reset confirmation
+                                try:
+                                    reset_metadata = load_run_metadata(run_id) or {}
+                                    reset_metadata["container_reset_confirmed"] = True
+                                    reset_metadata["container_reset_confirmed_at"] = datetime.now().isoformat()
+                                    save_run_metadata(run_id, reset_metadata)
+                                    print(f"[{run_id}] Container Reset: Confirmed at {reset_metadata['container_reset_confirmed_at']}")
+                                except Exception as e:
+                                    print(f"[{run_id}] Failed to save container reset confirmation: {e}")
+                                
+                                # Exit with code 1 to trigger Railway restart (ON_FAILURE policy)
+                                # Railway will automatically restart the container
+                                os._exit(1)
+                            
+                            # Start restart thread in background (non-daemon so it completes)
+                            restart_thread = threading.Thread(target=schedule_container_restart)
+                            restart_thread.daemon = False
+                            restart_thread.start()
                 pipeline_runs[run_id]["progress"] = 100
-            print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
+            else:
+                print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
         
         except FileNotFoundError as e:
             # State file not found
@@ -1213,6 +1261,26 @@ def run_pipeline():
                 "status": "error",
                 "error": "Church scraping is not yet available"
             }), 400
+        
+        # Check if another run is already active
+        active_runs = []
+        for rid, run_data in pipeline_runs.items():
+            if run_data.get("status") == "running":
+                # Verify thread is actually alive
+                if rid in running_threads:
+                    thread = running_threads[rid].get('thread')
+                    if thread and thread.is_alive():
+                        active_runs.append(rid)
+                else:
+                    # Thread missing but status is running - mark as stale
+                    pipeline_runs[rid]["status"] = "cancelled"
+        
+        if active_runs:
+            return jsonify({
+                "status": "error",
+                "error": f"Another run is already in progress. Please wait for it to complete or stop it first.",
+                "activeRunId": active_runs[0]
+            }), 409  # Conflict status code
         
         # Generate unique run ID
         run_id = str(uuid.uuid4())
