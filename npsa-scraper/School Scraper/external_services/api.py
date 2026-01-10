@@ -915,6 +915,8 @@ def run_streaming_pipeline(state: str, run_id: str):
             # Update progress tracking with county info
             pipeline_runs[run_id]["totalCounties"] = total_counties
             pipeline_runs[run_id]["statusMessage"] = f"Processing {state} (0/{total_counties} counties completed)..."
+            pipeline_runs[run_id]["currentCounty"] = "Starting..."
+            pipeline_runs[run_id]["countiesProcessed"] = 0
             
             # Determine processing mode message
             if MAX_WORKERS == 1:
@@ -968,8 +970,14 @@ def run_streaming_pipeline(state: str, run_id: str):
                             # Update pipeline_runs state
                             with progress_lock:
                                 pipeline_runs[run_id]["progress"] = progress_pct
-                                pipeline_runs[run_id]["statusMessage"] = f"Processed {completed}/{total_counties} counties..."
-                                pipeline_runs[run_id]["countiesProcessed"] = pipeline_runs[run_id].get("countiesProcessed", 0) + 1
+                                pipeline_runs[run_id]["statusMessage"] = f"Processing {completed}/{total_counties} counties..."
+                                pipeline_runs[run_id]["countiesProcessed"] = completed
+                                # Set currentCounty to show progress (since we're processing in parallel, show the count)
+                                # This replaces "Initializing..." with actual progress
+                                if completed < total_counties:
+                                    pipeline_runs[run_id]["currentCounty"] = f"Processing {completed}/{total_counties} counties"
+                                else:
+                                    pipeline_runs[run_id]["currentCounty"] = f"All {total_counties} counties completed"
                                 pipeline_runs[run_id]["schoolsFound"] = pipeline_runs[run_id].get("schoolsFound", 0) + result.get('schools', 0)
                                 pipeline_runs[run_id]["schoolsProcessed"] = pipeline_runs[run_id].get("schoolsProcessed", 0) + result.get('schools', 0)
                                 

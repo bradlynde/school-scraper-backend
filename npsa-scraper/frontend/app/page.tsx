@@ -434,7 +434,11 @@ export default function Home() {
   const countiesProcessed = summary?.countiesProcessed || 0;
   const totalCounties = summary?.totalCounties || 0;
   const schoolsProcessed = summary?.schoolsProcessed || summary?.schoolsFound || 0;
-  const currentCounty = summary?.currentCounty || (countiesProcessed > 0 ? "Processing..." : "Initializing...");
+  // Use currentCounty if available, otherwise derive from statusMessage, otherwise show progress-based message
+  const currentCounty = summary?.currentCounty || 
+                        (summary?.statusMessage ? summary.statusMessage.replace(/^Processing\s+/, '').split('(')[0].trim() : null) ||
+                        (countiesProcessed > 0 ? `${countiesProcessed}/${totalCounties} counties` : 
+                         (totalCounties > 0 ? "Starting..." : "Initializing..."));
 
   // Helper function to create cumulative line graph
   const createLineGraph = (data: number[], width: number = 200, height: number = 80, color: string = "#6b8e23") => {
