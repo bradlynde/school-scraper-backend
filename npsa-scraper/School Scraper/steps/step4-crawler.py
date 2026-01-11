@@ -656,7 +656,7 @@ if __name__ == "__main__":
         # Cleanup Selenium driver with nuclear option
         driver = None
         try:
-        if collector.driver:
+            if collector.driver:
                 driver = collector.driver
                 collector.driver = None
                 driver.quit()
