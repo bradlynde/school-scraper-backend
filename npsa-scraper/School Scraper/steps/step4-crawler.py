@@ -660,7 +660,7 @@ if __name__ == "__main__":
                 driver = collector.driver
                 collector.driver = None
                 driver.quit()
-            except:
+        except:
             pass  # Don't let cleanup fail
         finally:
             # No cleanup needed - subprocess will die naturally and take children with it
