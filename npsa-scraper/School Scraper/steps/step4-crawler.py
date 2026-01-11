@@ -254,7 +254,7 @@ class ContentCollector:
         """Basic cleanup: quit Selenium driver if it exists"""
         driver = None
         try:
-        if self.driver:
+            if self.driver:
                 driver = self.driver
                 self.driver = None
                 driver.quit()
