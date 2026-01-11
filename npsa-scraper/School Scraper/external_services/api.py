@@ -831,7 +831,7 @@ def aggregate_final_results(run_id: str, state: str):
         traceback.print_exc()
 
 
-def run_streaming_pipeline(state: str, run_id: str):
+def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool = False):
     """
     Initialize the pipeline and process all counties (sequentially or in parallel).
     
@@ -885,8 +885,7 @@ def run_streaming_pipeline(state: str, run_id: str):
         - Sequential (MAX_WORKERS=1): One county at a time, simple loop
         - Parallel (MAX_WORKERS>1): Multiple counties simultaneously with multiprocessing.Pool
         
-        Always starts fresh - no checkpoint resume logic. Checkpoints are saved for progress tracking
-        only, not for resuming. Runs are designed to complete fully without hangups.
+        If resume_from_checkpoint is True, loads checkpoint and skips counties that have data files.
         Thread locks ensure safe concurrent access to shared state.
         """
         try:
@@ -894,43 +893,85 @@ def run_streaming_pipeline(state: str, run_id: str):
             counties = load_counties_from_state(state)
             total_counties = len(counties)
             
-            # Always start fresh - no checkpoint resume logic
-            # This prevents hangs and ensures runs complete fully
+            # Check if resuming from checkpoint
             completed_counties = []
             start_index = 0
             
-            # Save initial metadata for new run
+            if resume_from_checkpoint:
+                # Load checkpoint
+                checkpoint = load_checkpoint(run_id)
+                if checkpoint:
+                    completed_counties = checkpoint.get('completed_counties', [])
+                    start_index = checkpoint.get('next_county_index', 0)
+                    print(f"[{run_id}] Resuming from checkpoint: {len(completed_counties)}/{total_counties} counties already completed")
+                
+                # Also check data files to catch counties that completed but didn't checkpoint
+                # (e.g., Prince George's that completed but hung during cleanup)
+                run_dir = RUNS_DIR / run_id
+                if run_dir.exists():
+                    for county in counties:
+                        county_dir = run_dir / county.replace(' ', '_')
+                        county_csv = county_dir / "final_contacts.csv"
+                        if county_csv.exists() and county not in completed_counties:
+                            print(f"[{run_id}] Found completed county (data file exists): {county}")
+                            completed_counties.append(county)
+                    
+                    # Recalculate start_index based on actual completed counties
+                    start_index = 0
+                    for i, c in enumerate(counties):
+                        if c in completed_counties:
+                            start_index = i + 1
+                        else:
+                            break
+                    
+                    if completed_counties:
+                        print(f"[{run_id}] Resuming: {len(completed_counties)}/{total_counties} counties completed, starting from index {start_index}")
+            
+            # Save initial metadata for new run or resume
             initial_metadata = {
                 "run_id": run_id,
                 "state": state,
                 "status": "running",
                 "total_counties": total_counties,
-                "completed_counties": [],
+                "completed_counties": completed_counties,
                 "start_time": time.time(),
                 "created_at": datetime.now().isoformat()
             }
             save_run_metadata(run_id, initial_metadata)
-            print(f"[{run_id}] New run started: {total_counties} counties to process")
+            
+            if resume_from_checkpoint and completed_counties:
+                print(f"[{run_id}] Resuming run: {len(completed_counties)}/{total_counties} counties already completed")
+            else:
+                print(f"[{run_id}] New run started: {total_counties} counties to process")
             
             # Update progress tracking with county info
             pipeline_runs[run_id]["totalCounties"] = total_counties
-            pipeline_runs[run_id]["statusMessage"] = f"Processing {state} (0/{total_counties} counties completed)..."
-            pipeline_runs[run_id]["currentCounty"] = "Starting..."
-            pipeline_runs[run_id]["countiesProcessed"] = 0
+            pipeline_runs[run_id]["statusMessage"] = f"Processing {state} ({len(completed_counties)}/{total_counties} counties completed)..."
+            pipeline_runs[run_id]["currentCounty"] = "Starting..." if not completed_counties else f"Resuming from {len(completed_counties)}/{total_counties}"
+            pipeline_runs[run_id]["countiesProcessed"] = len(completed_counties)
             
             # Determine processing mode message
+            remaining_count = total_counties - len(completed_counties)
             if MAX_WORKERS == 1:
-                print(f"[{run_id}] Processing {total_counties} counties sequentially...")
+                print(f"[{run_id}] Processing {remaining_count} remaining counties sequentially...")
             else:
-                print(f"[{run_id}] Processing {total_counties} counties with {MAX_WORKERS} parallel workers...")
+                print(f"[{run_id}] Processing {remaining_count} remaining counties with {MAX_WORKERS} parallel workers...")
             
-            # Process all counties from the beginning
-            remaining_counties = [(idx, county) for idx, county in enumerate(counties)]
+            # Process remaining counties (skip completed ones if resuming)
+            remaining_counties = [(idx, county) for idx, county in enumerate(counties) if county not in completed_counties]
             
-            # UNIFIED PROCESSING: Use Pool for both sequential (MAX_WORKERS=1) and parallel (MAX_WORKERS>1)
-            # maxtasksperchild=1 forces each worker to terminate after one county,
-            # which automatically cleans up all Chrome child processes when the worker dies
-            with Pool(processes=MAX_WORKERS, maxtasksperchild=1) as pool:
+            if not remaining_counties:
+                print(f"[{run_id}] All counties already completed!")
+                # Update progress to show all complete
+                pipeline_runs[run_id]["progress"] = 100
+                pipeline_runs[run_id]["countiesProcessed"] = total_counties
+                pipeline_runs[run_id]["statusMessage"] = f"All {total_counties} counties already completed"
+                # Continue to aggregation - skip the pool processing
+            else:
+                # UNIFIED PROCESSING: Use Pool for both sequential (MAX_WORKERS=1) and parallel (MAX_WORKERS>1)
+                # maxtasksperchild=1 forces each worker to terminate after one county,
+                # which automatically cleans up all Chrome child processes when the worker dies
+                with Pool(processes=MAX_WORKERS, maxtasksperchild=1) as pool:
                 # Submit all remaining counties to the pool
                 pool_args = [(idx, county, state, run_id, total_counties) for idx, county in remaining_counties]
                 
@@ -1501,20 +1542,81 @@ def stop_run(run_id: str):
 
 @app.route("/runs/<run_id>/resume", methods=["POST", "OPTIONS"])
 def resume_run(run_id: str):
-    """Resume endpoint is no longer supported - runs complete fully without hangups.
-    This endpoint returns an error to prevent manual resume attempts."""
+    """Resume a run from checkpoint. Loads checkpoint and skips counties that have data files."""
     if request.method == "OPTIONS":
         response = jsonify({})
         response.headers.add("Access-Control-Allow-Origin", "*")
         response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
     
-    error_response = jsonify({
-        "status": "error",
-        "error": "Resume functionality is no longer supported. Runs are designed to complete fully without hangups. If a run appears stuck, please stop and restart it."
-    })
-    error_response.headers.add("Access-Control-Allow-Origin", "*")
-    return error_response, 400
+    try:
+        # Check metadata first (persistent storage)
+        metadata = load_run_metadata(run_id)
+        if not metadata:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        state = metadata.get("state")
+        if not state:
+            return jsonify({
+                "status": "error",
+                "error": "State not found in run metadata"
+            }), 400
+        
+        # Check if run is currently running
+        if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "running":
+            # Check if thread is actually alive
+            if run_id in running_threads:
+                thread = running_threads[run_id].get('thread')
+                if thread and thread.is_alive():
+                    return jsonify({
+                        "status": "error",
+                        "error": "Run is already running. Please stop it first before resuming."
+                    }), 409  # Conflict
+        
+        # Check if checkpoint exists
+        checkpoint = load_checkpoint(run_id)
+        if not checkpoint:
+            return jsonify({
+                "status": "error",
+                "error": "No checkpoint found for this run. Cannot resume."
+            }), 400
+        
+        # Check if already completed
+        completed_counties = checkpoint.get('completed_counties', [])
+        total_counties = checkpoint.get('total_counties', 0)
+        if len(completed_counties) >= total_counties:
+            return jsonify({
+                "status": "error",
+                "error": "Run is already complete. Cannot resume."
+            }), 400
+        
+        # Start pipeline with resume flag
+        thread = threading.Thread(target=run_streaming_pipeline, args=(state, run_id, True))
+        thread.daemon = True
+        
+        # Track the thread for cancellation
+        running_threads[run_id] = {'thread': thread, 'cancelled': False}
+        
+        thread.start()
+        
+        response = jsonify({
+            "status": "resumed",
+            "runId": run_id,
+            "message": f"Run resumed from checkpoint: {len(completed_counties)}/{total_counties} counties already completed"
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+        
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
 
 
 @app.route("/runs/<run_id>/delete", methods=["DELETE", "OPTIONS"])
