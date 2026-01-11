@@ -254,7 +254,7 @@ class ContentCollector:
         """Basic cleanup: quit Selenium driver if it exists"""
         driver = None
         try:
-            if self.driver:
+        if self.driver:
                 driver = self.driver
                 self.driver = None
                 driver.quit()
@@ -656,12 +656,12 @@ if __name__ == "__main__":
         # Cleanup Selenium driver with nuclear option
         driver = None
         try:
-            if collector.driver:
+        if collector.driver:
                 driver = collector.driver
                 collector.driver = None
                 driver.quit()
-        except:
+            except:
             pass  # Don't let cleanup fail
         finally:
             # No cleanup needed - subprocess will die naturally and take children with it
-            pass
+                pass
