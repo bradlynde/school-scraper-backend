@@ -159,7 +159,7 @@ def list_chrome_processes():
 def check_health():
     """
     Health check function that lists Chrome and ChromeDriver processes.
-    Does NOT kill processes - only reports what exists.
+    Aggressively kills orphaned processes (those whose parent is PID 1).
     """
     try:
         process_info = list_chrome_processes()
@@ -169,14 +169,28 @@ def check_health():
         print(f"  ChromeDriver: {process_info['chromedriver_count']} processes")
         print(f"  Total: {process_info['total_count']} processes")
         
-        if process_info['chrome_processes']:
+        # Aggressive cleanup of orphaned processes (PPID 1)
+        # In containers, when a worker dies, its Chrome processes are reparented to PID 1
+        if HAS_PSUTIL and process_info['total_count'] > 0:
+            killed_orphans = 0
+            all_chrome = process_info['chrome_processes'] + process_info['chromedriver_processes']
+            
+            for proc_data in all_chrome:
+                try:
+                    proc = psutil.Process(proc_data['pid'])
+                    # If parent is PID 1 or if parent is dead, it's an orphan
+                    if proc.ppid() == 1:
+                        proc.kill()
+                        killed_orphans += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            if killed_orphans > 0:
+                print(f"[HEALTH] Found {process_info['total_count']} Chrome processes, killing {killed_orphans} orphaned processes (PPID 1)...")
+        
+        if process_info['chrome_processes'] and process_info['chrome_count'] < 10: # Only list if few
             print(f"  Chrome process names:")
             for proc in process_info['chrome_processes']:
-                print(f"    - PID {proc['pid']}: {proc['name']}")
-        
-        if process_info['chromedriver_processes']:
-            print(f"  ChromeDriver process names:")
-            for proc in process_info['chromedriver_processes']:
                 print(f"    - PID {proc['pid']}: {proc['name']}")
         
         return True

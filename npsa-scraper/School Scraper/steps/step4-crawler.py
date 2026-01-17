@@ -130,6 +130,9 @@ class ContentCollector:
             retry_count: Current retry attempt (internal use)
             max_retries: Maximum number of retry attempts
         """
+        # Cleanup any hanging processes from failed attempts
+        if retry_count > 0:
+            self._kill_all_chrome_processes()
         
         chrome_options = Options()
         chrome_options.add_argument('--headless')
@@ -143,7 +146,6 @@ class ContentCollector:
         chrome_options.add_argument('--disable-extensions')
         chrome_options.add_argument('--disable-plugins')
         chrome_options.add_argument('--disable-images')  # Don't load images to save memory
-        # Note: We keep JavaScript enabled because we need it for click/hover interactions
         chrome_options.add_argument('--disable-background-networking')
         chrome_options.add_argument('--disable-background-timer-throttling')
         chrome_options.add_argument('--disable-renderer-backgrounding')
@@ -152,10 +154,14 @@ class ContentCollector:
         
         # Memory and process limits
         chrome_options.add_argument('--memory-pressure-off')
-        chrome_options.add_argument('--max_old_space_size=512')  # Limit memory to 512MB per instance
+        # Optimized JS flags for memory
+        chrome_options.add_argument('--js-flags="--max-old-space-size=512"')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--num-raster-threads=1')
+        chrome_options.add_argument('--disable-low-res-tiling')
         
         # Performance optimizations
-        chrome_options.add_argument('--disable-features=TranslateUI')
+        chrome_options.add_argument('--disable-features=TranslateUI,BlinkGenPropertyTrees')
         chrome_options.add_argument('--disable-ipc-flooding-protection')
         chrome_options.add_argument('--disable-hang-monitor')
         chrome_options.add_argument('--disable-prompt-on-repost')
@@ -166,6 +172,7 @@ class ContentCollector:
         chrome_options.add_argument('--enable-automation')
         chrome_options.add_argument('--password-store=basic')
         chrome_options.add_argument('--use-mock-keychain')
+        chrome_options.add_argument('--disk-cache-size=4096')
         
         # Set preferences to reduce resource usage
         prefs = {
@@ -173,6 +180,8 @@ class ContentCollector:
                 'images': 2,  # Block images
                 'plugins': 2,  # Block plugins
                 'popups': 2,  # Block popups
+                'notifications': 2,
+                'geolocation': 2
             },
             'profile.managed_default_content_settings': {
                 'images': 2
@@ -187,8 +196,6 @@ class ContentCollector:
             driver = webdriver.Chrome(service=service, options=chrome_options)
             driver.set_page_load_timeout(45)  # 45 second timeout
             driver.set_script_timeout(45)  # Script timeout
-            # Remove implicit wait, use explicit waits instead
-            # driver.implicitly_wait(2)  # Removed - use explicit waits
             return driver
         except Exception as e:
             if retry_count < max_retries:
@@ -202,6 +209,7 @@ class ContentCollector:
                 # Final attempt with minimal options
                 print(f"    [SELENIUM] All retries exhausted, trying minimal options...")
             try:
+                self._kill_all_chrome_processes()
                 minimal_options = Options()
                 minimal_options.add_argument('--headless')
                 minimal_options.add_argument('--no-sandbox')
@@ -222,6 +230,32 @@ class ContentCollector:
                 print(f"    [SELENIUM] ERROR: Could not create Chrome driver even with minimal options: {e2}")
                 raise
     
+    def _kill_all_chrome_processes(self):
+        """Forcefully kill any Chrome processes owned by the current process or its children"""
+        try:
+            if HAS_PSUTIL:
+                current_process = psutil.Process(os.getpid())
+                children = current_process.children(recursive=True)
+                killed_count = 0
+                for child in children:
+                    try:
+                        name = child.name().lower()
+                        if any(x in name for x in ['chrome', 'chromium', 'chromedriver']):
+                            child.kill()
+                            killed_count += 1
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                if killed_count > 0:
+                    print(f"    [SELENIUM] Cleaned up {killed_count} hanging processes")
+            else:
+                # Fallback to pkill if psutil is not available
+                subprocess.run(['pkill', '-9', '-P', str(os.getpid()), '-f', 'chrome'], 
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+                subprocess.run(['pkill', '-9', '-P', str(os.getpid()), '-f', 'chromedriver'], 
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+        except Exception as e:
+            print(f"    [SELENIUM] Warning during process cleanup: {e}")
+
     def _ensure_driver_healthy(self):
         """Check and restart Selenium driver if needed"""
         if not self.driver:
@@ -232,34 +266,37 @@ class ContentCollector:
         try:
             self.driver.execute_script("return document.readyState")
         except:
-            print("    [SELENIUM] Driver crashed, restarting...")
-            driver = None
+            print("    [SELENIUM] Driver crashed, cleaning up and restarting...")
             try:
                 if self.driver:
                     self.driver.quit()
             except:
                 pass  # Don't let cleanup fail
             finally:
-                # No cleanup needed - subprocess will die naturally and take children with it
                 self.driver = None
+                # Aggressively kill any remaining children before restarting
+                self._kill_all_chrome_processes()
             
             # Restart the driver
             self.driver = self._setup_selenium()
     
     def cleanup(self):
         """Basic cleanup: quit Selenium driver if it exists"""
-        driver = None
         try:
             if self.driver:
                 driver = self.driver
                 self.driver = None
-                driver.quit()
-                print("    [SELENIUM] Driver quit")
+                try:
+                    driver.quit()
+                    print("    [SELENIUM] Driver quit")
+                except:
+                    pass
         except Exception as e:
             print(f"    [SELENIUM] WARNING: Error quitting driver: {e}")
         finally:
-            # No cleanup needed - subprocess will die naturally and take children with it
             self.driver = None
+            # Forcefully kill any remaining children
+            self._kill_all_chrome_processes()
     
     def __del__(self):
         """Destructor - safety net to ensure driver is cleaned up"""
@@ -679,15 +716,5 @@ if __name__ == "__main__":
     try:
         collector.collect_content_from_pages(args.input, args.output)
     finally:
-        # Cleanup Selenium driver with nuclear option
-        driver = None
-        try:
-            if collector.driver:
-                driver = collector.driver
-                collector.driver = None
-                driver.quit()
-        except:
-            pass  # Don't let cleanup fail
-        finally:
-            # No cleanup needed - subprocess will die naturally and take children with it
-            pass
+        # Aggressive cleanup
+        collector.cleanup()
