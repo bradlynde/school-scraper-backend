@@ -5,7 +5,7 @@ Process one lead through all steps, then write to final CSV only.
 No intermediate CSV files - all in memory streaming.
 
 Usage:
-    python Pipeline.py --api-key KEY --openai-key OPENAI_KEY
+    python pipeline.py --api-key KEY --openai-key OPENAI_KEY
 """
 
 import os
