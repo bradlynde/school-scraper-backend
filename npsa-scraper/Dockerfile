@@ -28,7 +28,7 @@ COPY ["requirements.txt", "./requirements.txt"]
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 # Copy the School Scraper directory contents
-COPY ["School Scraper/", "./"]
+COPY School\ Scraper/ ./
 
 # Verify assets/data/state_counties directory exists
 RUN ls -la assets/data/state_counties/ | head -5 || echo "Warning: assets/data/state_counties directory not found"
