@@ -24,7 +24,7 @@ ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 WORKDIR /app
 
 # Install Python dependencies
-COPY ["School Scraper/docs/requirements.txt", "./requirements.txt"]
+COPY ["requirements.txt", "./requirements.txt"]
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 # Copy the School Scraper directory contents

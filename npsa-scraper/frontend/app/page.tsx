@@ -317,7 +317,7 @@ export default function Home() {
           errorMessage = errorData.error || errorData.message || errorMessage;
         } catch {
           // If JSON parse fails, use text response
-          const errorText = await response.text();
+        const errorText = await response.text();
           if (errorText) {
             errorMessage = errorText;
           }

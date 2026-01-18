@@ -200,6 +200,9 @@ class ContentCollector:
             return driver
         except Exception as e:
             if retry_count < max_retries:
+                # Cleanup any leftover Chrome processes before retry (bottom-up)
+                self._kill_all_chrome_processes()
+                
                 # Retry with exponential backoff
                 wait_time = 2 ** retry_count  # 1s, 2s, 4s
                 print(f"    {bold('[SELENIUM]')} Failed to create Chrome driver (attempt {retry_count + 1}/{max_retries + 1}): {e}")
@@ -208,6 +211,8 @@ class ContentCollector:
                 return self._setup_selenium(retry_count=retry_count + 1, max_retries=max_retries)
             else:
                 # Final attempt with minimal options
+                # Cleanup any leftover Chrome processes before final attempt (bottom-up)
+                self._kill_all_chrome_processes()
                 print(f"    {bold('[SELENIUM]')} All retries exhausted, trying minimal options...")
             try:
                 minimal_options = Options()
@@ -243,15 +248,19 @@ class ContentCollector:
                     self.driver.quit()
             except:
                 pass  # Don't let cleanup fail
-            finally:
-                # No cleanup needed - subprocess will die naturally and take children with it
-                self.driver = None
+            
+            # Cleanup any leftover Chrome processes before restart (bottom-up)
+            self._kill_all_chrome_processes()
+            self.driver = None
             
             # Restart the driver
             self.driver = self._setup_selenium()
     
     def cleanup(self):
-        """Basic cleanup: quit Selenium driver if it exists"""
+        """Basic cleanup: quit Selenium driver and kill all Chrome processes (bottom-up)"""
+        # Cleanup Chrome processes first (bottom-up) before quitting driver
+        self._kill_all_chrome_processes()
+        
         driver = None
         try:
             if self.driver:
@@ -262,12 +271,123 @@ class ContentCollector:
         except Exception as e:
             print(f"    {bold('[SELENIUM]')} WARNING: Error quitting driver: {e}")
         finally:
-            # No cleanup needed - subprocess will die naturally and take children with it
             self.driver = None
     
     def __del__(self):
         """Destructor - safety net to ensure driver is cleaned up"""
         self.cleanup()
+    
+    def _kill_all_chrome_processes(self):
+        """
+        Deep cleanup of all Chrome/Chromium/ChromeDriver child processes.
+        Kills processes BOTTOM-UP (children first, then parents) to prevent zombies.
+        Only targets processes in the current worker's process tree (not system-wide).
+        Protects main container processes (waitress-serve, main Python process).
+        
+        Returns:
+            int: Number of processes killed
+        """
+        if not HAS_PSUTIL:
+            return 0
+        
+        killed_count = 0
+        try:
+            current_pid = os.getpid()
+            current_process = psutil.Process(current_pid)
+            
+            # Identify main container processes to protect
+            # These should never be killed, even if they match patterns
+            protected_names = {'waitress-serve', 'dumb-init', 'python', 'python3'}
+            protected_pids = set()
+            
+            # Get main container PID (parent or grandparent process)
+            try:
+                parent = current_process.parent()
+                if parent:
+                    protected_pids.add(parent.pid)
+                    # Also protect parent's parent (grandparent, likely waitress)
+                    try:
+                        grandparent = parent.parent()
+                        if grandparent:
+                            protected_pids.add(grandparent.pid)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            
+            # Collect all Chrome processes in worker's process tree
+            chrome_processes = []
+            try:
+                for child in current_process.children(recursive=True):
+                    try:
+                        name = child.info.get('name', '').lower()
+                        # Check if it's a Chrome process
+                        if ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
+                            # Skip protected processes
+                            if child.pid not in protected_pids:
+                                if name not in protected_names:
+                                    chrome_processes.append(child)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                        continue
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            
+            if not chrome_processes:
+                return 0
+            
+            # Sort processes by depth (deepest children first) - BOTTOM-UP approach
+            # Build depth map: calculate depth of each process from root
+            depth_map = {}
+            def get_depth(proc):
+                if proc.pid in depth_map:
+                    return depth_map[proc.pid]
+                try:
+                    if proc.pid == current_pid:
+                        depth = 0
+                    else:
+                        parent_depth = get_depth(proc.parent()) if proc.parent() else 0
+                        depth = parent_depth + 1
+                    depth_map[proc.pid] = depth
+                    return depth
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    return 999  # Unknown depth, kill last
+            
+            # Calculate depths
+            for proc in chrome_processes:
+                get_depth(proc)
+            
+            # Sort by depth descending (deepest = children first, shallowest = parents last)
+            chrome_processes.sort(key=lambda p: depth_map.get(p.pid, 999), reverse=True)
+            
+            # Kill processes BOTTOM-UP (deepest children first)
+            for proc in chrome_processes:
+                try:
+                    if proc.is_running():
+                        # Try graceful termination first
+                        proc.terminate()
+                        killed_count += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            
+            # Wait a moment for processes to die
+            if killed_count > 0:
+                time.sleep(0.5)
+                
+                # Force kill any remaining processes
+                for proc in chrome_processes:
+                    try:
+                        if proc.is_running():
+                            proc.kill()  # Force kill if still running
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+            
+            if killed_count > 0:
+                print(f"    {bold('[SELENIUM]')} Killed {killed_count} Chrome child processes (bottom-up)")
+            
+        except Exception as e:
+            print(f"    {bold('[SELENIUM]')} WARNING: Error in Chrome process cleanup: {e}")
+        
+        return killed_count
     
     def safe_get(self, url: str) -> requests.Response:
         """Make HTTP request with retry logic"""
@@ -664,4 +784,4 @@ if __name__ == "__main__":
             pass  # Don't let cleanup fail
         finally:
             # No cleanup needed - subprocess will die naturally and take children with it
-                pass
+            pass

@@ -438,4 +438,4 @@ class SchoolSearcher:
         print(f"{bold('[STEP 1]')} Complete: {self.stats['counties_searched']} counties, {self.stats['total_schools_found']} schools, {self.stats['total_api_calls']} API calls, {elapsed/60:.1f} min")
 
 # County and city lists have been moved to assets/data/state_counties/{state}.txt files
-# Use load_counties_from_state() helper in Pipeline.py to load them
+# Use load_counties_from_state() helper in pipeline.py to load them
