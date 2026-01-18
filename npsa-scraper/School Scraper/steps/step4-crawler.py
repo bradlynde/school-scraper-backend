@@ -389,6 +389,107 @@ class ContentCollector:
         
         return killed_count
     
+    def _kill_orphaned_chrome_processes(self):
+        """
+        Kill all orphaned Chrome/Chromium/ChromeDriver processes (PPID=1) BOTTOM-UP.
+        Called after each Selenium use to prevent accumulation of orphaned processes.
+        
+        Per Giorgio's recommendation: "kill all the processes that don't have a parent
+        except the first one" (PID 1 - the container init process).
+        
+        Returns:
+            int: Number of orphaned processes killed
+        """
+        if not HAS_PSUTIL:
+            return 0
+        
+        killed_count = 0
+        try:
+            # ALWAYS protect PID 1 (container init process) - Giorgio's explicit requirement
+            protected_pids = {1}
+            protected_names = {'waitress-serve', 'dumb-init', 'python', 'python3', 'waitress'}
+            
+            # Find orphaned Chrome processes (PPID=1)
+            orphaned_processes = []
+            for proc in psutil.process_iter(['name', 'pid', 'ppid']):
+                try:
+                    name = proc.info.get('name', '').lower()
+                    ppid = proc.info.get('ppid', -1)
+                    pid = proc.info['pid']
+                    
+                    # Check if it's an orphaned Chrome process (PPID=1) and not protected
+                    if ppid == 1 and ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
+                        if pid not in protected_pids and name not in protected_names:
+                            orphaned_processes.append(proc)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                    continue
+            
+            if not orphaned_processes:
+                return 0
+            
+            # Sort orphaned processes by depth (children first) - BOTTOM-UP approach
+            depth_map = {}
+            def get_orphan_depth(proc):
+                if proc.pid in depth_map:
+                    return depth_map[proc.pid]
+                try:
+                    # Count children depth (deeper if has more descendants)
+                    children = proc.children(recursive=True)
+                    depth = len(children)
+                    depth_map[proc.pid] = depth
+                    return depth
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    return 0
+            
+            # Calculate depths
+            for proc in orphaned_processes:
+                get_orphan_depth(proc)
+            
+            # Sort by depth descending (processes with more children = deeper, kill first)
+            orphaned_processes.sort(key=lambda p: depth_map.get(p.pid, 0), reverse=True)
+            
+            # Kill orphaned processes BOTTOM-UP (processes with more children first)
+            for proc in orphaned_processes:
+                try:
+                    if proc.is_running():
+                        # First, try to kill children of this orphan if any (BOTTOM-UP)
+                        try:
+                            for child in proc.children(recursive=True):
+                                try:
+                                    child_name = child.info.get('name', '').lower()
+                                    if ('chrome' in child_name or 'chromium' in child_name or 'chromedriver' in child_name):
+                                        if child.is_running():
+                                            child.terminate()
+                                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                    continue
+                            time.sleep(0.2)  # Brief wait for children to die
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                        
+                        # Then kill the orphan process itself
+                        proc.terminate()
+                        killed_count += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            
+            # Force kill any remaining
+            if killed_count > 0:
+                time.sleep(0.3)
+                for proc in orphaned_processes:
+                    try:
+                        if proc.is_running():
+                            proc.kill()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                        continue
+            
+            if killed_count > 0:
+                print(f"    {bold('[SELENIUM]')} Killed {killed_count} orphaned Chrome processes (PPID=1, bottom-up)")
+        
+        except Exception as e:
+            print(f"    {bold('[SELENIUM]')} WARNING: Error killing orphaned Chrome processes: {e}")
+        
+        return killed_count
+    
     def safe_get(self, url: str) -> requests.Response:
         """Make HTTP request with retry logic"""
         for attempt in range(self.max_retries):
@@ -523,8 +624,10 @@ class ContentCollector:
             print(f"      Selenium error: {e}")
             return None
         finally:
-            # Cleanup handled by cleanup() method, but ensure driver reference is maintained
-            pass
+            # After each Selenium use, kill orphaned Chrome processes (PPID=1) to prevent accumulation
+            # This aligns with Giorgio's recommendation: "kill all processes without a parent except PID 1"
+            # Prevents orphaned processes from accumulating when parent processes die unexpectedly (crashes/timeouts)
+            self._kill_orphaned_chrome_processes()
     
     def collect_page_content(self, school_name: str, url: str) -> Optional[Dict]:
         """
