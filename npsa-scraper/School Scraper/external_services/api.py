@@ -304,9 +304,38 @@ def check_health():
         process_info = list_chrome_processes()
         print(f"{bold('[HEALTH]')} Chrome: {process_info['chrome_count']}, ChromeDriver: {process_info['chromedriver_count']}, Total: {process_info['total_count']}")
         
+        # DEBUG: List all Chrome processes with exact names, PIDs, PPIDs
+        if HAS_PSUTIL:
+            print(f"{bold('[HEALTH]')} Listing all Chrome/Chromium/ChromeDriver processes:")
+            try:
+                for proc in psutil.process_iter(['name', 'pid', 'ppid', 'status', 'cmdline']):
+                    try:
+                        name = proc.info.get('name', '')
+                        name_lower = name.lower()
+                        pid = proc.info['pid']
+                        ppid = proc.info.get('ppid', -1)
+                        status = proc.info.get('status', 'unknown')
+                        
+                        # Check if it's a Chrome-related process
+                        if ('chrome' in name_lower or 'chromium' in name_lower or 'chromedriver' in name_lower):
+                            cmdline = proc.info.get('cmdline', [])
+                            cmdline_str = ' '.join(cmdline[:3]) if cmdline else ''
+                            if len(cmdline) > 3:
+                                cmdline_str += '...'
+                            
+                            print(f"{bold('[HEALTH]')}   PID {pid:6d} | PPID {ppid:6d} | {status:8s} | {name}")
+                            if cmdline_str:
+                                print(f"{bold('[HEALTH]')}          Command: {cmdline_str}")
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                        continue
+            except Exception as e:
+                print(f"{bold('[HEALTH]')} Error listing detailed processes: {e}")
+        
+        # CLEANUP DISABLED FOR DEBUGGING - Orphaned process killing disabled
         # Kill orphaned processes (PPID=1) - these are processes reparented to PID 1 in containers
         # This prevents process accumulation when workers don't properly clean up
-        if HAS_PSUTIL:
+        # DISABLED: if HAS_PSUTIL:
+        if False:  # Disabled for debugging
             try:
                 orphaned_count = 0
                 orphaned_processes = []
@@ -654,9 +683,10 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         except Exception:
             pass
         
+        # CLEANUP DISABLED FOR DEBUGGING
         # Kill Chrome processes BOTTOM-UP (only worker's process tree, protects main container)
         # This replaces system-wide process_iter() and pkill which could kill parents before children
-        kill_chrome_processes_bottom_up()
+        # was: kill_chrome_processes_bottom_up()
         
         # Brief delay after cleanup to provide buffer
         time.sleep(1.0)
@@ -675,10 +705,10 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
     run_dir.mkdir(parents=True, exist_ok=True)
     result_file = str(run_dir / f"{county.replace(' ', '_')}_result.json")
     
-    # Update progress
+        # Update progress
     pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
-    pipeline_runs[run_id]["currentCounty"] = county
-    pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
+        pipeline_runs[run_id]["currentCounty"] = county
+        pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
     pipeline_runs[run_id]["currentStep"] = 1
     
     # Start subprocess to run county
@@ -1129,11 +1159,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                     completed_counties.append(county)
                             
                             completed = len(completed_counties)
-                            progress_pct = int((completed / total_counties) * 100)
+                    progress_pct = int((completed / total_counties) * 100)
                             
                             # Update pipeline_runs state
                             with progress_lock:
-                                pipeline_runs[run_id]["progress"] = progress_pct
+                    pipeline_runs[run_id]["progress"] = progress_pct
                                 pipeline_runs[run_id]["statusMessage"] = f"Processing {completed}/{total_counties} counties..."
                                 pipeline_runs[run_id]["countiesProcessed"] = completed
                                 # Set currentCounty to show progress (since we're processing in parallel, show the count)
@@ -1160,8 +1190,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                 pipeline_runs[run_id]["countySchools"].append(result.get('schools', 0))
                             
                             print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
-                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                            
+                    print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                    
                             # Save checkpoint after every county (CHECKPOINT_BATCH_SIZE=1) or at completion
                             # This is for progress tracking only - runs always start fresh, no resume logic
                             is_checkpoint = completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties
@@ -1197,7 +1227,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                             log_resource_usage()
                             
                             # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                            gc.collect()
+                        gc.collect()
                             
                             # 2-second delay between counties to provide buffer for cleanup
                             if completed < total_counties:
@@ -1218,10 +1248,10 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                         pipeline_runs[run_id]["status"] = "cancelled"
                         pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
                         return
-                    except Exception as e:
+                except Exception as e:
                         print(f"[{run_id}] Error in pool processing: {e}")
-                        import traceback
-                        traceback.print_exc()
+                    import traceback
+                    traceback.print_exc()
                         # Save checkpoint before terminating
                         save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
                         pool.terminate()
@@ -1240,7 +1270,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed ({len(completed_counties)}/{total_counties}), starting aggregation...")
             try:
-                aggregate_final_results(run_id, state)
+            aggregate_final_results(run_id, state)
             except Exception as e:
                 print(f"[{run_id}] Error during aggregation: {e}")
                 import traceback
@@ -1319,9 +1349,9 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "error"
-                pipeline_runs[run_id]["error"] = error_msg
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            pipeline_runs[run_id]["status"] = "error"
+            pipeline_runs[run_id]["error"] = error_msg
+            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
             import traceback
             traceback.print_exc()
         except Exception as e:
@@ -1345,9 +1375,9 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "error"
-                pipeline_runs[run_id]["error"] = error_msg
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            pipeline_runs[run_id]["status"] = "error"
+            pipeline_runs[run_id]["error"] = error_msg
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
     
     # Wrapper to ensure thread always completes and updates status
     def process_all_counties_with_error_handling():
@@ -1355,8 +1385,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             process_all_counties()
         except Exception as e:
             print(f"[{run_id}] Unhandled exception in process_all_counties: {e}")
-            import traceback
-            traceback.print_exc()
+        import traceback
+        traceback.print_exc()
             # Ensure status is updated even on unhandled exceptions
             if run_id in pipeline_runs:
                 pipeline_runs[run_id]["status"] = "error"

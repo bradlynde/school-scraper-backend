@@ -200,8 +200,7 @@ class ContentCollector:
             return driver
         except Exception as e:
             if retry_count < max_retries:
-                # Cleanup any leftover Chrome processes before retry (bottom-up)
-                self._kill_all_chrome_processes()
+                # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_all_chrome_processes()
                 
                 # Retry with exponential backoff
                 wait_time = 2 ** retry_count  # 1s, 2s, 4s
@@ -211,8 +210,7 @@ class ContentCollector:
                 return self._setup_selenium(retry_count=retry_count + 1, max_retries=max_retries)
             else:
                 # Final attempt with minimal options
-                # Cleanup any leftover Chrome processes before final attempt (bottom-up)
-                self._kill_all_chrome_processes()
+                # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_all_chrome_processes()
                 print(f"    {bold('[SELENIUM]')} All retries exhausted, trying minimal options...")
             try:
                 minimal_options = Options()
@@ -249,17 +247,15 @@ class ContentCollector:
             except:
                 pass  # Don't let cleanup fail
             
-            # Cleanup any leftover Chrome processes before restart (bottom-up)
-            self._kill_all_chrome_processes()
+            # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_all_chrome_processes()
             self.driver = None
             
             # Restart the driver
             self.driver = self._setup_selenium()
     
     def cleanup(self):
-        """Basic cleanup: quit Selenium driver and kill all Chrome processes (bottom-up)"""
-        # Cleanup Chrome processes first (bottom-up) before quitting driver
-        self._kill_all_chrome_processes()
+        """Basic cleanup: quit Selenium driver (Chrome process cleanup disabled for debugging)"""
+        # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_all_chrome_processes()
         
         driver = None
         try:
@@ -490,6 +486,63 @@ class ContentCollector:
         
         return killed_count
     
+    def _list_all_chrome_processes(self):
+        """
+        List ALL Chrome/Chromium/ChromeDriver processes with exact names, PIDs, and PPIDs.
+        Used for debugging to see exactly what processes are created by the tool.
+        
+        Returns:
+            list: List of dicts with process info
+        """
+        if not HAS_PSUTIL:
+            print(f"    {bold('[PROCESS-LIST]')} psutil not available, cannot list processes")
+            return []
+        
+        processes = []
+        try:
+            for proc in psutil.process_iter(['name', 'pid', 'ppid', 'status', 'cmdline']):
+                try:
+                    name = proc.info.get('name', '')
+                    name_lower = name.lower()
+                    pid = proc.info['pid']
+                    ppid = proc.info.get('ppid', -1)
+                    status = proc.info.get('status', 'unknown')
+                    
+                    # Check if it's a Chrome-related process
+                    if ('chrome' in name_lower or 'chromium' in name_lower or 'chromedriver' in name_lower):
+                        cmdline = proc.info.get('cmdline', [])
+                        cmdline_str = ' '.join(cmdline[:3]) if cmdline else ''  # First 3 args only
+                        if len(cmdline) > 3:
+                            cmdline_str += '...'
+                        
+                        processes.append({
+                            'name': name,
+                            'pid': pid,
+                            'ppid': ppid,
+                            'status': status,
+                            'cmdline': cmdline_str
+                        })
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                    continue
+            
+            # Sort by PID for consistent output
+            processes.sort(key=lambda p: p['pid'])
+            
+            # Print detailed list
+            if processes:
+                print(f"    {bold('[PROCESS-LIST]')} Found {len(processes)} Chrome/Chromium/ChromeDriver processes:")
+                for proc in processes:
+                    print(f"    {bold('[PROCESS-LIST]')}   PID {proc['pid']:6d} | PPID {proc['ppid']:6d} | {proc['status']:8s} | {proc['name']}")
+                    if proc['cmdline']:
+                        print(f"    {bold('[PROCESS-LIST]')}          Command: {proc['cmdline']}")
+            else:
+                print(f"    {bold('[PROCESS-LIST]')} No Chrome/Chromium/ChromeDriver processes found")
+        
+        except Exception as e:
+            print(f"    {bold('[PROCESS-LIST]')} WARNING: Error listing processes: {e}")
+        
+        return processes
+    
     def safe_get(self, url: str) -> requests.Response:
         """Make HTTP request with retry logic"""
         for attempt in range(self.max_retries):
@@ -624,10 +677,10 @@ class ContentCollector:
             print(f"      Selenium error: {e}")
             return None
         finally:
-            # After each Selenium use, kill orphaned Chrome processes (PPID=1) to prevent accumulation
-            # This aligns with Giorgio's recommendation: "kill all processes without a parent except PID 1"
-            # Prevents orphaned processes from accumulating when parent processes die unexpectedly (crashes/timeouts)
-            self._kill_orphaned_chrome_processes()
+            # DEBUG: List all Chrome processes after each Selenium use (cleanup disabled for debugging)
+            # After each Selenium use, list all Chrome processes to see what's created
+            self._list_all_chrome_processes()
+            # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_orphaned_chrome_processes()
     
     def collect_page_content(self, school_name: str, url: str) -> Optional[Dict]:
         """
