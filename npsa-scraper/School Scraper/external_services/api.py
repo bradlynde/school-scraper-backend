@@ -331,11 +331,9 @@ def check_health():
             except Exception as e:
                 print(f"{bold('[HEALTH]')} Error listing detailed processes: {e}")
         
-        # CLEANUP DISABLED FOR DEBUGGING - Orphaned process killing disabled
         # Kill orphaned processes (PPID=1) - these are processes reparented to PID 1 in containers
         # This prevents process accumulation when workers don't properly clean up
-        # DISABLED: if HAS_PSUTIL:
-        if False:  # Disabled for debugging
+        if HAS_PSUTIL:
             try:
                 orphaned_count = 0
                 orphaned_processes = []
@@ -683,10 +681,9 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         except Exception:
             pass
         
-        # CLEANUP DISABLED FOR DEBUGGING
         # Kill Chrome processes BOTTOM-UP (only worker's process tree, protects main container)
         # This replaces system-wide process_iter() and pkill which could kill parents before children
-        # was: kill_chrome_processes_bottom_up()
+        kill_chrome_processes_bottom_up()
         
         # Brief delay after cleanup to provide buffer
         time.sleep(1.0)

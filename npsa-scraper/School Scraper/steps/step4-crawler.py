@@ -200,7 +200,8 @@ class ContentCollector:
             return driver
         except Exception as e:
             if retry_count < max_retries:
-                # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_all_chrome_processes()
+                # Cleanup any leftover Chrome processes before retry (bottom-up)
+                self._kill_all_chrome_processes()
                 
                 # Retry with exponential backoff
                 wait_time = 2 ** retry_count  # 1s, 2s, 4s
@@ -210,7 +211,8 @@ class ContentCollector:
                 return self._setup_selenium(retry_count=retry_count + 1, max_retries=max_retries)
             else:
                 # Final attempt with minimal options
-                # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_all_chrome_processes()
+                # Cleanup any leftover Chrome processes before final attempt (bottom-up)
+                self._kill_all_chrome_processes()
                 print(f"    {bold('[SELENIUM]')} All retries exhausted, trying minimal options...")
             try:
                 minimal_options = Options()
@@ -247,15 +249,17 @@ class ContentCollector:
             except:
                 pass  # Don't let cleanup fail
             
-            # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_all_chrome_processes()
+            # Cleanup any leftover Chrome processes before restart (bottom-up)
+            self._kill_all_chrome_processes()
             self.driver = None
             
             # Restart the driver
             self.driver = self._setup_selenium()
     
     def cleanup(self):
-        """Basic cleanup: quit Selenium driver (Chrome process cleanup disabled for debugging)"""
-        # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_all_chrome_processes()
+        """Basic cleanup: quit Selenium driver and kill all Chrome processes (bottom-up)"""
+        # Cleanup Chrome processes first (bottom-up) before quitting driver
+        self._kill_all_chrome_processes()
         
         driver = None
         try:
@@ -590,13 +594,17 @@ class ContentCollector:
         
         # Check if thread is still alive (timed out)
         if thread.is_alive():
-            # Timeout occurred - forcefully quit driver
+            # Timeout occurred - kill children FIRST (bottom-up) before quitting driver
             print(f"      [TIMEOUT] Page load exceeded {timeout}s, forcefully terminating...")
             try:
-                driver.quit()
+                # CRITICAL: Kill children BEFORE parent to prevent orphans
+                self._kill_all_chrome_processes()
+                time.sleep(0.5)  # Wait for children to die
+                driver.quit()  # Now safe to quit parent
+                time.sleep(0.3)  # Brief wait
+                self._kill_all_chrome_processes()  # Final cleanup for any stragglers
             except:
                 pass
-            # No cleanup needed - subprocess will die naturally and take children with it
             # Mark driver as dead so it gets recreated
             self.driver = None
             return False
@@ -677,10 +685,12 @@ class ContentCollector:
             print(f"      Selenium error: {e}")
             return None
         finally:
-            # DEBUG: List all Chrome processes after each Selenium use (cleanup disabled for debugging)
-            # After each Selenium use, list all Chrome processes to see what's created
+            # List all Chrome processes after each Selenium use (for monitoring)
             self._list_all_chrome_processes()
-            # CLEANUP DISABLED FOR DEBUGGING - was: self._kill_orphaned_chrome_processes()
+            # After each Selenium use, kill orphaned Chrome processes (PPID=1) to prevent accumulation
+            # This aligns with Giorgio's recommendation: "kill all processes without a parent except PID 1"
+            # Prevents orphaned processes from accumulating when parent processes die unexpectedly (crashes/timeouts)
+            self._kill_orphaned_chrome_processes()
     
     def collect_page_content(self, school_name: str, url: str) -> Optional[Dict]:
         """
