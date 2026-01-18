@@ -1099,34 +1099,34 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                     pool_args = [(idx, county, state, run_id, total_counties) for idx, county in remaining_counties]
                     
                     # Use imap_unordered to get results as they complete (out-of-order is handled)
-                # Track which counties we've submitted to handle failures gracefully
-                failed_counties = []
-                try:
-                    for idx, county, result, processing_time in pool.imap_unordered(process_county_worker_multiprocessing, pool_args):
-                        # Check for cancellation
-                        if running_threads.get(run_id, {}).get('cancelled', False):
-                            pool.terminate()  # Force kill all workers
-                            pool.join()
-                            pipeline_runs[run_id]["status"] = "cancelled"
-                            pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
-                            print(f"[{run_id}] Pipeline cancelled during processing")
-                            return
-                        
-                        # Handle worker failures gracefully - continue processing other counties
-                        if not result.get('success', False):
-                            error_msg = result.get('error', 'Unknown error')
-                            print(f"[{run_id}] WARNING: {county} County failed: {error_msg}")
-                            failed_counties.append(county)
-                            # Still mark as completed to avoid infinite retry, but log the failure
+                    # Track which counties we've submitted to handle failures gracefully
+                    failed_counties = []
+                    try:
+                        for idx, county, result, processing_time in pool.imap_unordered(process_county_worker_multiprocessing, pool_args):
+                            # Check for cancellation
+                            if running_threads.get(run_id, {}).get('cancelled', False):
+                                pool.terminate()  # Force kill all workers
+                                pool.join()
+                                pipeline_runs[run_id]["status"] = "cancelled"
+                                pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+                                print(f"[{run_id}] Pipeline cancelled during processing")
+                                return
+                            
+                            # Handle worker failures gracefully - continue processing other counties
+                            if not result.get('success', False):
+                                error_msg = result.get('error', 'Unknown error')
+                                print(f"[{run_id}] WARNING: {county} County failed: {error_msg}")
+                                failed_counties.append(county)
+                                # Still mark as completed to avoid infinite retry, but log the failure
+                                with checkpoint_lock:
+                                    if county not in completed_counties:
+                                        completed_counties.append(county)
+                                continue
+                            
+                            # Update progress in main process (thread-safe)
                             with checkpoint_lock:
                                 if county not in completed_counties:
                                     completed_counties.append(county)
-                            continue
-                        
-                        # Update progress in main process (thread-safe)
-                        with checkpoint_lock:
-                            if county not in completed_counties:
-                                completed_counties.append(county)
                             
                             completed = len(completed_counties)
                             progress_pct = int((completed / total_counties) * 100)
@@ -1189,53 +1189,53 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                 save_run_metadata(run_id, metadata)
                                 
                                 print(f"[{run_id}] Checkpoint saved after {completed} counties")
-                        
-                        # Health check after each county (lists remaining processes)
-                        check_health()
-                        
-                        # Resource monitoring
-                        log_resource_usage()
-                        
-                        # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                        gc.collect()
-                        
-                        # 2-second delay between counties to provide buffer for cleanup
-                        if completed < total_counties:
-                            time.sleep(2.0)
+                            
+                            # Health check after each county (lists remaining processes)
+                            check_health()
+                            
+                            # Resource monitoring
+                            log_resource_usage()
+                            
+                            # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
+                            gc.collect()
+                            
+                            # 2-second delay between counties to provide buffer for cleanup
+                            if completed < total_counties:
+                                time.sleep(2.0)
                     
-                    # Log any failed counties after all processing completes
-                    if failed_counties:
-                        print(f"[{run_id}] WARNING: {len(failed_counties)} counties failed: {', '.join(failed_counties)}")
-                        if run_id in pipeline_runs:
-                            pipeline_runs[run_id]["statusMessage"] = f"Completed with {len(failed_counties)} failures"
+                        # Log any failed counties after all processing completes
+                        if failed_counties:
+                            print(f"[{run_id}] WARNING: {len(failed_counties)} counties failed: {', '.join(failed_counties)}")
+                            if run_id in pipeline_runs:
+                                pipeline_runs[run_id]["statusMessage"] = f"Completed with {len(failed_counties)} failures"
                         
-                except KeyboardInterrupt:
-                    print(f"[{run_id}] Interrupted by user, cleaning up...")
-                    pool.terminate()
-                    pool.join()
-                    # Save checkpoint before exiting
-                    save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
-                    pipeline_runs[run_id]["status"] = "cancelled"
-                    pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
-                    return
-                except Exception as e:
-                    print(f"[{run_id}] Error in pool processing: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    # Save checkpoint before terminating
-                    save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
-                    pool.terminate()
-                    pool.join()
-                    # Don't crash - try to continue to aggregation if we have some results
-                    if len(completed_counties) > 0:
-                        print(f"[{run_id}] Continuing to aggregation with {len(completed_counties)} completed counties despite error")
-                    else:
-                        # No progress made, mark as error
-                        if run_id in pipeline_runs:
-                            pipeline_runs[run_id]["status"] = "error"
-                            pipeline_runs[run_id]["error"] = f"Pool processing failed: {str(e)}"
-                            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {str(e)}"
+                    except KeyboardInterrupt:
+                        print(f"[{run_id}] Interrupted by user, cleaning up...")
+                        pool.terminate()
+                        pool.join()
+                        # Save checkpoint before exiting
+                        save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
+                        pipeline_runs[run_id]["status"] = "cancelled"
+                        pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
                         return
+                    except Exception as e:
+                        print(f"[{run_id}] Error in pool processing: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Save checkpoint before terminating
+                        save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
+                        pool.terminate()
+                        pool.join()
+                        # Don't crash - try to continue to aggregation if we have some results
+                        if len(completed_counties) > 0:
+                            print(f"[{run_id}] Continuing to aggregation with {len(completed_counties)} completed counties despite error")
+                        else:
+                            # No progress made, mark as error
+                            if run_id in pipeline_runs:
+                                pipeline_runs[run_id]["status"] = "error"
+                                pipeline_runs[run_id]["error"] = f"Pool processing failed: {str(e)}"
+                                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {str(e)}"
+                            return
             
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed ({len(completed_counties)}/{total_counties}), starting aggregation...")
