@@ -32,6 +32,30 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+# CRITICAL: Ensure dumb-init is PID 1 for proper process reaping
+# If Railway or another platform overrides the Dockerfile ENTRYPOINT,
+# this check ensures dumb-init still runs as PID 1
+if HAS_PSUTIL:
+    try:
+        current_pid = os.getpid()
+        pid1_process = psutil.Process(1)
+        pid1_name = pid1_process.name().lower()
+        
+        # If we're PID 1 and we're not dumb-init, exec into dumb-init
+        if current_pid == 1 and 'dumb-init' not in pid1_name and 'init' not in pid1_name:
+            print("[CRITICAL] Running as PID 1 but not dumb-init! Execing into dumb-init...")
+            # Find dumb-init (should be in /usr/bin/dumb-init)
+            dumb_init_path = "/usr/bin/dumb-init"
+            if os.path.exists(dumb_init_path):
+                # Exec into dumb-init, which will then run the original command
+                # We need to reconstruct the original command from sys.argv
+                os.execv(dumb_init_path, ["dumb-init", "--"] + sys.argv)
+            else:
+                print(f"[CRITICAL] dumb-init not found at {dumb_init_path}, cannot fix PID 1 issue")
+    except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as e:
+        # If we can't check, continue anyway (might not be in a container)
+        pass
+
 # Add parent directory to path to import pipeline
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from pipeline import StreamingPipeline

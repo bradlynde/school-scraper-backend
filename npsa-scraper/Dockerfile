@@ -30,6 +30,10 @@ RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 # Copy the School Scraper directory contents
 COPY School\ Scraper/ ./
 
+# Copy startup script that ensures dumb-init runs as PID 1
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
 # Verify assets/data/state_counties directory exists
 RUN ls -la assets/data/state_counties/ | head -5 || echo "Warning: assets/data/state_counties directory not found"
 
@@ -41,6 +45,8 @@ EXPOSE 8080
 # Waitress is a pure-Python WSGI server that uses a fixed thread pool, eliminating thread exhaustion issues
 # It's designed for production workloads and handles long-running processes better than Flask's dev server
 # dumb-init acts as PID 1 and automatically reaps zombie processes (fixes Chrome zombie accumulation)
+# Use exec form to ensure dumb-init is PID 1 and properly reaps zombie processes
+# The start.sh script provides additional safety checks
 ENTRYPOINT ["dumb-init", "--"]
-CMD waitress-serve --host=0.0.0.0 --port=${PORT:-8080} --threads=4 --channel-timeout=300 external_services.api:app
+CMD ["/app/start.sh"]
 
