@@ -66,10 +66,31 @@ if HAS_PSUTIL:
                 except:
                     pass
             
-            start_script_path = "/app/start.sh"
+            # Search for start.sh in multiple locations
+            # Get the directory where this script is located
+            script_dir = Path(__file__).parent.parent.parent  # Go up from external_services/api.py to project root
+            start_script_paths = [
+                "/app/start.sh",  # Expected location from Dockerfile
+                str(script_dir / "start.sh"),  # Relative to project root
+                "./start.sh",  # Current working directory
+                os.path.join(os.getcwd(), "start.sh"),  # Current working directory (absolute)
+            ]
+            start_script_path = None
+            for path in start_script_paths:
+                if os.path.exists(path) and os.access(path, os.X_OK):
+                    start_script_path = path
+                    break
             
-            if dumb_init_path and os.path.exists(start_script_path):
-                print(f"[CRITICAL] Found dumb-init at {dumb_init_path}, execing into it...")
+            # Diagnostic output
+            print(f"[CRITICAL] dumb-init search result: {dumb_init_path if dumb_init_path else 'NOT FOUND'}")
+            print(f"[CRITICAL] start.sh search result: {start_script_path if start_script_path else 'NOT FOUND'}")
+            if not start_script_path:
+                print(f"[CRITICAL] Searched start.sh in: {start_script_paths}")
+                print(f"[CRITICAL] Current working directory: {os.getcwd()}")
+                print(f"[CRITICAL] Script location: {Path(__file__).parent}")
+            
+            if dumb_init_path and start_script_path:
+                print(f"[CRITICAL] Found both dumb-init and start.sh, execing into dumb-init...")
                 # Exec into dumb-init, which will then run start.sh
                 # start.sh will handle PORT expansion and start waitress properly
                 os.execv(dumb_init_path, ["dumb-init", "--", start_script_path])
@@ -77,11 +98,14 @@ if HAS_PSUTIL:
                 missing = []
                 if not dumb_init_path:
                     missing.append("dumb-init")
-                if not os.path.exists(start_script_path):
-                    missing.append(f"start.sh at {start_script_path}")
+                if not start_script_path:
+                    missing.append("start.sh")
                 print(f"[CRITICAL] Cannot fix PID 1 issue - missing: {', '.join(missing)}")
-                print(f"[CRITICAL] Searched paths: {dumb_init_paths}")
+                if not dumb_init_path:
+                    print(f"[CRITICAL] Searched dumb-init paths: {dumb_init_paths}")
                 # Continue anyway - might work but won't have proper process reaping
+                # Note: If Railway bypasses Dockerfile ENTRYPOINT, this fallback cannot work
+                # because we're already in the Python process loading the Flask app
     except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as e:
         # If we can't check, continue anyway (might not be in a container)
         pass
