@@ -44,15 +44,43 @@ if HAS_PSUTIL:
         # If we're PID 1 and we're not dumb-init, exec into dumb-init with start.sh
         if current_pid == 1 and 'dumb-init' not in pid1_name and 'init' not in pid1_name:
             print("[CRITICAL] Running as PID 1 but not dumb-init! Execing into dumb-init with start.sh...")
-            # Find dumb-init (should be in /usr/bin/dumb-init)
-            dumb_init_path = "/usr/bin/dumb-init"
+            # Search for dumb-init in common locations
+            dumb_init_paths = [
+                "/usr/bin/dumb-init",
+                "/usr/local/bin/dumb-init",
+                "/bin/dumb-init"
+            ]
+            dumb_init_path = None
+            for path in dumb_init_paths:
+                if os.path.exists(path) and os.access(path, os.X_OK):
+                    dumb_init_path = path
+                    break
+            
+            # Also try to find it using which (if available)
+            if not dumb_init_path:
+                try:
+                    import shutil
+                    which_path = shutil.which("dumb-init")
+                    if which_path and os.path.exists(which_path):
+                        dumb_init_path = which_path
+                except:
+                    pass
+            
             start_script_path = "/app/start.sh"
-            if os.path.exists(dumb_init_path) and os.path.exists(start_script_path):
+            
+            if dumb_init_path and os.path.exists(start_script_path):
+                print(f"[CRITICAL] Found dumb-init at {dumb_init_path}, execing into it...")
                 # Exec into dumb-init, which will then run start.sh
                 # start.sh will handle PORT expansion and start waitress properly
                 os.execv(dumb_init_path, ["dumb-init", "--", start_script_path])
             else:
-                print(f"[CRITICAL] dumb-init not found at {dumb_init_path} or start.sh not found at {start_script_path}, cannot fix PID 1 issue")
+                missing = []
+                if not dumb_init_path:
+                    missing.append("dumb-init")
+                if not os.path.exists(start_script_path):
+                    missing.append(f"start.sh at {start_script_path}")
+                print(f"[CRITICAL] Cannot fix PID 1 issue - missing: {', '.join(missing)}")
+                print(f"[CRITICAL] Searched paths: {dumb_init_paths}")
                 # Continue anyway - might work but won't have proper process reaping
     except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as e:
         # If we can't check, continue anyway (might not be in a container)

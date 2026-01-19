@@ -8,19 +8,43 @@ CURRENT_PID=$$
 
 echo "[STARTUP] Current PID: $$, PID 1: $PID1_NAME"
 
+# Find dumb-init in common locations
+DUMB_INIT_PATH=""
+for path in /usr/bin/dumb-init /usr/local/bin/dumb-init /bin/dumb-init; do
+    if [ -x "$path" ]; then
+        DUMB_INIT_PATH="$path"
+        break
+    fi
+done
+
+# Also try which if available
+if [ -z "$DUMB_INIT_PATH" ] && command -v dumb-init >/dev/null 2>&1; then
+    DUMB_INIT_PATH=$(command -v dumb-init)
+fi
+
 # If we're PID 1 and we're not dumb-init, something is wrong
 # This means Railway overrode the ENTRYPOINT
 if [ "$CURRENT_PID" = "1" ] && [ "$PID1_NAME" != "dumb-init" ]; then
     echo "[STARTUP] ERROR: Running as PID 1 but not dumb-init! Execing into dumb-init..."
-    # Exec into dumb-init, which will then run this script again
-    exec dumb-init -- "$0" "$@"
+    if [ -n "$DUMB_INIT_PATH" ]; then
+        echo "[STARTUP] Found dumb-init at $DUMB_INIT_PATH"
+        # Exec into dumb-init, which will then run this script again
+        exec "$DUMB_INIT_PATH" -- "$0" "$@"
+    else
+        echo "[STARTUP] ERROR: dumb-init not found! Searched: /usr/bin/dumb-init /usr/local/bin/dumb-init /bin/dumb-init"
+        echo "[STARTUP] Process reaping will not work correctly. Continuing anyway..."
+    fi
 fi
 
 # If PID 1 is not dumb-init and we're not PID 1, try to exec into dumb-init
 # (This shouldn't happen if ENTRYPOINT is correct, but handle it)
 if [ "$PID1_NAME" != "dumb-init" ] && [ "$CURRENT_PID" != "1" ]; then
     echo "[STARTUP] WARNING: PID 1 is not dumb-init, attempting to exec into dumb-init..."
-    exec dumb-init -- "$0" "$@"
+    if [ -n "$DUMB_INIT_PATH" ]; then
+        exec "$DUMB_INIT_PATH" -- "$0" "$@"
+    else
+        echo "[STARTUP] WARNING: dumb-init not found, cannot fix PID 1 issue"
+    fi
 fi
 
 # Get port from environment variable (default 8080)
