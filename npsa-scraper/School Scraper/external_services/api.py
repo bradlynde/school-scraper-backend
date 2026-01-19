@@ -319,6 +319,9 @@ def check_health():
                         # Check if it's a Chrome-related process
                         if ('chrome' in name_lower or 'chromium' in name_lower or 'chromedriver' in name_lower):
                             cmdline = proc.info.get('cmdline', [])
+                            # Handle None cmdline (some processes may not have cmdline available)
+                            if cmdline is None:
+                                cmdline = []
                             cmdline_str = ' '.join(cmdline[:3]) if cmdline else ''
                             if len(cmdline) > 3:
                                 cmdline_str += '...'

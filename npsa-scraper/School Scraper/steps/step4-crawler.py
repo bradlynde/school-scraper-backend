@@ -515,6 +515,9 @@ class ContentCollector:
                     # Check if it's a Chrome-related process
                     if ('chrome' in name_lower or 'chromium' in name_lower or 'chromedriver' in name_lower):
                         cmdline = proc.info.get('cmdline', [])
+                        # Handle None cmdline (some processes may not have cmdline available)
+                        if cmdline is None:
+                            cmdline = []
                         cmdline_str = ' '.join(cmdline[:3]) if cmdline else ''  # First 3 args only
                         if len(cmdline) > 3:
                             cmdline_str += '...'
@@ -598,13 +601,27 @@ class ContentCollector:
             print(f"      [TIMEOUT] Page load exceeded {timeout}s, forcefully terminating...")
             try:
                 # CRITICAL: Kill children BEFORE parent to prevent orphans
+                # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
                 self._kill_all_chrome_processes()
-                time.sleep(0.5)  # Wait for children to die
-                driver.quit()  # Now safe to quit parent
-                time.sleep(0.3)  # Brief wait
-                self._kill_all_chrome_processes()  # Final cleanup for any stragglers
-            except:
-                pass
+                time.sleep(1.0)  # Wait longer for children to die
+                
+                # Step 2: Kill orphaned processes (PPID=1) that may have been created
+                self._kill_orphaned_chrome_processes()
+                time.sleep(0.5)
+                
+                # Step 3: Try to quit driver gracefully first
+                try:
+                    driver.quit()
+                except:
+                    pass  # Driver may already be dead
+                
+                time.sleep(0.5)  # Wait after quit
+                
+                # Step 4: Final cleanup - kill any remaining Chrome processes
+                self._kill_all_chrome_processes()
+                self._kill_orphaned_chrome_processes()
+            except Exception as e:
+                print(f"      [TIMEOUT] Error during cleanup: {e}")
             # Mark driver as dead so it gets recreated
             self.driver = None
             return False
