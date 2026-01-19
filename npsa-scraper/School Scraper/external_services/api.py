@@ -41,17 +41,19 @@ if HAS_PSUTIL:
         pid1_process = psutil.Process(1)
         pid1_name = pid1_process.name().lower()
         
-        # If we're PID 1 and we're not dumb-init, exec into dumb-init
+        # If we're PID 1 and we're not dumb-init, exec into dumb-init with start.sh
         if current_pid == 1 and 'dumb-init' not in pid1_name and 'init' not in pid1_name:
-            print("[CRITICAL] Running as PID 1 but not dumb-init! Execing into dumb-init...")
+            print("[CRITICAL] Running as PID 1 but not dumb-init! Execing into dumb-init with start.sh...")
             # Find dumb-init (should be in /usr/bin/dumb-init)
             dumb_init_path = "/usr/bin/dumb-init"
-            if os.path.exists(dumb_init_path):
-                # Exec into dumb-init, which will then run the original command
-                # We need to reconstruct the original command from sys.argv
-                os.execv(dumb_init_path, ["dumb-init", "--"] + sys.argv)
+            start_script_path = "/app/start.sh"
+            if os.path.exists(dumb_init_path) and os.path.exists(start_script_path):
+                # Exec into dumb-init, which will then run start.sh
+                # start.sh will handle PORT expansion and start waitress properly
+                os.execv(dumb_init_path, ["dumb-init", "--", start_script_path])
             else:
-                print(f"[CRITICAL] dumb-init not found at {dumb_init_path}, cannot fix PID 1 issue")
+                print(f"[CRITICAL] dumb-init not found at {dumb_init_path} or start.sh not found at {start_script_path}, cannot fix PID 1 issue")
+                # Continue anyway - might work but won't have proper process reaping
     except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as e:
         # If we can't check, continue anyway (might not be in a container)
         pass
