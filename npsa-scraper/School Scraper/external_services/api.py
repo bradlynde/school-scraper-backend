@@ -299,7 +299,24 @@ def check_health():
     Health check function that lists Chrome/ChromeDriver processes and kills orphaned ones.
     Orphaned processes (PPID=1) are killed BOTTOM-UP (children first, then parents).
     This prevents Chrome process accumulation in containers where orphaned processes escape cleanup.
+    
+    Also verifies that dumb-init is running as PID 1 (required for proper process reaping).
     """
+    # Verify dumb-init is PID 1 (critical for proper process reaping)
+    try:
+        if HAS_PSUTIL:
+            try:
+                pid1 = psutil.Process(1)
+                pid1_name = pid1.name().lower()
+                if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
+                    print(f"{bold('[HEALTH]')} WARNING: PID 1 is '{pid1_name}', expected 'dumb-init'. Process reaping may not work correctly.")
+                else:
+                    print(f"{bold('[HEALTH]')} Verified: PID 1 is '{pid1_name}' (process reaping enabled)")
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                print(f"{bold('[HEALTH]')} WARNING: Cannot verify PID 1: {e}")
+    except Exception as e:
+        print(f"{bold('[HEALTH]')} WARNING: Error checking PID 1: {e}")
+    
     try:
         process_info = list_chrome_processes()
         print(f"{bold('[HEALTH]')} Chrome: {process_info['chrome_count']}, ChromeDriver: {process_info['chromedriver_count']}, Total: {process_info['total_count']}")

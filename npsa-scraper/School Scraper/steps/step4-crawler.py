@@ -197,6 +197,17 @@ class ContentCollector:
             driver.set_script_timeout(45)  # Script timeout
             # Remove implicit wait, use explicit waits instead
             # driver.implicitly_wait(2)  # Removed - use explicit waits
+            
+            # Verify dumb-init is PID 1 (critical for proper process reaping)
+            if HAS_PSUTIL:
+                try:
+                    pid1 = psutil.Process(1)
+                    pid1_name = pid1.name().lower()
+                    if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
+                        print(f"    {bold('[SELENIUM]')} WARNING: PID 1 is '{pid1_name}', expected 'dumb-init'. Process reaping may not work correctly.")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass  # Can't verify, but continue anyway
+            
             return driver
         except Exception as e:
             if retry_count < max_retries:
@@ -245,12 +256,17 @@ class ContentCollector:
             driver = None
             try:
                 if self.driver:
+                    # Kill children BEFORE quitting driver to prevent orphans
+                    self._kill_all_chrome_processes()
+                    time.sleep(0.5)
                     self.driver.quit()
+                    time.sleep(0.5)
             except:
                 pass  # Don't let cleanup fail
             
             # Cleanup any leftover Chrome processes before restart (bottom-up)
             self._kill_all_chrome_processes()
+            self._kill_orphaned_chrome_processes()
             self.driver = None
             
             # Restart the driver
@@ -260,6 +276,7 @@ class ContentCollector:
         """Basic cleanup: quit Selenium driver and kill all Chrome processes (bottom-up)"""
         # Cleanup Chrome processes first (bottom-up) before quitting driver
         self._kill_all_chrome_processes()
+        time.sleep(0.5)  # Wait for children to die
         
         driver = None
         try:
@@ -268,8 +285,16 @@ class ContentCollector:
                 self.driver = None
                 driver.quit()
                 print(f"    {bold('[SELENIUM]')} Driver quit")
+                # Wait for driver.quit() to complete and children to die
+                time.sleep(1.0)
+                # Final cleanup pass to catch any stragglers
+                self._kill_all_chrome_processes()
+                self._kill_orphaned_chrome_processes()
         except Exception as e:
             print(f"    {bold('[SELENIUM]')} WARNING: Error quitting driver: {e}")
+            # Even if quit() fails, try to kill processes
+            self._kill_all_chrome_processes()
+            self._kill_orphaned_chrome_processes()
         finally:
             self.driver = None
     
