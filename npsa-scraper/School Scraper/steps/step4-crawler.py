@@ -716,15 +716,76 @@ class ContentCollector:
         1. Check page titles (H2, H3, H4) FIRST to determine if page is relevant
         2. Extract emails using regex (fast, no LLM needed)
         3. Only process full HTML if page passes initial checks
-        4. Timeout after 2-3 minutes if page is unproductive
+        4. Hard timeout at 120 seconds - forces cleanup regardless of state
         
         Returns:
             Dictionary with school_name, url, html_content, fetch_method, email_count
             Returns None if page fetch failed or timed out
         """
         import time
-        page_start_time = time.time()
+        import threading
         
+        # FORCED TIMEOUT: 120 seconds hard limit - always triggers cleanup
+        FORCED_TIMEOUT = 120
+        page_start_time = time.time()
+        result_container = [None]  # Use list to allow modification from nested function
+        exception_container = [None]
+        
+        def _collect_with_timeout():
+            """Inner function that does the actual collection"""
+            try:
+                result_container[0] = self._collect_page_content_inner(school_name, url, page_start_time)
+            except Exception as e:
+                exception_container[0] = e
+        
+        # Start collection in a separate thread
+        collection_thread = threading.Thread(target=_collect_with_timeout, daemon=True)
+        collection_thread.start()
+        collection_thread.join(timeout=FORCED_TIMEOUT)
+        
+        # Check if thread is still alive (timed out)
+        if collection_thread.is_alive():
+            # FORCED TIMEOUT: Kill everything and cleanup
+            print(f"    [FORCED-TIMEOUT] Page processing exceeded {FORCED_TIMEOUT}s hard limit, forcefully terminating...")
+            try:
+                # CRITICAL: Kill children BEFORE parent to prevent orphans
+                # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
+                self._kill_all_chrome_processes()
+                time.sleep(1.0)  # Wait longer for children to die
+                
+                # Step 2: Kill orphaned processes (PPID=1) that may have been created
+                self._kill_orphaned_chrome_processes()
+                time.sleep(0.5)
+                
+                # Step 3: Try to quit driver gracefully first
+                if self.driver:
+                    try:
+                        self.driver.quit()
+                    except:
+                        pass  # Driver may already be dead
+                    self.driver = None
+                
+                time.sleep(0.5)  # Wait after quit
+                
+                # Step 4: Final cleanup - kill any remaining Chrome processes
+                self._kill_all_chrome_processes()
+                self._kill_orphaned_chrome_processes()
+            except Exception as e:
+                print(f"    [FORCED-TIMEOUT] Error during cleanup: {e}")
+            
+            return None
+        
+        # Check if an exception occurred
+        if exception_container[0]:
+            raise exception_container[0]
+        
+        return result_container[0]
+    
+    def _collect_page_content_inner(self, school_name: str, url: str, page_start_time: float) -> Optional[Dict]:
+        """
+        Inner method that does the actual page content collection.
+        Called by collect_page_content() which wraps it with a forced timeout.
+        """
         try:
             html = None
             fetch_method = 'unknown'
