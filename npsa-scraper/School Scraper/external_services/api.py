@@ -68,12 +68,14 @@ if HAS_PSUTIL:
             
             # Search for start.sh in multiple locations
             # Get the directory where this script is located
-            script_dir = Path(__file__).parent.parent.parent  # Go up from external_services/api.py to project root
+            script_dir = Path(__file__).parent.parent  # /app (where School Scraper was copied)
+            current_dir = Path(os.getcwd())
             start_script_paths = [
-                "/app/start.sh",  # Expected location from Dockerfile
-                str(script_dir / "start.sh"),  # Relative to project root
-                "./start.sh",  # Current working directory
-                os.path.join(os.getcwd(), "start.sh"),  # Current working directory (absolute)
+                "/app/start.sh",  # Expected location from Dockerfile COPY
+                str(script_dir / "start.sh"),  # Relative to /app (if copied with School Scraper/)
+                str(current_dir / "start.sh"),  # Current working directory (absolute)
+                "./start.sh",  # Current working directory (relative)
+                "start.sh",  # In PATH or current dir
             ]
             start_script_path = None
             for path in start_script_paths:
@@ -94,6 +96,14 @@ if HAS_PSUTIL:
                 # Exec into dumb-init, which will then run start.sh
                 # start.sh will handle PORT expansion and start waitress properly
                 os.execv(dumb_init_path, ["dumb-init", "--", start_script_path])
+            elif dumb_init_path:
+                # dumb-init found but start.sh not found - create it on the fly or exec directly
+                # Since we're already in Python loading the app, we can't exec into waitress here
+                # But we can at least verify dumb-init is available for future use
+                print(f"[CRITICAL] Found dumb-init at {dumb_init_path} but start.sh not found")
+                print(f"[CRITICAL] Note: Cannot exec into dumb-init now (app already loading)")
+                print(f"[CRITICAL] This means PID 1 will remain python3 - process reaping disabled")
+                # Continue - the app will run but without proper process reaping
             else:
                 missing = []
                 if not dumb_init_path:
@@ -104,8 +114,6 @@ if HAS_PSUTIL:
                 if not dumb_init_path:
                     print(f"[CRITICAL] Searched dumb-init paths: {dumb_init_paths}")
                 # Continue anyway - might work but won't have proper process reaping
-                # Note: If Railway bypasses Dockerfile ENTRYPOINT, this fallback cannot work
-                # because we're already in the Python process loading the Flask app
     except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as e:
         # If we can't check, continue anyway (might not be in a container)
         pass

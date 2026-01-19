@@ -32,7 +32,9 @@ COPY School\ Scraper/ ./
 
 # Copy startup script that ensures dumb-init runs as PID 1
 COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+RUN chmod +x /app/start.sh && \
+    ls -la /app/start.sh || echo "ERROR: start.sh was not copied!" && \
+    test -f /app/start.sh || (echo "ERROR: start.sh does not exist!" && exit 1)
 
 # Verify assets/data/state_counties directory exists
 RUN ls -la assets/data/state_counties/ | head -5 || echo "Warning: assets/data/state_counties directory not found"
