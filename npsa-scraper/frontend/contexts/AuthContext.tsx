@@ -28,24 +28,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // Check if user should be logged out due to inactivity (7 days)
-  const checkAutoLogout = () => {
-    if (typeof window !== "undefined" && isAuthenticated) {
-      const lastActivityStr = localStorage.getItem("auth_last_activity");
-      if (lastActivityStr) {
-        const lastActivity = parseInt(lastActivityStr, 10);
-        const now = Date.now();
-        const daysSinceActivity = (now - lastActivity) / (24 * 60 * 60 * 1000);
-        
-        if (daysSinceActivity >= 7) {
-          // Auto-logout after 7 days of inactivity
-          logout();
-          return true;
-        }
-      }
-    }
-    return false;
-  };
 
   // Check for existing token on mount
   useEffect(() => {
@@ -87,12 +69,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return;
     
-    const interval = setInterval(() => {
-      checkAutoLogout();
-    }, 60 * 60 * 1000); // Check every hour
+    const checkAutoLogout = () => {
+      if (typeof window !== "undefined") {
+        const lastActivityStr = localStorage.getItem("auth_last_activity");
+        if (lastActivityStr) {
+          const lastActivity = parseInt(lastActivityStr, 10);
+          const now = Date.now();
+          const daysSinceActivity = (now - lastActivity) / (24 * 60 * 60 * 1000);
+          
+          if (daysSinceActivity >= 7) {
+            // Auto-logout after 7 days of inactivity
+            logout();
+          }
+        }
+      }
+    };
+    
+    const interval = setInterval(checkAutoLogout, 60 * 60 * 1000); // Check every hour
     
     return () => clearInterval(interval);
-  }, [isAuthenticated]);
+  }, [isAuthenticated, logout]);
 
   // Update last activity on user interactions (mouse clicks, keyboard, etc.)
   useEffect(() => {
@@ -181,7 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = () => {
+  const logout = React.useCallback(() => {
     if (typeof window !== "undefined") {
       localStorage.removeItem("auth_token");
       localStorage.removeItem("auth_username");
@@ -190,7 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUsername(null);
     setIsAuthenticated(false);
-  };
+  }, []);
 
   return (
     <AuthContext.Provider value={{ isAuthenticated, username, token, login, logout, loading }}>
