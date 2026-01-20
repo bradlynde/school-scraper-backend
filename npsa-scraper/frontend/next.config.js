@@ -5,6 +5,10 @@ const nextConfig = {
   images: {
     domains: [],
   },
+  // Force fresh build
+  generateBuildId: async () => {
+    return `build-${Date.now()}`
+  },
 }
 
 module.exports = nextConfig
