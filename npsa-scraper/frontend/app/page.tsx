@@ -110,6 +110,8 @@ export default function Home() {
   const [completedCountiesSet, setCompletedCountiesSet] = useState<Set<string>>(new Set());
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
 
   function downloadCSV(csvContent: string, filename: string) {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -131,6 +133,46 @@ export default function Home() {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}m`;
+  }
+
+  // Helper: Format status with consistent copy
+  function formatStatus(status: string, metrics?: { countiesProcessed?: number; totalCounties?: number; schoolsFound?: number; errors?: number }): string {
+    const countiesProcessed = metrics?.countiesProcessed || 0;
+    const totalCounties = metrics?.totalCounties || 0;
+    const schoolsFound = metrics?.schoolsFound || 0;
+    const errors = metrics?.errors || 0;
+
+    switch (status) {
+      case "running":
+        return `Running — County ${countiesProcessed}/${totalCounties}`;
+      case "paused":
+        return "Paused — Waiting";
+      case "completed":
+        return `Complete — ${schoolsFound} schools`;
+      case "error":
+        return `Error — ${errors} errors`;
+      case "finalizing":
+        return "Finalizing...";
+      default:
+        return status;
+    }
+  }
+
+  // Helper: Format relative time
+  function formatRelativeTime(timestamp: number): string {
+    const now = Date.now();
+    const diff = Math.floor((now - timestamp) / 1000);
+    
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  }
+
+  // Helper: Truncate with ellipsis
+  function truncateText(text: string, maxLength: number): string {
+    if (text.length <= maxLength) return text;
+    return text.slice(0, maxLength) + "...";
   }
 
   async function checkPipelineStatus(runId: string) {
@@ -220,6 +262,11 @@ export default function Home() {
         setStatus("Pipeline failed - see error below");
         setIsRunning(false);
         setSummary(data);
+      } else if (data.status === "finalizing") {
+        setSummary(data);
+        setIsFinalizing(true);
+        setFinalizingMessage(data.statusMessage || "Run is finalizing. Please wait 2 minutes for the container to restart.");
+        setIsRunning(false);
       } else if (data.status === "running") {
         setSummary(data);
         setCurrentStep(data.currentStep || 0);
@@ -325,7 +372,13 @@ export default function Home() {
         
         // Handle specific error codes
         if (response.status === 409) {
-          errorMessage = errorMessage || "Another run is already in progress. Please wait for it to complete or stop it first.";
+          const errorData = await response.json().catch(() => ({}));
+          if (errorData.isFinalizing) {
+            setIsFinalizing(true);
+            setFinalizingMessage(errorMessage || "A run is currently finalizing. Please wait 2 minutes for the container to restart before starting a new run.");
+          } else {
+            errorMessage = errorMessage || "Another run is already in progress. Please wait for it to complete or stop it first.";
+          }
         }
         
         throw new Error(errorMessage);
@@ -638,22 +691,26 @@ export default function Home() {
                 </div>
               )}
               
-              <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-6 md:p-10">
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-8 md:p-12">
                 <div className="flex flex-col space-y-8">
                   <div>
-                    <h1 className="text-2xl font-semibold text-gray-900 mb-1">Start New Search</h1>
+                    <h1 className="text-3xl font-bold text-gray-900 mb-3">Start New Search</h1>
+                    {/* Explainer paragraph (dashboard-16) */}
+                    <p className="text-base text-gray-600 leading-relaxed">
+                      Select a state to begin scanning for schools. The system will discover schools, extract contact information, and compile results into a downloadable CSV file.
+                    </p>
                   </div>
 
                   {/* State Selection */}
                   <div>
-                    <label htmlFor="state" className="block text-base font-medium text-gray-700 mb-3">
+                    <label htmlFor="state" className="block text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
                       Select State
                     </label>
                     <select
                       id="state"
                       value={selectedState}
                       onChange={(e) => setSelectedState(e.target.value)}
-                      className="w-full px-5 py-3.5 bg-white border border-gray-300 rounded-lg text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#1e3a5f] focus:border-[#1e3a5f] transition-all shadow-sm"
+                      className="w-full px-5 py-3.5 bg-white border border-gray-300 rounded-xl text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#1e3a5f] focus:border-[#1e3a5f] transition-all shadow-sm"
                     >
                       <option value="">-- Select a state --</option>
                       {US_STATES.map((state) => (
@@ -664,23 +721,66 @@ export default function Home() {
                     </select>
                   </div>
 
+                  {/* Preview row after state selection (dashboard-17) */}
+                  {selectedState && (
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
+                      <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <p className="text-gray-500 mb-1">Counties</p>
+                          <p className="font-semibold text-gray-900">~{selectedState === "alabama" ? "67" : "50-100"}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 mb-1">Est. Time</p>
+                          <p className="font-semibold text-gray-900">~{selectedState === "alabama" ? "5-8h" : "3-6h"}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500 mb-1">Expected Output</p>
+                          <p className="font-semibold text-gray-900">100-500 contacts</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {error && (
-                    <div className="p-5 bg-red-50 border border-red-200 rounded-lg">
+                    <div className="p-5 bg-red-50 border border-red-200 rounded-xl">
                       <p className="text-red-700 text-base">{error}</p>
                     </div>
                   )}
 
+                  {isFinalizing && finalizingMessage && (
+                    <div className="p-5 bg-yellow-50 border border-yellow-200 rounded-xl">
+                      <p className="text-yellow-800 text-base font-medium">{finalizingMessage}</p>
+                    </div>
+                  )}
+                  
+                  {/* Enhanced primary CTA button (dashboard-18) */}
                   <button
                     onClick={runPipeline}
-                    disabled={!selectedState || selectedType === "church"}
-                    className={`w-full px-8 py-4 rounded-lg text-base font-semibold text-white transition-all duration-200 shadow-md ${
-                      !selectedState || selectedType === "church"
+                    disabled={!selectedState || selectedType === "church" || isFinalizing}
+                    className={`w-full px-8 py-5 rounded-xl text-lg font-semibold text-white transition-all duration-200 shadow-lg flex items-center justify-center gap-3 ${
+                      !selectedState || selectedType === "church" || isFinalizing
                         ? "bg-gray-400 cursor-not-allowed opacity-60"
-                        : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-lg transform hover:-translate-y-0.5"
+                        : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-xl transform hover:-translate-y-1"
                     }`}
                   >
-                    Start Search
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    Start Scan
                   </button>
+
+                  {/* Secondary action link (dashboard-19) */}
+                  <div className="text-center">
+                    <button
+                      onClick={() => {
+                        setSelectedType("finished");
+                        setViewState("start");
+                      }}
+                      className="text-sm text-[#1e3a5f] hover:text-[#2c5282] font-medium underline"
+                    >
+                      View previous runs
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -689,151 +789,223 @@ export default function Home() {
         )}
 
         {/* PROGRESS VIEW - Show when progress state OR when run selected from Running tab */}
-        {viewState === "progress" && summary && (
-          <div className="animate-fade-in">
-            <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
+        {viewState === "progress" && summary && (() => {
+          // Centralized computed run state (dashboard-28)
+          const countiesCompleted = summary.countiesProcessed || 0;
+          const totalCounties = summary.totalCounties || 1;
+          const currentCountyIndex = countiesCompleted + 1;
+          const currentCountyName = summary.currentCounty || "Starting...";
+          const elapsedTime = elapsedTimeDisplay;
+          const estimatedRemaining = estimatedTime || 0;
+          const runStatus = summary.status || "running";
+          const progressPercent = totalCounties > 0 ? Math.round((countiesCompleted / totalCounties) * 100) : 0;
+
+          return (
+          <div className="animate-fade-in min-h-screen" style={{ backgroundColor: '#f9fafb' }}>
+            <div className="flex items-center justify-center py-12 px-4 sm:px-6 md:px-8">
             <div className="w-full max-w-7xl">
-              {/* Header - Left aligned with cards */}
-              <div className="mb-10">
-                <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Running Pipeline</h1>
-              </div>
-
-              {/* Two Column Layout */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
-                {/* Left Column - Progress Cards */}
-                <div className="lg:col-span-2 space-y-6">
-                  {/* 3 Progress Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                    {/* Card 1: Completed Counties */}
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
-                      <div className="flex items-center justify-between mb-5">
-                        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Completed Counties</h3>
-                        <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                        </svg>
-                      </div>
-                      <div className="flex items-baseline gap-2 mb-2">
-                        <span className="text-5xl font-bold text-[#1e3a5f]">{countiesProcessed}</span>
-                        <span className="text-xl text-gray-500">/ {totalCounties}</span>
-                      </div>
-                      <p className="text-sm text-gray-500">
-                        {totalCounties > 0 ? Math.round((countiesProcessed / totalCounties) * 100) : 0}% complete
-                      </p>
-                    </div>
-
-                    {/* Card 2: Processed Schools */}
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
-                      <div className="flex items-center justify-between mb-5">
-                        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Processed Schools</h3>
-                        <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                        </svg>
-                      </div>
-                      <div className="flex items-baseline mb-2">
-                        <span className="text-5xl font-bold text-[#1e3a5f]">{schoolsProcessed}</span>
-                      </div>
-                      <p className="text-sm text-gray-500">Schools discovered and processed</p>
-                    </div>
-
-                    {/* Card 3: Current County with Pulse */}
-                    <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
-                      <div className="flex items-center justify-between mb-5">
-                        <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Current County</h3>
-                        <div className="relative">
-                          <div className="absolute inset-0 rounded-full bg-[#1e3a5f] opacity-20 animate-pulse"></div>
-                          <div className="relative w-4 h-4 rounded-full bg-[#1e3a5f]"></div>
-                        </div>
-                      </div>
-                      <div className="flex items-baseline mb-2 mt-1">
-                        <span className="text-3xl font-bold text-[#1e3a5f]">{currentCounty}</span>
-                      </div>
-                      <p className="text-sm text-gray-500 mt-1">Currently processing</p>
-                    </div>
-                  </div>
-
-                  {/* Activity Log */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-6 md:p-8 overflow-x-auto">
-                    <div className="mb-6">
-                      <h3 className="text-lg font-bold text-[#1e3a5f] border-l-4 border-[#1e3a5f] pl-3">Activity Log</h3>
-                    </div>
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {summary?.currentCounty && (
-                        <div className="flex items-center gap-4 text-sm py-2">
-                          <div className="relative flex-shrink-0">
-                            <div className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-[#1e3a5f] opacity-30 animate-ping"></div>
-                            <div className="relative w-2.5 h-2.5 rounded-full bg-[#1e3a5f]"></div>
-                          </div>
-                          <span className="text-[#1e3a5f] font-semibold">Processing {summary.currentCounty} County...</span>
-                        </div>
-                      )}
-                      {completedCounties.length > 0 ? (
-                        completedCounties.slice().reverse().map((county, index) => (
-                          <div key={index} className="flex items-center gap-4 text-sm py-2">
-                            <div className="w-2.5 h-2.5 rounded-full bg-green-500 flex-shrink-0"></div>
-                            <span className="text-gray-700 font-medium">Completed {county} County</span>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="flex items-center gap-4 text-sm text-gray-500 py-2">
-                          <div className="w-2.5 h-2.5 rounded-full bg-gray-300 flex-shrink-0"></div>
-                          <span>Waiting for county completion...</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right Column - Stats */}
-                <div className="space-y-6">
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md p-6 flex flex-col h-full">
-                    <h3 className="text-lg font-bold text-gray-900 mb-6">Run Statistics</h3>
-                    <div className="flex-1 flex flex-col justify-center space-y-6">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Elapsed Time</p>
-                        <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
-                      </div>
-                      {estimatedTime !== null && estimatedTime > 0 && (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Estimated Remaining</p>
-                          <p className="text-3xl font-bold text-gray-900">{formatTime(estimatedTime)}</p>
-                        </div>
-                      )}
-                      <div>
-                        <p className="text-xs text-gray-500 mb-2 uppercase tracking-wide font-medium">Status</p>
-                        <p className="text-lg font-semibold text-[#1e3a5f]">{status}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {error && (
-                    <div className="bg-red-50 border border-red-200 rounded-xl shadow-md p-8">
-                      <div className="flex items-start">
-                        <div className="flex-shrink-0">
-                          <svg className="h-6 w-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        </div>
-                        <div className="ml-3 flex-1">
-                          <h3 className="text-base font-semibold text-red-800 mb-2">Pipeline Error</h3>
-                          <p className="text-red-700 text-sm whitespace-pre-wrap">{error}</p>
-                        </div>
-                      </div>
-                      <div className="mt-4">
-                        <button
-                          onClick={resetToStart}
-                          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
-                        >
-                          Return to Start
-                        </button>
-                      </div>
+              {/* Header with live indicator (dashboard-3) */}
+              <div className="mb-8">
+                <div className="flex items-center gap-3">
+                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Progress</h1>
+                  {runStatus === "running" && (
+                    <div className="relative">
+                      <div className="absolute inset-0 w-3 h-3 rounded-full bg-[#1e3a5f] opacity-30 animate-ping"></div>
+                      <div className="relative w-3 h-3 rounded-full bg-[#1e3a5f]"></div>
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* Hero Row: ProgressCard (65-70%) + RunStatsCard (30-35%) */}
+              <div className="grid grid-cols-1 lg:grid-cols-10 gap-6 md:gap-8 mb-8">
+                {/* ProgressCard - 65-70% width (7 columns) */}
+                <div className="lg:col-span-7">
+                  <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
+                    {/* Primary: X/Y Counties, % complete */}
+                    <div className="mb-8">
+                      <div className="flex items-baseline gap-3 mb-4">
+                        <span className="text-6xl font-bold text-[#1e3a5f]">{countiesCompleted}</span>
+                        <span className="text-3xl text-gray-500">/ {totalCounties}</span>
+                        <span className="text-2xl font-semibold text-gray-600 ml-auto">{progressPercent}%</span>
+                      </div>
+                      
+                      {/* Progress bar (dashboard-4) */}
+                      <div className="w-full bg-gray-200 rounded-full h-3 mb-5">
+                        <div 
+                          className="bg-[#1e3a5f] h-3 rounded-full transition-all duration-500"
+                          style={{ width: `${progressPercent}%` }}
+                        ></div>
+                      </div>
+                      
+                      {/* Primary text (dashboard-7) - Typographic hierarchy (dashboard-25) */}
+                      <p className="text-2xl font-bold text-gray-900 mb-2">
+                        Processing County {currentCountyIndex} of {totalCounties}
+                      </p>
+                      
+                      {/* Subtext (dashboard-8) - Muted secondary label */}
+                      <p className="text-sm text-gray-500 font-medium">Discovering and processing schools…</p>
+                    </div>
+
+                    {/* 3 sub-metrics row - Typographic hierarchy (dashboard-25) */}
+                    <div className="grid grid-cols-3 gap-8 pt-8 border-t border-gray-200">
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Schools</p>
+                        <p className="text-3xl font-bold text-gray-900">{schoolsProcessed}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Contacts</p>
+                        <p className="text-3xl font-bold text-gray-900">{summary.totalContacts || 0}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Current</p>
+                        <p className="text-xl font-semibold text-gray-900 truncate" title={currentCountyName}>
+                          {truncateText(currentCountyName, 20)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Last updated footer (dashboard-5) */}
+                    {startTime && (
+                      <div className="mt-4 pt-4 border-t border-gray-100">
+                        <p className="text-xs text-gray-400">Last updated: {formatRelativeTime(startTime)}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* RunStatsCard - 30-35% width (3 columns) */}
+                <div className="lg:col-span-3">
+                  <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10 h-full flex flex-col" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
+                    <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-8">Run Statistics</h3>
+                    <div className="flex-1 flex flex-col justify-center space-y-8">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Elapsed Time</p>
+                        <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTime)}</p>
+                      </div>
+                      {estimatedRemaining > 0 && (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Estimated Remaining</p>
+                          <p className="text-3xl font-bold text-gray-900">{formatTime(estimatedRemaining)}</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Status</p>
+                        <p className="text-lg font-semibold text-[#1e3a5f]">
+                          {formatStatus(runStatus, { countiesProcessed, totalCounties, schoolsFound: schoolsProcessed })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Activity Log Section - Increased spacing (dashboard-26) */}
+              <div className="space-y-8 mt-10">
+
+                {/* Activity Log Panel (dashboard-11, dashboard-12, dashboard-13, dashboard-14, dashboard-15) */}
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
+                  {/* Header with controls (dashboard-13) - Typographic hierarchy (dashboard-25) */}
+                  <div className="flex items-center justify-between mb-8">
+                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Activity</h3>
+                    <div className="flex items-center gap-4">
+                      <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                        <input type="checkbox" defaultChecked className="rounded" />
+                        <span>Auto-scroll</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  {/* Activity entries with severity icons and timestamps */}
+                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                    {summary?.currentCounty && (
+                      <div className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+                        <div className="flex-shrink-0">
+                          <span className="text-[#1e3a5f] text-lg">→</span>
+                        </div>
+                        <div className="flex-1">
+                          <span className="text-[#1e3a5f] font-semibold">Processing {summary.currentCounty} County</span>
+                        </div>
+                        {startTime && (
+                          <div className="text-xs text-gray-400 flex-shrink-0">
+                            {formatRelativeTime(startTime)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {completedCounties.length > 0 ? (
+                      completedCounties.slice().reverse().map((county, index) => {
+                        const timestamp = startTime ? startTime + (index * 60000) : Date.now();
+                        return (
+                          <div key={index} className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
+                            <div className="flex-shrink-0">
+                              <span className="text-green-600 text-lg">✔</span>
+                            </div>
+                            <div className="flex-1">
+                              <span className="text-gray-700 font-medium">County completed: {county}</span>
+                            </div>
+                            <div className="text-xs text-gray-400 flex-shrink-0">
+                              {formatRelativeTime(timestamp)}
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="flex items-center gap-4 text-sm py-2 px-3 text-gray-500">
+                        <div className="flex-shrink-0">
+                          <span className="text-gray-400 text-lg">⏳</span>
+                        </div>
+                        <div className="flex-1">
+                          <span>Waiting for county completion…</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Results Preview (Optional) - dashboard-27 */}
+                {summary && (summary.totalContacts || 0) > 0 && (
+                  <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Recently Found</h3>
+                      <span className="text-xs text-gray-500">
+                        {summary.totalContacts || 0} total contacts
+                      </span>
+                    </div>
+                    <div className="space-y-3">
+                      {/* Show last 5 schools if available */}
+                      {summary.countyContacts && summary.countyContacts.length > 0 ? (
+                        <div className="text-sm text-gray-600">
+                          <p>Last 5 counties processed with contacts found</p>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500 italic">
+                          Contact details will appear here as counties are processed
+                        </div>
+                      )}
+                      {error && (
+                        <div className="mt-4 pt-4 border-t border-gray-200">
+                          <div className="flex items-center gap-2 text-sm text-red-600">
+                            <span>✖</span>
+                            <span>Errors detected - check activity log for details</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           </div>
-        )}
+          );
+        })()}
+
+              </div>
+            </div>
+          </div>
+          );
+        })()}
 
         {/* SUMMARY VIEW - Show when summary state */}
         {viewState === "summary" && summary && (

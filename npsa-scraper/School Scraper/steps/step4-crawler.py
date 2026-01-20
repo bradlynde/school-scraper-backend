@@ -52,11 +52,10 @@ def bold(text: str) -> str:
 
 
 class ContentCollector:
-    def __init__(self, timeout: int = 10, max_retries: int = 1, use_selenium: bool = True, page_timeout: int = 45):
+    def __init__(self, timeout: int = 10, max_retries: int = 1, use_selenium: bool = True):
         self.timeout = timeout  # HTTP request timeout (10 seconds)
         self.max_retries = max_retries  # 1 retry only
         self.use_selenium = use_selenium
-        self.page_timeout = page_timeout  # Max time to spend on a single page (45 seconds)
         self.driver = None
         
         self.headers = {
@@ -193,8 +192,8 @@ class ContentCollector:
             # Use explicit ChromeDriver path to bypass Selenium Manager network issues
             service = Service(executable_path=os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            driver.set_page_load_timeout(45)  # 45 second timeout
-            driver.set_script_timeout(45)  # Script timeout
+            # Page load timeout handled by thread timeout (900s)
+            driver.set_script_timeout(900)  # Script timeout matches unified timeout
             # Remove implicit wait, use explicit waits instead
             # driver.implicitly_wait(2)  # Removed - use explicit waits
             
@@ -234,8 +233,8 @@ class ContentCollector:
                 chromedriver_path = os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver')
                 service = Service(executable_path=chromedriver_path)
                 driver = webdriver.Chrome(service=service, options=minimal_options)
-                driver.set_page_load_timeout(45)
-                driver.set_script_timeout(45)
+                # Page load timeout handled by thread timeout (900s)
+                driver.set_script_timeout(900)  # Script timeout matches unified timeout
                 print(f"    {bold('[SELENIUM]')} Driver created with minimal options")
                 return driver
             except Exception as e2:
@@ -259,7 +258,7 @@ class ContentCollector:
                     # Kill children BEFORE quitting driver to prevent orphans
                     self._kill_all_chrome_processes()
                     time.sleep(0.5)
-                    self.driver.quit()
+                self.driver.quit()
                     time.sleep(0.5)
             except:
                 pass  # Don't let cleanup fail
@@ -280,7 +279,7 @@ class ContentCollector:
         
         driver = None
         try:
-            if self.driver:
+        if self.driver:
                 driver = self.driver
                 self.driver = None
                 driver.quit()
@@ -524,7 +523,7 @@ class ContentCollector:
             list: List of dicts with process info
         """
         if not HAS_PSUTIL:
-            print(f"    {bold('[PROCESS-LIST]')} psutil not available, cannot list processes")
+            # Process listing removed - no longer needed
             return []
         
         processes = []
@@ -560,18 +559,11 @@ class ContentCollector:
             # Sort by PID for consistent output
             processes.sort(key=lambda p: p['pid'])
             
-            # Print detailed list
-            if processes:
-                print(f"    {bold('[PROCESS-LIST]')} Found {len(processes)} Chrome/Chromium/ChromeDriver processes:")
-                for proc in processes:
-                    print(f"    {bold('[PROCESS-LIST]')}   PID {proc['pid']:6d} | PPID {proc['ppid']:6d} | {proc['status']:8s} | {proc['name']}")
-                    if proc['cmdline']:
-                        print(f"    {bold('[PROCESS-LIST]')}          Command: {proc['cmdline']}")
-            else:
-                print(f"    {bold('[PROCESS-LIST]')} No Chrome/Chromium/ChromeDriver processes found")
+            # Process listing removed - no longer needed
         
         except Exception as e:
-            print(f"    {bold('[PROCESS-LIST]')} WARNING: Error listing processes: {e}")
+            # Error listing processes - silently continue
+            pass
         
         return processes
     
@@ -596,9 +588,9 @@ class ContentCollector:
                     return None  # Return None instead of raising
         return None
     
-    def _get_url_with_timeout(self, driver, url: str, timeout: int = 45) -> bool:
+    def _get_url_with_timeout(self, driver, url: str, timeout: int = 900) -> bool:
         """
-        Wrapper for driver.get() with a hard 45-second timeout.
+        Wrapper for driver.get() with a hard timeout (default 900 seconds).
         If the page load exceeds the timeout, forcefully quits the driver.
         
         Returns:
@@ -670,7 +662,7 @@ class ContentCollector:
             driver = self.driver
             
             # Use timeout wrapper for driver.get() - 45 second hard limit
-            if not self._get_url_with_timeout(driver, url, timeout=45):
+            if not self._get_url_with_timeout(driver, url, timeout=900):
                 print(f"      [TIMEOUT] Failed to load page within 45s timeout")
                 # Driver was killed, need to recreate it
                 self.driver = None
@@ -741,7 +733,7 @@ class ContentCollector:
         1. Check page titles (H2, H3, H4) FIRST to determine if page is relevant
         2. Extract emails using regex (fast, no LLM needed)
         3. Only process full HTML if page passes initial checks
-        4. Hard timeout at 120 seconds - forces cleanup regardless of state
+        4. Hard timeout at 900 seconds - forces cleanup regardless of state
         
         Returns:
             Dictionary with school_name, url, html_content, fetch_method, email_count
@@ -750,8 +742,8 @@ class ContentCollector:
         import time
         import threading
         
-        # FORCED TIMEOUT: 120 seconds hard limit - always triggers cleanup
-        FORCED_TIMEOUT = 120
+        # TIMEOUT: 900 seconds hard limit - always triggers cleanup
+        TIMEOUT = 900
         page_start_time = time.time()
         result_container = [None]  # Use list to allow modification from nested function
         exception_container = [None]
@@ -766,12 +758,12 @@ class ContentCollector:
         # Start collection in a separate thread
         collection_thread = threading.Thread(target=_collect_with_timeout, daemon=True)
         collection_thread.start()
-        collection_thread.join(timeout=FORCED_TIMEOUT)
+        collection_thread.join(timeout=TIMEOUT)
         
         # Check if thread is still alive (timed out)
         if collection_thread.is_alive():
-            # FORCED TIMEOUT: Kill everything and cleanup
-            print(f"    [FORCED-TIMEOUT] Page processing exceeded {FORCED_TIMEOUT}s hard limit, forcefully terminating...")
+            # TIMEOUT: Kill everything and cleanup
+            print(f"    [TIMEOUT] Page processing exceeded {TIMEOUT}s hard limit, forcefully terminating...")
             try:
                 # CRITICAL: Kill children BEFORE parent to prevent orphans
                 # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
@@ -796,7 +788,10 @@ class ContentCollector:
                 self._kill_all_chrome_processes()
                 self._kill_orphaned_chrome_processes()
             except Exception as e:
-                print(f"    [FORCED-TIMEOUT] Error during cleanup: {e}")
+                print(f"    [TIMEOUT] Error during cleanup: {e}")
+            
+            # Add 3-second buffer after cleanup to prevent connection refused warnings
+            time.sleep(3.0)
             
             return None
         
@@ -832,11 +827,7 @@ class ContentCollector:
                 html = response.text
                 fetch_method = 'requests'
             
-            # Check timeout - skip if we've spent too much time
-            elapsed = time.time() - page_start_time
-            if elapsed > self.page_timeout:
-                print(f"    [TIMEOUT] Page timeout ({elapsed:.1f}s > {self.page_timeout}s) - skipping")
-                return None
+            # Timeout is handled by thread timeout (900s) - no need to check here
             
             # OPTIMIZATION: Fast regex email extraction FIRST (no parsing)
             emails_fast = self.extract_emails_from_html_only(html)
@@ -867,11 +858,7 @@ class ContentCollector:
                     print(f"    [SKIP] Page doesn't appear relevant (no emails, no admin titles) - skipping")
                     return None
             
-            # Check timeout again before heavy processing
-            elapsed = time.time() - page_start_time
-            if elapsed > self.page_timeout:
-                print(f"    [TIMEOUT] Page timeout ({elapsed:.1f}s > {self.page_timeout}s) - skipping")
-                return None
+            # Timeout is handled by thread timeout (900s) - no need to check here
             
             # Cache full text (expensive operation, only do once)
             full_text = soup.get_text()
@@ -895,11 +882,8 @@ class ContentCollector:
             # If emails found AND high-value titles found, skip Selenium (already have what we need)
             
             if should_use_selenium:
-                # Check timeout before Selenium (expensive operation)
-                elapsed = time.time() - page_start_time
-                if elapsed > self.page_timeout * 0.8:  # Use 80% of timeout for Selenium
-                    print(f"    [SKIP] Skipping Selenium (approaching timeout: {elapsed:.1f}s)")
-                elif self.use_selenium:
+                # Timeout is handled by thread timeout (900s) - proceed with Selenium if needed
+                if self.use_selenium:
                     if not emails or len(emails) == 0:
                         print(f"    No emails in HTML, trying Selenium (click/hover reveals)...")
                     else:
@@ -919,10 +903,7 @@ class ContentCollector:
             else:
                 print(f"    Found {len(emails)} emails via simple HTML")
             
-            # Final timeout check
-            elapsed = time.time() - page_start_time
-            if elapsed > self.page_timeout:
-                print(f"    [TIMEOUT] Page timeout exceeded ({elapsed:.1f}s > {self.page_timeout}s) - returning partial results")
+            # Timeout is handled by thread timeout (900s) - no need to check here
             
             # Count emails found
             email_count = len(emails) if emails else 0
@@ -1045,12 +1026,12 @@ if __name__ == "__main__":
         # Cleanup Selenium driver with nuclear option
         driver = None
         try:
-            if collector.driver:
+        if collector.driver:
                 driver = collector.driver
                 collector.driver = None
                 driver.quit()
-        except:
+            except:
             pass  # Don't let cleanup fail
         finally:
             # No cleanup needed - subprocess will die naturally and take children with it
-            pass
+                pass

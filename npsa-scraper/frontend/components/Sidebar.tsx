@@ -105,7 +105,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
   };
 
   return (
-    <aside className="h-full w-64 bg-white border-r border-gray-200 shadow-sm flex flex-col">
+    <aside className="h-full w-64 bg-white border-r border-gray-200 shadow-sm flex flex-col" style={{ backgroundColor: '#fafafa' }}>
         {/* Logo Section */}
         <div className="p-6 border-b border-gray-200 flex items-center justify-center">
           <Image
@@ -277,29 +277,60 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                 }
                 
                 return (
-                  <div className="space-y-2">
-                    {filteredRuns.map((run) => (
+                  <div className="space-y-3">
+                    {filteredRuns.map((run) => {
+                      const completedCount = run.completed_counties?.length || 0;
+                      const totalCount = run.total_counties || 0;
+                      const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+                      
+                      return (
                       <div
                         key={run.run_id}
-                        className="p-3 bg-gray-50 rounded-lg border border-gray-200 hover:border-gray-300 transition-colors relative group"
+                        className="p-4 bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-lg transition-all relative group"
+                        style={{ borderRadius: '16px' }}
                       >
                         <div 
                           className="cursor-pointer"
                           onClick={() => onRunSelect?.(run.run_id)}
                         >
-                          <div className="flex items-start justify-between mb-2">
-                            <div className="flex-1">
-                              <div className="font-medium text-sm text-gray-900">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-sm text-gray-900 truncate">
                                 {run.state?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown State'}
                               </div>
                               <div className="text-xs text-gray-500 mt-1">
                                 {formatDate(run.created_at)}
                               </div>
                             </div>
-                            <span className={`px-2 py-1 rounded text-xs font-medium ${getStatusColor(run.status)}`}>
-                              {run.status}
-                            </span>
+                            {/* Live badge/pill with pulsing dot for running (dashboard-20) */}
+                            <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                              {run.status === "running" && (
+                                <div className="relative">
+                                  <div className="absolute inset-0 w-2 h-2 rounded-full bg-blue-500 opacity-30 animate-ping"></div>
+                                  <div className="relative w-2 h-2 rounded-full bg-blue-500"></div>
+                                </div>
+                              )}
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusColor(run.status)}`}>
+                                {run.status === "running" ? "Running" : run.status === "completed" ? "Finished" : run.status === "error" ? "Error" : run.status === "finalizing" ? "Finalizing" : run.status}
+                              </span>
+                            </div>
                           </div>
+                          
+                          {/* Tiny progress indicator (dashboard-21) */}
+                          {run.status === "running" && totalCount > 0 && (
+                            <div className="mb-2">
+                              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                                <span>{completedCount}/{totalCount}</span>
+                                <span>{progressPercent}%</span>
+                              </div>
+                              <div className="w-full bg-gray-200 rounded-full h-1.5">
+                                <div 
+                                  className="bg-[#1e3a5f] h-1.5 rounded-full transition-all duration-300"
+                                  style={{ width: `${progressPercent}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          )}
                           
                           {run.total_contacts !== undefined && (
                             <div className="text-xs text-gray-600 mt-2">
@@ -308,7 +339,73 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                           )}
                         </div>
                         
-                        <div className="flex items-center gap-2 mt-2">
+                        {/* Quick action icon buttons (dashboard-22) */}
+                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                          {/* Pause/Resume button - only for running */}
+                          {run.status === "running" && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // TODO: Implement pause/resume functionality
+                                alert('Pause/Resume functionality coming soon');
+                              }}
+                              className="p-1.5 text-gray-600 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                              title="Pause/Resume"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            </button>
+                          )}
+                          
+                          {/* Cancel button - only for running */}
+                          {run.status === "running" && (
+                            <button
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (confirm('Are you sure you want to cancel this run?')) {
+                                  try {
+                                    const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+                                    const response = await fetch(`${apiUrl}/runs/${run.run_id}/stop`, {
+                                      method: 'POST',
+                                    });
+                                    if (response.ok) {
+                                      fetchRuns();
+                                    } else {
+                                      alert('Failed to cancel run');
+                                    }
+                                  } catch (error) {
+                                    console.error('Error canceling run:', error);
+                                    alert('Failed to cancel run');
+                                  }
+                                }
+                              }}
+                              className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Cancel run"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          )}
+                          
+                          {/* View Logs button - jumps to Activity section */}
+                          {run.status === "running" && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onRunSelect?.(run.run_id);
+                                // Scroll to activity section would be handled by parent
+                              }}
+                              className="p-1.5 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="View Logs"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                            </button>
+                          )}
+                          
                           {/* Delete button - trash icon */}
                           <button
                             onClick={async (e) => {
@@ -330,7 +427,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                                 }
                               }
                             }}
-                            className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded transition-colors"
+                            className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors ml-auto"
                             title="Delete run"
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -410,7 +507,8 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                           )}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 );
               })()

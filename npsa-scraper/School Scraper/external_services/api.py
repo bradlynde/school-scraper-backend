@@ -35,88 +35,7 @@ except ImportError:
 # CRITICAL: Ensure dumb-init is PID 1 for proper process reaping
 # If Railway or another platform overrides the Dockerfile ENTRYPOINT,
 # this check ensures dumb-init still runs as PID 1
-if HAS_PSUTIL:
-    try:
-        current_pid = os.getpid()
-        pid1_process = psutil.Process(1)
-        pid1_name = pid1_process.name().lower()
-        
-        # If we're PID 1 and we're not dumb-init, exec into dumb-init with start.sh
-        if current_pid == 1 and 'dumb-init' not in pid1_name and 'init' not in pid1_name:
-            print("[CRITICAL] Running as PID 1 but not dumb-init! Execing into dumb-init with start.sh...")
-            # Search for dumb-init in common locations
-            dumb_init_paths = [
-                "/usr/bin/dumb-init",
-                "/usr/local/bin/dumb-init",
-                "/bin/dumb-init"
-            ]
-            dumb_init_path = None
-            for path in dumb_init_paths:
-                if os.path.exists(path) and os.access(path, os.X_OK):
-                    dumb_init_path = path
-                    break
-            
-            # Also try to find it using which (if available)
-            if not dumb_init_path:
-                try:
-                    import shutil
-                    which_path = shutil.which("dumb-init")
-                    if which_path and os.path.exists(which_path):
-                        dumb_init_path = which_path
-                except:
-                    pass
-            
-            # Search for start.sh in multiple locations
-            # Get the directory where this script is located
-            script_dir = Path(__file__).parent.parent  # /app (where School Scraper was copied)
-            current_dir = Path(os.getcwd())
-            start_script_paths = [
-                "/app/start.sh",  # Expected location from Dockerfile COPY
-                str(script_dir / "start.sh"),  # Relative to /app (if copied with School Scraper/)
-                str(current_dir / "start.sh"),  # Current working directory (absolute)
-                "./start.sh",  # Current working directory (relative)
-                "start.sh",  # In PATH or current dir
-            ]
-            start_script_path = None
-            for path in start_script_paths:
-                if os.path.exists(path) and os.access(path, os.X_OK):
-                    start_script_path = path
-                    break
-            
-            # Diagnostic output
-            print(f"[CRITICAL] dumb-init search result: {dumb_init_path if dumb_init_path else 'NOT FOUND'}")
-            print(f"[CRITICAL] start.sh search result: {start_script_path if start_script_path else 'NOT FOUND'}")
-            if not start_script_path:
-                print(f"[CRITICAL] Searched start.sh in: {start_script_paths}")
-                print(f"[CRITICAL] Current working directory: {os.getcwd()}")
-                print(f"[CRITICAL] Script location: {Path(__file__).parent}")
-            
-            if dumb_init_path and start_script_path:
-                print(f"[CRITICAL] Found both dumb-init and start.sh, execing into dumb-init...")
-                # Exec into dumb-init, which will then run start.sh
-                # start.sh will handle PORT expansion and start waitress properly
-                os.execv(dumb_init_path, ["dumb-init", "--", start_script_path])
-            elif dumb_init_path:
-                # dumb-init found but start.sh not found - create it on the fly or exec directly
-                # Since we're already in Python loading the app, we can't exec into waitress here
-                # But we can at least verify dumb-init is available for future use
-                print(f"[CRITICAL] Found dumb-init at {dumb_init_path} but start.sh not found")
-                print(f"[CRITICAL] Note: Cannot exec into dumb-init now (app already loading)")
-                print(f"[CRITICAL] This means PID 1 will remain python3 - process reaping disabled")
-                # Continue - the app will run but without proper process reaping
-            else:
-                missing = []
-                if not dumb_init_path:
-                    missing.append("dumb-init")
-                if not start_script_path:
-                    missing.append("start.sh")
-                print(f"[CRITICAL] Cannot fix PID 1 issue - missing: {', '.join(missing)}")
-                if not dumb_init_path:
-                    print(f"[CRITICAL] Searched dumb-init paths: {dumb_init_paths}")
-                # Continue anyway - might work but won't have proper process reaping
-    except (psutil.NoSuchProcess, psutil.AccessDenied, Exception) as e:
-        # If we can't check, continue anyway (might not be in a container)
-        pass
+# PID 1 check removed - no longer needed as dumb-init is properly configured
 
 # Add parent directory to path to import pipeline
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -244,7 +163,8 @@ def list_chrome_processes():
             'chromedriver_processes': chromedriver_processes
         }
     except Exception as e:
-        print(f"{bold('[HEALTH]')} Error listing processes: {e}")
+        # Error listing processes - silently continue
+        pass
         return {
             'chrome_count': 0,
             'chromedriver_count': 0,
@@ -388,54 +308,7 @@ def check_health():
     
     Also verifies that dumb-init is running as PID 1 (required for proper process reaping).
     """
-    # Verify dumb-init is PID 1 (critical for proper process reaping)
-    try:
-        if HAS_PSUTIL:
-            try:
-                pid1 = psutil.Process(1)
-                pid1_name = pid1.name().lower()
-                if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
-                    print(f"{bold('[HEALTH]')} WARNING: PID 1 is '{pid1_name}', expected 'dumb-init'. Process reaping may not work correctly.")
-                else:
-                    print(f"{bold('[HEALTH]')} Verified: PID 1 is '{pid1_name}' (process reaping enabled)")
-            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
-                print(f"{bold('[HEALTH]')} WARNING: Cannot verify PID 1: {e}")
-    except Exception as e:
-        print(f"{bold('[HEALTH]')} WARNING: Error checking PID 1: {e}")
-    
-    try:
-        process_info = list_chrome_processes()
-        print(f"{bold('[HEALTH]')} Chrome: {process_info['chrome_count']}, ChromeDriver: {process_info['chromedriver_count']}, Total: {process_info['total_count']}")
-        
-        # DEBUG: List all Chrome processes with exact names, PIDs, PPIDs
-        if HAS_PSUTIL:
-            print(f"{bold('[HEALTH]')} Listing all Chrome/Chromium/ChromeDriver processes:")
-            try:
-                for proc in psutil.process_iter(['name', 'pid', 'ppid', 'status', 'cmdline']):
-                    try:
-                        name = proc.info.get('name', '')
-                        name_lower = name.lower()
-                        pid = proc.info['pid']
-                        ppid = proc.info.get('ppid', -1)
-                        status = proc.info.get('status', 'unknown')
-                        
-                        # Check if it's a Chrome-related process
-                        if ('chrome' in name_lower or 'chromium' in name_lower or 'chromedriver' in name_lower):
-                            cmdline = proc.info.get('cmdline', [])
-                            # Handle None cmdline (some processes may not have cmdline available)
-                            if cmdline is None:
-                                cmdline = []
-                            cmdline_str = ' '.join(cmdline[:3]) if cmdline else ''
-                            if len(cmdline) > 3:
-                                cmdline_str += '...'
-                            
-                            print(f"{bold('[HEALTH]')}   PID {pid:6d} | PPID {ppid:6d} | {status:8s} | {name}")
-                            if cmdline_str:
-                                print(f"{bold('[HEALTH]')}          Command: {cmdline_str}")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
-                        continue
-            except Exception as e:
-                print(f"{bold('[HEALTH]')} Error listing detailed processes: {e}")
+    # Health check diagnostics removed - no longer needed
         
         # Kill orphaned processes (PPID=1) - these are processes reparented to PID 1 in containers
         # This prevents process accumulation when workers don't properly clean up
@@ -539,13 +412,15 @@ def check_health():
                                 continue
                     
                     if orphaned_count > 0:
-                        print(f"{bold('[HEALTH]')} Killed {orphaned_count} orphaned Chrome processes (PPID=1, bottom-up)")
+                        # Orphaned processes killed silently
             except Exception as e:
-                print(f"{bold('[HEALTH]')} Error killing orphaned processes: {e}")
+                # Error killing orphaned processes - silently continue
+                pass
         
         return True
     except Exception as e:
-        print(f"{bold('[HEALTH]')} Error in health check: {e}")
+        # Error in health check - silently continue
+        pass
         return True  # Don't fail on health check errors
 
 
@@ -808,10 +683,10 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
     run_dir.mkdir(parents=True, exist_ok=True)
     result_file = str(run_dir / f"{county.replace(' ', '_')}_result.json")
     
-    # Update progress
+        # Update progress
     pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
-    pipeline_runs[run_id]["currentCounty"] = county
-    pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
+        pipeline_runs[run_id]["currentCounty"] = county
+        pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
     pipeline_runs[run_id]["currentStep"] = 1
     
     # Start subprocess to run county
@@ -976,8 +851,28 @@ def aggregate_final_results(run_id: str, state: str):
         
         if not all_contacts:
             print(f"[{run_id}] No contacts found in any county")
-            pipeline_runs[run_id]["status"] = "completed"
-            pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found."
+            # Set to finalizing for 2-minute cooldown
+            pipeline_runs[run_id]["status"] = "finalizing"
+            pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found. Finalizing..."
+            pipeline_runs[run_id]["finalizingAt"] = time.time()
+            
+            # Create restart marker for start.sh to detect restart
+            try:
+                with open("/tmp/run_completed_marker", "w") as f:
+                    f.write(str(time.time()))
+            except:
+                pass  # Ignore if can't write marker
+            
+            # Start background thread to transition to completed after 2 minutes
+            def finalize_completion():
+                time.sleep(120)  # 2-minute cooldown
+                if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "finalizing":
+                    pipeline_runs[run_id]["status"] = "completed"
+                    pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found."
+                    pipeline_runs[run_id]["completedAt"] = time.time()
+            
+            finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
+            finalize_thread.start()
             pipeline_runs[run_id]["totalContacts"] = 0
             pipeline_runs[run_id]["completedAt"] = time.time()
             return
@@ -1071,13 +966,31 @@ def aggregate_final_results(run_id: str, state: str):
             pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails)
             pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails) - len(contacts_enriched)
         
-        # Update final stats
-        pipeline_runs[run_id]["status"] = "completed"
-        pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts."
+        # Update final stats - set to finalizing for 2-minute cooldown
+        pipeline_runs[run_id]["status"] = "finalizing"
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts. Finalizing..."
         pipeline_runs[run_id]["currentStep"] = 13
         pipeline_runs[run_id]["progress"] = 100
         pipeline_runs[run_id]["countiesProcessed"] = len(counties)
-        pipeline_runs[run_id]["completedAt"] = time.time()  # Track completion time
+        pipeline_runs[run_id]["finalizingAt"] = time.time()  # Track when finalizing started
+        
+        # Create restart marker for start.sh to detect restart
+        try:
+            with open("/tmp/run_completed_marker", "w") as f:
+                f.write(str(time.time()))
+        except:
+            pass  # Ignore if can't write marker
+        
+        # Start background thread to transition to completed after 2 minutes
+        def finalize_completion():
+            time.sleep(120)  # 2-minute cooldown
+            if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "finalizing":
+                pipeline_runs[run_id]["status"] = "completed"
+                pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts."
+                pipeline_runs[run_id]["completedAt"] = time.time()
+        
+        finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
+        finalize_thread.start()
         
     except Exception as e:
         pipeline_runs[run_id]["status"] = "error"
@@ -1262,11 +1175,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                     completed_counties.append(county)
                             
                             completed = len(completed_counties)
-                            progress_pct = int((completed / total_counties) * 100)
+                    progress_pct = int((completed / total_counties) * 100)
                             
                             # Update pipeline_runs state
                             with progress_lock:
-                                pipeline_runs[run_id]["progress"] = progress_pct
+                    pipeline_runs[run_id]["progress"] = progress_pct
                                 pipeline_runs[run_id]["statusMessage"] = f"Processing {completed}/{total_counties} counties..."
                                 pipeline_runs[run_id]["countiesProcessed"] = completed
                                 # Set currentCounty to show progress (since we're processing in parallel, show the count)
@@ -1293,8 +1206,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                 pipeline_runs[run_id]["countySchools"].append(result.get('schools', 0))
                             
                             print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
-                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                            
+                    print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                    
                             # Save checkpoint after every county (CHECKPOINT_BATCH_SIZE=1) or at completion
                             # This is for progress tracking only - runs always start fresh, no resume logic
                             is_checkpoint = completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties
@@ -1330,7 +1243,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                             log_resource_usage()
                             
                             # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                            gc.collect()
+                        gc.collect()
                             
                             # 2-second delay between counties to provide buffer for cleanup
                             if completed < total_counties:
@@ -1351,10 +1264,10 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                         pipeline_runs[run_id]["status"] = "cancelled"
                         pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
                         return
-                    except Exception as e:
+                except Exception as e:
                         print(f"[{run_id}] Error in pool processing: {e}")
-                        import traceback
-                        traceback.print_exc()
+                    import traceback
+                    traceback.print_exc()
                         # Save checkpoint before terminating
                         save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
                         pool.terminate()
@@ -1373,7 +1286,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed ({len(completed_counties)}/{total_counties}), starting aggregation...")
             try:
-                aggregate_final_results(run_id, state)
+            aggregate_final_results(run_id, state)
             except Exception as e:
                 print(f"[{run_id}] Error during aggregation: {e}")
                 import traceback
@@ -1395,12 +1308,31 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             })
             save_run_metadata(run_id, final_metadata)
             
-            # Final status update
+            # Final status update - set to finalizing for 2-minute cooldown
             if run_id in pipeline_runs:
                 if pipeline_runs[run_id].get("status") != "error":
-                    pipeline_runs[run_id]["status"] = "completed"
-                    pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed"
+                    pipeline_runs[run_id]["status"] = "finalizing"
+                    pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed. Finalizing..."
+                    pipeline_runs[run_id]["finalizingAt"] = time.time()
                     pipeline_runs[run_id]["containerResetRequested"] = True
+                    
+                    # Create restart marker for start.sh to detect restart
+                    try:
+                        with open("/tmp/run_completed_marker", "w") as f:
+                            f.write(str(time.time()))
+                    except:
+                        pass  # Ignore if can't write marker
+                    
+                    # Start background thread to transition to completed after 2 minutes
+                    def finalize_completion():
+                        time.sleep(120)  # 2-minute cooldown
+                        if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "finalizing":
+                            pipeline_runs[run_id]["status"] = "completed"
+                            pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed"
+                            pipeline_runs[run_id]["completedAt"] = time.time()
+                    
+                    finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
+                    finalize_thread.start()
                     
                     # Only schedule container restart on successful completion (not errors)
                     # Update metadata with container reset status
@@ -1452,9 +1384,9 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "error"
-                pipeline_runs[run_id]["error"] = error_msg
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            pipeline_runs[run_id]["status"] = "error"
+            pipeline_runs[run_id]["error"] = error_msg
+            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
             import traceback
             traceback.print_exc()
         except Exception as e:
@@ -1478,9 +1410,9 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "error"
-                pipeline_runs[run_id]["error"] = error_msg
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            pipeline_runs[run_id]["status"] = "error"
+            pipeline_runs[run_id]["error"] = error_msg
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
     
     # Wrapper to ensure thread always completes and updates status
     def process_all_counties_with_error_handling():
@@ -1488,8 +1420,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             process_all_counties()
         except Exception as e:
             print(f"[{run_id}] Unhandled exception in process_all_counties: {e}")
-            import traceback
-            traceback.print_exc()
+        import traceback
+        traceback.print_exc()
             # Ensure status is updated even on unhandled exceptions
             if run_id in pipeline_runs:
                 pipeline_runs[run_id]["status"] = "error"
@@ -1567,10 +1499,16 @@ def run_pipeline():
                 "error": "Church scraping is not yet available"
             }), 400
         
-        # Check if another run is already active
+        # Check if another run is already active or finalizing
         active_runs = []
+        finalizing_runs = []
+        current_time = time.time()
+        
         for rid, run_data in pipeline_runs.items():
-            if run_data.get("status") == "running":
+            status = run_data.get("status")
+            
+            # Check for running runs
+            if status == "running":
                 # Verify thread is actually alive
                 if rid in running_threads:
                     thread = running_threads[rid].get('thread')
@@ -1579,12 +1517,32 @@ def run_pipeline():
                 else:
                     # Thread missing but status is running - mark as stale
                     pipeline_runs[rid]["status"] = "cancelled"
+            
+            # Check for finalizing runs (2-minute cooldown)
+            elif status == "finalizing":
+                finalizing_at = run_data.get("finalizingAt", 0)
+                elapsed = current_time - finalizing_at
+                if elapsed < 120:  # Still in 2-minute cooldown
+                    finalizing_runs.append(rid)
+                else:
+                    # Cooldown expired, mark as completed
+                    pipeline_runs[rid]["status"] = "completed"
+                    if "completedAt" not in pipeline_runs[rid]:
+                        pipeline_runs[rid]["completedAt"] = current_time
         
         if active_runs:
             return jsonify({
                 "status": "error",
                 "error": f"Another run is already in progress. Please wait for it to complete or stop it first.",
                 "activeRunId": active_runs[0]
+            }), 409  # Conflict status code
+        
+        if finalizing_runs:
+            return jsonify({
+                "status": "error",
+                "error": f"A run is currently finalizing. Please wait 2 minutes for the container to restart before starting a new run.",
+                "activeRunId": finalizing_runs[0],
+                "isFinalizing": True
             }), 409  # Conflict status code
         
         # Generate unique run ID
