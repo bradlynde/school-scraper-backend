@@ -695,10 +695,6 @@ export default function Home() {
                 <div className="flex flex-col space-y-8">
                   <div>
                     <h1 className="text-3xl font-bold text-gray-900 mb-3">Start New Search</h1>
-                    {/* Explainer paragraph (dashboard-16) */}
-                    <p className="text-base text-gray-600 leading-relaxed">
-                      The system will discover schools, extract contact information, and compile results into a downloadable CSV file.
-                    </p>
                   </div>
 
                   {/* State Selection */}
