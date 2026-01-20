@@ -1497,10 +1497,18 @@ def root():
     }), 200
 
 
-@app.route("/health", methods=["GET"])
+@app.route("/health", methods=["GET", "OPTIONS"])
 def health():
-    """Health check endpoint - public"""
-    return jsonify({"status": "healthy"}), 200
+    """Health check endpoint - public, no authentication required"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return response, 200
+    
+    response = jsonify({"status": "healthy"})
+    response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+    return response, 200
 
 
 # Rate limiting for login endpoint (simple in-memory implementation)
