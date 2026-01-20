@@ -1001,12 +1001,6 @@ export default function Home() {
           );
         })()}
 
-              </div>
-            </div>
-          </div>
-          );
-        })()}
-
         {/* SUMMARY VIEW - Show when summary state */}
         {viewState === "summary" && summary && (
           <div className="animate-fade-in">
