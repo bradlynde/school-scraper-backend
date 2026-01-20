@@ -15,13 +15,20 @@ export default function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const success = await login(username, password);
-    
-    if (!success) {
-      setError("Invalid username or password");
+    try {
+      const success = await login(username, password);
+      
+      if (!success) {
+        setError("Invalid username or password");
+        setLoading(false);
+      }
+      // If successful, login function will update auth state and component will unmount
+    } catch (err: any) {
+      console.error("Login form error:", err);
+      const errorMessage = err?.message || "An error occurred during login. Please check your connection and try again.";
+      setError(errorMessage);
       setLoading(false);
     }
-    // If successful, login function will update auth state and component will unmount
   };
 
   return (

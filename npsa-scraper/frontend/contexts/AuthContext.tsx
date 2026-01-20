@@ -38,36 +38,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (username: string, password: string): Promise<boolean> => {
     try {
       const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
-      const response = await fetch(`${apiUrl}/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ username, password }),
-      });
-
-      if (!response.ok) {
-        return false;
-      }
-
-      const data = await response.json();
+      console.log("Attempting login to:", `${apiUrl}/login`);
       
-      if (data.status === "success" && data.token) {
-        // Store token and username
-        if (typeof window !== "undefined") {
-          localStorage.setItem("auth_token", data.token);
-          localStorage.setItem("auth_username", data.username);
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      try {
+        const response = await fetch(`${apiUrl}/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ username, password }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+        console.log("Login response status:", response.status);
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: "Unknown error" }));
+          console.error("Login failed:", errorData);
+          return false;
         }
-        setToken(data.token);
-        setUsername(data.username);
-        setIsAuthenticated(true);
-        return true;
+
+        const data = await response.json();
+        console.log("Login response data:", data);
+        
+        if (data.status === "success" && data.token) {
+          // Store token and username
+          if (typeof window !== "undefined") {
+            localStorage.setItem("auth_token", data.token);
+            localStorage.setItem("auth_username", data.username);
+          }
+          setToken(data.token);
+          setUsername(data.username);
+          setIsAuthenticated(true);
+          console.log("Login successful, authenticated:", true);
+          return true;
+        }
+        
+        console.error("Login response missing token or success status");
+        return false;
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          console.error("Login request timed out");
+          throw new Error("Request timed out. Please check your connection and try again.");
+        }
+        throw fetchError;
       }
-      
-      return false;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login error:", error);
-      return false;
+      throw error; // Re-throw to let LoginForm handle it
     }
   };
 
