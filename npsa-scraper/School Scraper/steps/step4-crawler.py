@@ -1026,11 +1026,11 @@ if __name__ == "__main__":
         # Cleanup Selenium driver with nuclear option
         driver = None
         try:
-        if collector.driver:
+            if collector.driver:
                 driver = collector.driver
                 collector.driver = None
                 driver.quit()
-            except:
+        except:
             pass  # Don't let cleanup fail
         finally:
             # No cleanup needed - subprocess will die naturally and take children with it
