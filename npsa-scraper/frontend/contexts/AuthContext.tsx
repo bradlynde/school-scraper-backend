@@ -28,6 +28,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const logout = React.useCallback(() => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("auth_token");
+      localStorage.removeItem("auth_username");
+      localStorage.removeItem("auth_last_activity");
+    }
+    setToken(null);
+    setUsername(null);
+    setIsAuthenticated(false);
+  }, []);
 
   // Check for existing token on mount
   useEffect(() => {
@@ -176,17 +186,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw error; // Re-throw to let LoginForm handle it
     }
   };
-
-  const logout = React.useCallback(() => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("auth_token");
-      localStorage.removeItem("auth_username");
-      localStorage.removeItem("auth_last_activity");
-    }
-    setToken(null);
-    setUsername(null);
-    setIsAuthenticated(false);
-  }, []);
 
   return (
     <AuthContext.Provider value={{ isAuthenticated, username, token, login, logout, loading }}>
