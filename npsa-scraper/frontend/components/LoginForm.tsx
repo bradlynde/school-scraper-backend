@@ -25,7 +25,15 @@ export default function LoginForm() {
       // If successful, login function will update auth state and component will unmount
     } catch (err: any) {
       console.error("Login form error:", err);
-      const errorMessage = err?.message || "An error occurred during login. Please check your connection and try again.";
+      let errorMessage = err?.message || "An error occurred during login. Please check your connection and try again.";
+      
+      // Make error messages more user-friendly
+      if (errorMessage.includes("Failed to connect to API")) {
+        errorMessage = "Cannot connect to the backend server. Please ensure the API is running and configured correctly.";
+      } else if (errorMessage.includes("timed out")) {
+        errorMessage = "Connection timed out. The server may be slow or unreachable.";
+      }
+      
       setError(errorMessage);
       setLoading(false);
     }

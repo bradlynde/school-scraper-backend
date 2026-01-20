@@ -437,7 +437,7 @@ export default function Home() {
 
   async function checkPipelineStatus(runId: string) {
     try {
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
       const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
         method: "GET",
         headers: {
@@ -811,7 +811,7 @@ export default function Home() {
             setSelectedRunId(runId);
             setSidebarOpen(false); // Close mobile menu on run select
             // Fetch run status to determine if it's running or finished
-            const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+            const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
             try {
               // First, try to get run from /runs endpoint to get metadata
               const runsResponse = await fetch(`${apiUrl}/runs`, {
@@ -1111,7 +1111,7 @@ export default function Home() {
                     <button
                       onClick={async () => {
                         if (selectedRunId) {
-                          const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+                          const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
                           try {
                             const response = await fetch(`${apiUrl}/runs/${selectedRunId}/download`, {
                               headers: {

@@ -122,7 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (username: string, password: string): Promise<boolean> => {
     try {
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
       console.log("Attempting login to:", `${apiUrl}/login`);
       
       // Add timeout to prevent hanging
