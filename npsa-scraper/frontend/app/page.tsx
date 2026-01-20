@@ -626,6 +626,7 @@ export default function Home() {
 
   // Render views with fade-in transitions
   return (
+    <>
     <div className="min-h-screen h-screen bg-gray-50 flex">
       {/* Mobile Hamburger Menu */}
       <button
