@@ -614,6 +614,12 @@ export default function Home() {
       return;
     }
 
+    if (!token) {
+      setError("Authentication token is missing. Please log in again.");
+      logout();
+      return;
+    }
+
     setViewState("progress");
     setStatus("Starting pipeline...");
     setSummary(null);
@@ -625,7 +631,12 @@ export default function Home() {
     setEstimatedTime(null);
 
     try {
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
+      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+      console.log("Starting pipeline with API URL:", apiUrl);
+      console.log("Request payload:", { state: selectedState.toLowerCase().replace(' ', '_'), type: selectedType });
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
       const response = await fetch(`${apiUrl}/run-pipeline`, {
         method: "POST",
@@ -637,7 +648,10 @@ export default function Home() {
           state: selectedState.toLowerCase().replace(' ', '_'),
           type: selectedType,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         if (response.status === 401) {
@@ -696,10 +710,25 @@ export default function Home() {
         setIsRunning(false);
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error occurred";
+      console.error("Pipeline error:", err);
+      let errorMessage = "Unknown error occurred";
+      
+      if (err instanceof Error) {
+        errorMessage = err.message;
+        
+        // Check for timeout
+        if (err.name === 'AbortError' || err.message.includes('timeout')) {
+          errorMessage = "Request timed out. The backend may be slow to respond or unavailable. Please try again.";
+        }
+        // Check for network errors
+        else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed")) {
+          const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+          errorMessage = `Failed to connect to the backend API at ${apiUrl}. This could mean:\n\n1. The backend server is not running\n2. The API URL is incorrect\n3. There's a network connectivity issue\n\nPlease verify that NEXT_PUBLIC_API_URL is set correctly in your Vercel environment variables and that the Railway backend is running.`;
+        }
+      }
+      
       setError(errorMessage);
       setStatus("Pipeline failed");
-      console.error("Pipeline error:", err);
       setViewState("start");
       setIsRunning(false);
       
