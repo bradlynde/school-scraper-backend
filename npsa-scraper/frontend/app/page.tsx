@@ -609,10 +609,20 @@ export default function Home() {
   const totalCounties = summary?.totalCounties || 0;
   const schoolsProcessed = summary?.schoolsProcessed || summary?.schoolsFound || 0;
   // Use currentCounty if available, otherwise derive from statusMessage, otherwise show progress-based message
-  const currentCounty = summary?.currentCounty || 
-    (summary?.statusMessage ? summary.statusMessage.replace(/^Processing\s+/, '').split('(')[0].trim() : null) ||
-    (countiesProcessed > 0 ? `${countiesProcessed}/${totalCounties} counties` : 
-      (totalCounties > 0 ? "Starting..." : "Initializing..."));
+  let currentCounty = summary?.currentCounty;
+  if (!currentCounty && summary?.statusMessage) {
+    const statusMsg = summary.statusMessage.replace(/^Processing\s+/, '');
+    currentCounty = statusMsg.split('(')[0].trim();
+  }
+  if (!currentCounty) {
+    if (countiesProcessed > 0) {
+      currentCounty = `${countiesProcessed}/${totalCounties} counties`;
+    } else if (totalCounties > 0) {
+      currentCounty = "Starting...";
+    } else {
+      currentCounty = "Initializing...";
+    }
+  }
 
   // Render views with fade-in transitions
   return (
