@@ -1033,6 +1033,7 @@ export default function Home() {
                       )}
                     </div>
                   </div>
+                </div>
 
                 {/* Results Preview (Optional) - dashboard-27 */}
                 {summary && (summary.totalContacts || 0) > 0 && (
