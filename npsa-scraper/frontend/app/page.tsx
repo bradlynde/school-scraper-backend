@@ -1204,5 +1204,6 @@ export default function Home() {
         )}
       </div>
     </div>
+    </React.Fragment>
   );
 }
