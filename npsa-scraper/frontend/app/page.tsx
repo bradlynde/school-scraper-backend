@@ -963,190 +963,48 @@ export default function Home() {
         {/* PROGRESS VIEW - Show when progress state OR when run selected from Running tab */}
         {viewState === "progress" && summary && (
             <div className="animate-fade-in min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f9fafb' }}>
-            <div className="w-full max-w-7xl px-4 sm:px-6 md:px-8 py-12">
-              {/* Header with live indicator */}
-              <div className="mb-8">
-                <div className="flex items-center gap-3">
-                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Progress</h1>
-                  {runProgress.status === "running" && (
-                    <div className="relative">
-                      <div className="absolute inset-0 w-3 h-3 rounded-full bg-[#1e3a5f] opacity-30 animate-ping"></div>
-                      <div className="relative w-3 h-3 rounded-full bg-[#1e3a5f]"></div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Hero Row: ProgressCard (65-70%) + RunStatsCard (30-35%) */}
-              <div className="grid grid-cols-1 lg:grid-cols-10 gap-6 md:gap-8 mb-8">
-                {/* ProgressCard - 65-70% width (7 columns) */}
-                <div className="lg:col-span-7">
-                  <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
-                    {/* Primary: X/Y Counties, % complete */}
-                    <div className="mb-8">
-                      <div className="flex items-baseline gap-3 mb-4">
-                        <span className="text-6xl font-bold text-[#1e3a5f]">{runProgress.completedCounties}</span>
-                        <span className="text-3xl text-gray-500">/ {runProgress.totalCounties}</span>
-                        <span className="text-2xl font-semibold text-gray-600">Counties</span>
-                        <span className="text-2xl font-semibold text-gray-600 ml-auto">{formatPercentComplete(runProgress)}% complete</span>
-                      </div>
-                      
-                      {/* Progress bar */}
-                      <div className="w-full bg-gray-200 rounded-full h-3 mb-5">
-                        <div 
-                          className="bg-[#1e3a5f] h-3 rounded-full transition-all duration-500"
-                          style={{ width: `${formatPercentComplete(runProgress)}%` }}
-                        ></div>
-                      </div>
-                      
-                      {/* Primary text */}
-                      <p className="text-2xl font-bold text-gray-900 mb-2">
-                        {formatCountyPosition(runProgress).split(' — ')[0]}
-                      </p>
-                      
-                      {/* Subtext */}
-                      <p className="text-sm text-gray-500 font-medium">Discovering schools in this county…</p>
-                    </div>
-
-                    {/* 3 sub-metrics row */}
-                    <div className="grid grid-cols-3 gap-8 pt-8 border-t border-gray-200">
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Schools</p>
-                        <p className="text-3xl font-bold text-gray-900">{runProgress.schoolsProcessed}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Contacts</p>
-                        <p className="text-3xl font-bold text-gray-900">{runProgress.contactsProcessed}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Errors</p>
-                        <p className="text-3xl font-bold text-gray-900">{runProgress.errorCount}</p>
-                      </div>
-                    </div>
-                  </div>
-                    </div>
-
-                {/* RunStatsCard - 30-35% width (3 columns) */}
-                <div className="lg:col-span-3">
-                  <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10 h-full flex flex-col" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
-                    <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-8">Run Statistics</h3>
-                    <div className="flex-1 flex flex-col justify-center space-y-8">
-                      <div>
-                        <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Elapsed</p>
-                        <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
-                        </div>
-                      {runProgress.etaRemainingMs && runProgress.etaRemainingMs > 0 ? (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Estimated Remaining</p>
-                          <p className="text-3xl font-bold text-gray-900">{formatTime(runProgress.etaRemainingMs / 1000)}</p>
-                      </div>
-                      ) : (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Estimated Remaining</p>
-                          <p className="text-3xl font-bold text-gray-900">—</p>
-                      </div>
-                      )}
-                      <div>
-                        <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Status</p>
-                        <p className="text-3xl font-bold text-[#1e3a5f] mb-1">
-                          {formatStatusLabel(runProgress)}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          {formatCountyPosition(runProgress).split(' — ')[0]}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                    </div>
-                  </div>
-
-              {/* Activity Log Section */}
-              <div className="space-y-8 mt-10">
-                {/* Activity Log Panel */}
-                <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
-                  {/* Header with controls */}
-                  <div className="flex items-center justify-between mb-8">
-                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Activity</h3>
-                    <div className="flex items-center gap-4">
-                      <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-                        <input type="checkbox" defaultChecked className="rounded" />
-                        <span>Auto-scroll</span>
-                      </label>
-                    </div>
+            <div className="w-full max-w-4xl px-4 sm:px-6 md:px-8 py-12">
+              {/* Single Card with all progress information */}
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
+                {/* X/Y Counties with percentage */}
+                <div className="mb-8">
+                  <div className="flex items-baseline gap-3 mb-6">
+                    <span className="text-6xl font-bold text-[#1e3a5f]">{runProgress.completedCounties}</span>
+                    <span className="text-3xl text-gray-500">/ {runProgress.totalCounties}</span>
+                    <span className="text-2xl font-semibold text-gray-600">Counties</span>
+                    <span className="text-2xl font-semibold text-gray-600 ml-auto">{formatPercentComplete(runProgress)}% complete</span>
                   </div>
                   
-                  {/* Activity entries with severity icons and timestamps */}
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {activityLog.length > 0 ? (
-                      activityLog.slice().reverse().map((entry, index) => (
-                        <div key={index} className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors">
-                          <div className="flex-shrink-0 w-6 text-center">
-                            <span className={`${
-                              entry.level === "error" ? "text-red-600" :
-                              entry.level === "warning" ? "text-yellow-600" :
-                              entry.level === "success" ? "text-green-600" :
-                              "text-[#1e3a5f]"
-                            }`}>
-                              {getActivityIcon(entry.level)}
-                            </span>
-                          </div>
-                          <div className="flex-1">
-                            <span className={`${
-                              entry.level === "error" ? "text-red-700" :
-                              entry.level === "warning" ? "text-yellow-700" :
-                              entry.level === "success" ? "text-green-700" :
-                              "text-gray-700"
-                            }`}>
-                              {entry.message}
-                            </span>
-                        </div>
-                          <div className="text-xs text-gray-400 flex-shrink-0">
-                            {formatRelativeTime(entry.timestamp.getTime())}
-                          </div>
-                          </div>
-                        ))
-                      ) : (
-                      <div className="flex items-center gap-4 text-sm py-2 px-3 text-gray-500">
-                        <div className="flex-1">
-                          <span>Waiting for activity…</span>
-                        </div>
-                        </div>
-                      )}
-                    </div>
+                  {/* Progress bar */}
+                  <div className="w-full bg-gray-200 rounded-full h-3">
+                    <div 
+                      className="bg-[#1e3a5f] h-3 rounded-full transition-all duration-500"
+                      style={{ width: `${formatPercentComplete(runProgress)}%` }}
+                    ></div>
                   </div>
                 </div>
 
-                {/* Results Preview (Optional) */}
-                {summary && (summary.totalContacts || 0) > 0 && (
-                  <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
-                    <div className="flex items-center justify-between mb-6">
-                      <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Recently Found</h3>
-                      <span className="text-xs text-gray-500">
-                        {summary.totalContacts || 0} total contacts
-                      </span>
-                      </div>
-                    <div className="space-y-3">
-                      {/* Show last 5 schools if available */}
-                      {summary.countyContacts && summary.countyContacts.length > 0 ? (
-                        <div className="text-sm text-gray-600">
-                          <p>Last 5 counties processed with contacts found</p>
-                        </div>
-                      ) : (
-                        <div className="text-sm text-gray-500 italic">
-                          Contact details will appear here as counties are processed
-                      </div>
-                      )}
-                  {error && (
-                        <div className="mt-4 pt-4 border-t border-gray-200">
-                          <div className="flex items-center gap-2 text-sm text-red-600">
-                            <span>Errors detected - check activity log for details</span>
-                        </div>
-                        </div>
-                      )}
-                      </div>
-                    </div>
-                  )}
-          </div>
+                {/* Stats row: Elapsed, Status, Estimated Remaining */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-8 border-t border-gray-200">
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Elapsed</p>
+                    <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Status</p>
+                    <p className="text-3xl font-bold text-[#1e3a5f]">{formatStatusLabel(runProgress)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Estimated Remaining</p>
+                    {runProgress.etaRemainingMs && runProgress.etaRemainingMs > 0 ? (
+                      <p className="text-3xl font-bold text-gray-900">{formatTime(runProgress.etaRemainingMs / 1000)}</p>
+                    ) : (
+                      <p className="text-3xl font-bold text-gray-900">—</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
