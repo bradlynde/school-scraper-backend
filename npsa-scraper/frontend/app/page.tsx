@@ -610,7 +610,7 @@ export default function Home() {
   const schoolsProcessed = summary?.schoolsProcessed || summary?.schoolsFound || 0;
   
   // Use currentCounty if available, otherwise derive from statusMessage, otherwise show progress-based message
-  const currentCounty = (() => {
+  const getCurrentCounty = () => {
     if (summary?.currentCounty) return summary.currentCounty;
     if (summary?.statusMessage) {
       const statusMsg = summary.statusMessage.replace(/^Processing\s+/, '');
@@ -619,7 +619,8 @@ export default function Home() {
     if (countiesProcessed > 0) return `${countiesProcessed}/${totalCounties} counties`;
     if (totalCounties > 0) return "Starting...";
     return "Initializing...";
-  })();
+  };
+  const currentCounty = getCurrentCounty();
 
   // Render views with fade-in transitions
   return (
