@@ -13,27 +13,106 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [username, setUsername] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Update last activity timestamp
+  const updateLastActivity = () => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("auth_last_activity", Date.now().toString());
+    }
+  };
+
+  // Check if user should be logged out due to inactivity (7 days)
+  const checkAutoLogout = () => {
+    if (typeof window !== "undefined" && isAuthenticated) {
+      const lastActivityStr = localStorage.getItem("auth_last_activity");
+      if (lastActivityStr) {
+        const lastActivity = parseInt(lastActivityStr, 10);
+        const now = Date.now();
+        const daysSinceActivity = (now - lastActivity) / (24 * 60 * 60 * 1000);
+        
+        if (daysSinceActivity >= 7) {
+          // Auto-logout after 7 days of inactivity
+          logout();
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   // Check for existing token on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
       const storedToken = localStorage.getItem("auth_token");
       const storedUsername = localStorage.getItem("auth_username");
+      const lastActivityStr = localStorage.getItem("auth_last_activity");
       
       if (storedToken && storedUsername) {
+        // Check if 7 days have passed since last activity
+        if (lastActivityStr) {
+          const lastActivity = parseInt(lastActivityStr, 10);
+          const now = Date.now();
+          const daysSinceActivity = (now - lastActivity) / (24 * 60 * 60 * 1000);
+          
+          if (daysSinceActivity >= 7) {
+            // Auto-logout - 7 days of inactivity
+            localStorage.removeItem("auth_token");
+            localStorage.removeItem("auth_username");
+            localStorage.removeItem("auth_last_activity");
+            setLoading(false);
+            return;
+          }
+        }
+        
         // Verify token is still valid (basic check - backend will verify)
         setToken(storedToken);
         setUsername(storedUsername);
         setIsAuthenticated(true);
+        
+        // Update last activity on successful mount
+        updateLastActivity();
       }
     }
     setLoading(false);
   }, []);
+
+  // Check for auto-logout periodically (every hour)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
+    const interval = setInterval(() => {
+      checkAutoLogout();
+    }, 60 * 60 * 1000); // Check every hour
+    
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
+
+  // Update last activity on user interactions (mouse clicks, keyboard, etc.)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+    const handleActivity = () => {
+      updateLastActivity();
+    };
+    
+    events.forEach(event => {
+      window.addEventListener(event, handleActivity, { passive: true });
+    });
+    
+    return () => {
+      events.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
+    };
+  }, [isAuthenticated]);
 
   const login = async (username: string, password: string): Promise<boolean> => {
     try {
@@ -71,6 +150,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (typeof window !== "undefined") {
             localStorage.setItem("auth_token", data.token);
             localStorage.setItem("auth_username", data.username);
+            // Set last activity timestamp on login
+            updateLastActivity();
           }
           setToken(data.token);
           setUsername(data.username);
@@ -87,6 +168,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error("Login request timed out");
           throw new Error("Request timed out. Please check your connection and try again.");
         }
+        console.error("Fetch error details:", fetchError);
+        // Provide more helpful error message
+        if (fetchError.message && fetchError.message.includes('fetch')) {
+          throw new Error(`Failed to connect to API at ${apiUrl}. Please check that the backend is running and NEXT_PUBLIC_API_URL is set correctly.`);
+        }
         throw fetchError;
       }
     } catch (error: any) {
@@ -99,6 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window !== "undefined") {
       localStorage.removeItem("auth_token");
       localStorage.removeItem("auth_username");
+      localStorage.removeItem("auth_last_activity");
     }
     setToken(null);
     setUsername(null);
