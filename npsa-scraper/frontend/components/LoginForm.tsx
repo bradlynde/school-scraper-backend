@@ -28,11 +28,6 @@ export default function LoginForm() {
     <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-8 md:p-12">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">School Scraper</h1>
-            <p className="text-gray-600">Please sign in to continue</p>
-          </div>
-
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label htmlFor="username" className="block text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
