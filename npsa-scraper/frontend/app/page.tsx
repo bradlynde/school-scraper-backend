@@ -684,22 +684,30 @@ export default function Home() {
           logout();
           return;
         }
-        // Try to parse error response as JSON
+        
+        // Read response body once and store it
+        let errorData: any = {};
         let errorMessage = `Backend responded with ${response.status}: ${response.statusText}`;
+        
         try {
-          const errorData = await response.json();
+          // Clone the response before reading to avoid consuming the body
+          const responseClone = response.clone();
+          errorData = await responseClone.json();
           errorMessage = errorData.error || errorData.message || errorMessage;
         } catch {
-          // If JSON parse fails, use text response
-        const errorText = await response.text();
-          if (errorText) {
-            errorMessage = errorText;
+          // If JSON parse fails, try text (but we can only read once, so use original response)
+          try {
+            const text = await response.text();
+            if (text) {
+              errorMessage = text;
+            }
+          } catch {
+            // If text also fails, use default message
           }
         }
         
-        // Handle specific error codes
+        // Handle specific error codes (use already-parsed errorData)
         if (response.status === 409) {
-          const errorData = await response.json().catch(() => ({}));
           if (errorData.isFinalizing) {
             setIsFinalizing(true);
             setFinalizingMessage(errorMessage || "A run is currently finalizing. Please wait 2 minutes for the container to restart before starting a new run.");
