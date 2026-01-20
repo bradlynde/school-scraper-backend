@@ -367,11 +367,11 @@ export default function Home() {
         
         // If run was selected from Finished tab, show summary; otherwise default behavior
         if (selectedRunId === runId && selectedType === 'finished') {
-        setViewState("summary");
+          setViewState("summary");
         } else if (selectedRunId === runId) {
           setViewState("summary");
         } else {
-        setViewState("summary");
+          setViewState("summary");
         }
       } else if (data.status === "error") {
         if (pollingInterval) {
@@ -485,7 +485,7 @@ export default function Home() {
           errorMessage = errorData.error || errorData.message || errorMessage;
         } catch {
           // If JSON parse fails, use text response
-        const errorText = await response.text();
+          const errorText = await response.text();
           if (errorText) {
             errorMessage = errorText;
           }
