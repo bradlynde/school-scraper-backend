@@ -92,6 +92,79 @@ const US_STATES = [
   { value: "wyoming", label: "Wyoming" },
 ];
 
+// County counts per state (from assets/data/state_counties/*.txt files)
+const STATE_COUNTY_COUNTS: Record<string, number> = {
+  "alabama": 67,
+  "alaska": 29,
+  "arizona": 15,
+  "arkansas": 75,
+  "california": 58,
+  "colorado": 64,
+  "connecticut": 8,
+  "delaware": 3,
+  "florida": 67,
+  "georgia": 159,
+  "hawaii": 5,
+  "idaho": 44,
+  "illinois": 101,
+  "indiana": 92,
+  "iowa": 99,
+  "kansas": 105,
+  "kentucky": 120,
+  "louisiana": 64,
+  "maine": 16,
+  "maryland": 24,
+  "massachusetts": 14,
+  "michigan": 83,
+  "minnesota": 87,
+  "mississippi": 82,
+  "missouri": 115,
+  "montana": 56,
+  "nebraska": 93,
+  "nevada": 16,
+  "new_hampshire": 10,
+  "new_jersey": 21,
+  "new_mexico": 33,
+  "new_york": 62,
+  "north_carolina": 100,
+  "north_dakota": 53,
+  "ohio": 88,
+  "oklahoma": 77,
+  "oregon": 36,
+  "pennsylvania": 67,
+  "rhode_island": 5,
+  "south_carolina": 46,
+  "south_dakota": 66,
+  "tennessee": 95,
+  "texas": 254,
+  "utah": 29,
+  "vermont": 14,
+  "virginia": 95,
+  "washington": 39,
+  "west_virginia": 55,
+  "wisconsin": 72,
+  "wyoming": 23,
+};
+
+// Average time per county: 579.4 seconds (~9.7 minutes)
+const SECONDS_PER_COUNTY = 579.4;
+
+// Helper function to format estimated time
+function formatEstimatedTime(seconds: number): string {
+  if (seconds < 3600) {
+    // Less than 1 hour, show as minutes
+    return `~${Math.round(seconds / 60)}m`;
+  } else if (seconds < 86400) {
+    // Less than 1 day, show as hours
+    const hours = seconds / 3600;
+    return `~${hours.toFixed(1)}h`;
+  } else {
+    // 1 day or more, show as days
+    const days = seconds / 86400;
+    return `~${days.toFixed(1)}d`;
+  }
+}
+
 export default function Home() {
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
@@ -718,24 +791,26 @@ export default function Home() {
                   </div>
 
                   {/* Preview row after state selection (dashboard-17) */}
-                  {selectedState && (
-                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
-                      <div className="grid grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <p className="text-gray-500 mb-1">Counties</p>
-                          <p className="font-semibold text-gray-900">~{selectedState === "alabama" ? "67" : "50-100"}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500 mb-1">Est. Time</p>
-                          <p className="font-semibold text-gray-900">~{selectedState === "alabama" ? "5-8h" : "3-6h"}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500 mb-1">Expected Output</p>
-                          <p className="font-semibold text-gray-900">100-500 contacts</p>
+                  {selectedState && (() => {
+                    const countyCount = STATE_COUNTY_COUNTS[selectedState] || 0;
+                    const estimatedSeconds = countyCount * SECONDS_PER_COUNTY;
+                    const estimatedTime = formatEstimatedTime(estimatedSeconds);
+                    
+                    return (
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <p className="text-gray-500 mb-1">Counties</p>
+                            <p className="font-semibold text-gray-900">{countyCount}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-1">Est. Time</p>
+                            <p className="font-semibold text-gray-900">{estimatedTime}</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {error && (
                     <div className="p-5 bg-red-50 border border-red-200 rounded-xl">
