@@ -737,43 +737,6 @@ export default function Home() {
     }
   }
 
-
-  // Restore elapsed time from localStorage on page load
-  useEffect(() => {
-    if (typeof window !== 'undefined' && selectedRunId && !startTime) {
-      const storedStartTime = localStorage.getItem(`run_startTime_${selectedRunId}`);
-      if (storedStartTime) {
-        const start = parseInt(storedStartTime, 10);
-        setStartTime(start);
-        const elapsed = (Date.now() - start) / 1000;
-        setElapsedTimeDisplay(elapsed);
-      }
-    }
-  }, [selectedRunId]);
-
-  // Update elapsed time display every second (real-time counter)
-  // Stop updating when run completes (viewState === "summary")
-  useEffect(() => {
-    if (startTime && viewState === "progress") {
-      const interval = setInterval(() => {
-        const elapsed = (Date.now() - startTime) / 1000;
-        setElapsedTimeDisplay(elapsed);
-      }, 1000);
-      return () => clearInterval(interval);
-    } else if (!startTime) {
-      // Only reset to 0 when startTime is null (before a run starts)
-      setElapsedTimeDisplay(0);
-    }
-  }, [startTime, viewState]);
-
-  useEffect(() => {
-    return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
-    };
-  }, [pollingInterval]);
-
   // Derive runProgress from summary and state
   const runProgress = deriveRunProgress(summary, elapsedTimeDisplay, estimatedTime, startTime);
 
