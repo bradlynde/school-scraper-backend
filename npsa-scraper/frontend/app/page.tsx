@@ -635,10 +635,10 @@ export default function Home() {
       console.log("Starting pipeline with API URL:", apiUrl);
       console.log("Request payload:", { state: selectedState.toLowerCase().replace(' ', '_'), type: selectedType });
 
-      // First, verify the backend is reachable
+      // Optional: verify the backend is reachable (don't block if it fails)
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout for health check
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for health check
         
         const healthCheck = await fetch(`${apiUrl}/health`, {
           method: "GET",
@@ -648,27 +648,16 @@ export default function Home() {
         
         clearTimeout(timeoutId);
         
-        if (!healthCheck.ok) {
-          throw new Error(`Backend health check failed with status ${healthCheck.status}`);
+        if (healthCheck.ok) {
+          const healthData = await healthCheck.json().catch(() => ({}));
+          if (healthData.status === "healthy") {
+            console.log("Backend health check passed");
+          }
         }
-        
-        const healthData = await healthCheck.json().catch(() => ({}));
-        if (healthData.status !== "healthy") {
-          throw new Error("Backend health check returned unexpected status");
-        }
-        
-        console.log("Backend health check passed");
       } catch (healthError: any) {
-        console.error("Backend health check failed:", healthError);
-        
-        // Provide more specific error message
-        if (healthError.name === 'AbortError' || healthError.message?.includes('timeout')) {
-          throw new Error(`Backend API at ${apiUrl} did not respond within 10 seconds. The server may be slow or unreachable.`);
-        } else if (healthError.message?.includes('Failed to fetch') || healthError.message?.includes('NetworkError')) {
-          throw new Error(`Cannot reach backend API at ${apiUrl}. Please check your network connection and ensure the backend is running.`);
-        } else {
-          throw new Error(`Backend health check failed: ${healthError.message || 'Unknown error'}`);
-        }
+        // Non-blocking: health check failed but we'll still try the actual request
+        // This handles cases where /health might not be deployed yet but other endpoints work
+        console.warn("Backend health check failed (non-blocking):", healthError);
       }
 
       const controller = new AbortController();
