@@ -258,7 +258,7 @@ class ContentCollector:
                     # Kill children BEFORE quitting driver to prevent orphans
                     self._kill_all_chrome_processes()
                     time.sleep(0.5)
-                self.driver.quit()
+                    self.driver.quit()
                     time.sleep(0.5)
             except:
                 pass  # Don't let cleanup fail
@@ -279,7 +279,7 @@ class ContentCollector:
         
         driver = None
         try:
-        if self.driver:
+            if self.driver:
                 driver = self.driver
                 self.driver = None
                 driver.quit()
@@ -1026,11 +1026,11 @@ if __name__ == "__main__":
         # Cleanup Selenium driver with nuclear option
         driver = None
         try:
-        if collector.driver:
+            if collector.driver:
                 driver = collector.driver
                 collector.driver = None
                 driver.quit()
-            except:
+        except:
             pass  # Don't let cleanup fail
         finally:
             # No cleanup needed - subprocess will die naturally and take children with it

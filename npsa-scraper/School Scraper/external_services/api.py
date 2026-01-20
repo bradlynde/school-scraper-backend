@@ -309,119 +309,115 @@ def check_health():
     Also verifies that dumb-init is running as PID 1 (required for proper process reaping).
     """
     # Health check diagnostics removed - no longer needed
-        
-        # Kill orphaned processes (PPID=1) - these are processes reparented to PID 1 in containers
-        # This prevents process accumulation when workers don't properly clean up
-        if HAS_PSUTIL:
+    # Kill orphaned processes (PPID=1) - these are processes reparented to PID 1 in containers
+    # This prevents process accumulation when workers don't properly clean up
+    if HAS_PSUTIL:
+        try:
+            orphaned_count = 0
+            orphaned_processes = []
+            
+            # Identify main container processes to protect (never kill these)
+            protected_names = {'waitress-serve', 'dumb-init', 'python', 'python3', 'waitress'}
+            protected_pids = set()
+            
+            # Get current process and identify protected processes
             try:
-                orphaned_count = 0
-                orphaned_processes = []
-                
-                # Identify main container processes to protect (never kill these)
-                protected_names = {'waitress-serve', 'dumb-init', 'python', 'python3', 'waitress'}
-                protected_pids = set()
-                
-                # Get current process and identify protected processes
+                current_pid = os.getpid()
+                current_process = psutil.Process(current_pid)
                 try:
-                    current_pid = os.getpid()
-                    current_process = psutil.Process(current_pid)
-                    try:
-                        parent = current_process.parent()
-                        if parent:
-                            protected_pids.add(parent.pid)
-                            try:
-                                grandparent = parent.parent()
-                                if grandparent:
-                                    protected_pids.add(grandparent.pid)
-                            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                pass
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
+                    parent = current_process.parent()
+                    if parent:
+                        protected_pids.add(parent.pid)
+                        try:
+                            grandparent = parent.parent()
+                            if grandparent:
+                                protected_pids.add(grandparent.pid)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
-                
-                # Find orphaned Chrome processes (PPID=1)
-                for proc in psutil.process_iter(['name', 'pid', 'ppid']):
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            
+            # Find orphaned Chrome processes (PPID=1)
+            for proc in psutil.process_iter(['name', 'pid', 'ppid']):
+                try:
+                    name = proc.info.get('name', '').lower()
+                    ppid = proc.info.get('ppid', -1)
+                    
+                    # Check if it's an orphaned Chrome process (PPID=1) and not protected
+                    if ppid == 1 and ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
+                        pid = proc.info['pid']
+                        if pid not in protected_pids and name not in protected_names:
+                            orphaned_processes.append(proc)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                    continue
+            
+            if orphaned_processes:
+                # Sort orphaned processes by depth (children first) - BOTTOM-UP approach
+                # Build depth map: processes with more children are deeper
+                depth_map = {}
+                def get_orphan_depth(proc):
+                    if proc.pid in depth_map:
+                        return depth_map[proc.pid]
                     try:
-                        name = proc.info.get('name', '').lower()
-                        ppid = proc.info.get('ppid', -1)
-                        
-                        # Check if it's an orphaned Chrome process (PPID=1) and not protected
-                        if ppid == 1 and ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
-                            pid = proc.info['pid']
-                            if pid not in protected_pids and name not in protected_names:
-                                orphaned_processes.append(proc)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                        # Count children depth (deeper if has more descendants)
+                        children = proc.children(recursive=True)
+                        depth = len(children)
+                        depth_map[proc.pid] = depth
+                        return depth
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        return 0
+                
+                # Calculate depths
+                for proc in orphaned_processes:
+                    get_orphan_depth(proc)
+                
+                # Sort by depth descending (processes with more children = deeper, kill first)
+                orphaned_processes.sort(key=lambda p: depth_map.get(p.pid, 0), reverse=True)
+                
+                # Kill orphaned processes BOTTOM-UP (processes with more children first)
+                for proc in orphaned_processes:
+                    try:
+                        if proc.is_running():
+                            # First, try to kill children of this orphan if any (BOTTOM-UP)
+                            try:
+                                for child in proc.children(recursive=True):
+                                    try:
+                                        child_name = child.info.get('name', '').lower()
+                                        if ('chrome' in child_name or 'chromium' in child_name or 'chromedriver' in child_name):
+                                            if child.is_running():
+                                                child.terminate()
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                        continue
+                                time.sleep(0.3)  # Wait for children to die
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                            
+                            # Then kill the orphan process itself
+                            proc.terminate()
+                            orphaned_count += 1
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
                 
-                if orphaned_processes:
-                    # Sort orphaned processes by depth (children first) - BOTTOM-UP approach
-                    # Build depth map: processes with more children are deeper
-                    depth_map = {}
-                    def get_orphan_depth(proc):
-                        if proc.pid in depth_map:
-                            return depth_map[proc.pid]
-                        try:
-                            # Count children depth (deeper if has more descendants)
-                            children = proc.children(recursive=True)
-                            depth = len(children)
-                            depth_map[proc.pid] = depth
-                            return depth
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            return 0
-                    
-                    # Calculate depths
-                    for proc in orphaned_processes:
-                        get_orphan_depth(proc)
-                    
-                    # Sort by depth descending (processes with more children = deeper, kill first)
-                    orphaned_processes.sort(key=lambda p: depth_map.get(p.pid, 0), reverse=True)
-                    
-                    # Kill orphaned processes BOTTOM-UP (processes with more children first)
+                # Force kill any remaining
+                if orphaned_count > 0:
+                    time.sleep(0.5)
                     for proc in orphaned_processes:
                         try:
                             if proc.is_running():
-                                # First, try to kill children of this orphan if any (BOTTOM-UP)
-                                try:
-                                    for child in proc.children(recursive=True):
-                                        try:
-                                            child_name = child.info.get('name', '').lower()
-                                            if ('chrome' in child_name or 'chromium' in child_name or 'chromedriver' in child_name):
-                                                if child.is_running():
-                                                    child.terminate()
-                                        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                                            continue
-                                    time.sleep(0.3)  # Wait for children to die
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-                                
-                                # Then kill the orphan process itself
-                                proc.terminate()
-                                orphaned_count += 1
+                                proc.kill()
                         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                             continue
-                    
-                    # Force kill any remaining
-                    if orphaned_count > 0:
-                        time.sleep(0.5)
-                        for proc in orphaned_processes:
-                            try:
-                                if proc.is_running():
-                                    proc.kill()
-                            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                                continue
-                    
-                    if orphaned_count > 0:
-                        # Orphaned processes killed silently
-            except Exception as e:
-                # Error killing orphaned processes - silently continue
-                pass
-        
-        return True
-    except Exception as e:
-        # Error in health check - silently continue
-        pass
-        return True  # Don't fail on health check errors
+                
+                if orphaned_count > 0:
+                    # Orphaned processes killed silently
+                    pass
+        except Exception as e:
+            # Error killing orphaned processes - silently continue
+            pass
+    
+    return True
 
 
 def log_resource_usage():
@@ -683,10 +679,10 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
     run_dir.mkdir(parents=True, exist_ok=True)
     result_file = str(run_dir / f"{county.replace(' ', '_')}_result.json")
     
-        # Update progress
+    # Update progress
     pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
-        pipeline_runs[run_id]["currentCounty"] = county
-        pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
+    pipeline_runs[run_id]["currentCounty"] = county
+    pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
     pipeline_runs[run_id]["currentStep"] = 1
     
     # Start subprocess to run county
@@ -1175,11 +1171,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                     completed_counties.append(county)
                             
                             completed = len(completed_counties)
-                    progress_pct = int((completed / total_counties) * 100)
+                            progress_pct = int((completed / total_counties) * 100)
                             
                             # Update pipeline_runs state
                             with progress_lock:
-                    pipeline_runs[run_id]["progress"] = progress_pct
+                                pipeline_runs[run_id]["progress"] = progress_pct
                                 pipeline_runs[run_id]["statusMessage"] = f"Processing {completed}/{total_counties} counties..."
                                 pipeline_runs[run_id]["countiesProcessed"] = completed
                                 # Set currentCounty to show progress (since we're processing in parallel, show the count)
@@ -1206,8 +1202,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                 pipeline_runs[run_id]["countySchools"].append(result.get('schools', 0))
                             
                             print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
-                    print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                    
+                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                            
                             # Save checkpoint after every county (CHECKPOINT_BATCH_SIZE=1) or at completion
                             # This is for progress tracking only - runs always start fresh, no resume logic
                             is_checkpoint = completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties
@@ -1243,13 +1239,13 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                             log_resource_usage()
                             
                             # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                        gc.collect()
+                            gc.collect()
                             
                             # 2-second delay between counties to provide buffer for cleanup
                             if completed < total_counties:
                                 time.sleep(2.0)
                     
-                        # Log any failed counties after all processing completes
+                    # Log any failed counties after all processing completes
                         if failed_counties:
                             print(f"[{run_id}] WARNING: {len(failed_counties)} counties failed: {', '.join(failed_counties)}")
                             if run_id in pipeline_runs:
@@ -1264,10 +1260,10 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                         pipeline_runs[run_id]["status"] = "cancelled"
                         pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
                         return
-                except Exception as e:
+                    except Exception as e:
                         print(f"[{run_id}] Error in pool processing: {e}")
-                    import traceback
-                    traceback.print_exc()
+                        import traceback
+                        traceback.print_exc()
                         # Save checkpoint before terminating
                         save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
                         pool.terminate()
@@ -1286,7 +1282,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed ({len(completed_counties)}/{total_counties}), starting aggregation...")
             try:
-            aggregate_final_results(run_id, state)
+                aggregate_final_results(run_id, state)
             except Exception as e:
                 print(f"[{run_id}] Error during aggregation: {e}")
                 import traceback
@@ -1384,9 +1380,9 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
-            pipeline_runs[run_id]["status"] = "error"
-            pipeline_runs[run_id]["error"] = error_msg
-            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+                pipeline_runs[run_id]["status"] = "error"
+                pipeline_runs[run_id]["error"] = error_msg
+                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
             import traceback
             traceback.print_exc()
         except Exception as e:
@@ -1410,9 +1406,9 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
-            pipeline_runs[run_id]["status"] = "error"
-            pipeline_runs[run_id]["error"] = error_msg
-        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+                pipeline_runs[run_id]["status"] = "error"
+                pipeline_runs[run_id]["error"] = error_msg
+                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
     
     # Wrapper to ensure thread always completes and updates status
     def process_all_counties_with_error_handling():
@@ -1420,8 +1416,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             process_all_counties()
         except Exception as e:
             print(f"[{run_id}] Unhandled exception in process_all_counties: {e}")
-        import traceback
-        traceback.print_exc()
+            import traceback
+            traceback.print_exc()
             # Ensure status is updated even on unhandled exceptions
             if run_id in pipeline_runs:
                 pipeline_runs[run_id]["status"] = "error"
