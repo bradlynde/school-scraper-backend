@@ -1601,15 +1601,18 @@ def run_pipeline():
     # We need to explicitly handle OPTIONS here to set CORS headers correctly
     if request.method == "OPTIONS":
         response = jsonify({})
-        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
         response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
     
+    # Ensure POST method (should never reach here for OPTIONS since handled above)
     if request.method != "POST":
         return jsonify({
             "status": "error",
-            "error": f"Method {request.method} not allowed. Use POST."
+            "error": f"Method {request.method} not allowed. Use POST.",
+            "received_method": request.method,
+            "allowed_methods": ["POST"]
         }), 405
     
     try:
@@ -1800,12 +1803,18 @@ def pipeline_status(run_id):
 # Error handler for 405 Method Not Allowed
 @app.errorhandler(405)
 def method_not_allowed(e):
-    return jsonify({
+    response = jsonify({
         "status": "error",
         "error": f"Method not allowed: {request.method}",
         "path": request.path,
-        "allowed_methods": ["POST"] if "/run-pipeline" in request.path else ["GET"]
-    }), 405
+        "received_method": request.method,
+        "allowed_methods": ["POST", "OPTIONS"] if "/run-pipeline" in request.path else ["GET"]
+    })
+    response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+    if "/run-pipeline" in request.path:
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    return response, 405
 
 # Error handler for 404 Not Found
 @app.route("/runs", methods=["GET"])
