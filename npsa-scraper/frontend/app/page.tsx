@@ -1,7 +1,7 @@
 "use client";
 // Force Vercel redeploy - 2025-12-13
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import Sidebar from "../components/Sidebar";
 
 type StepSummary = {
