@@ -626,7 +626,6 @@ export default function Home() {
 
   // Render views with fade-in transitions
   return (
-    <>
     <div className="min-h-screen h-screen bg-gray-50 flex">
       {/* Mobile Hamburger Menu */}
       <button
@@ -883,7 +882,7 @@ export default function Home() {
           const progressPercent = totalCounties > 0 ? Math.round((countiesCompleted / totalCounties) * 100) : 0;
 
           return (
-          <div className="animate-fade-in min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f9fafb' }}>
+            <div className="animate-fade-in min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f9fafb' }}>
             <div className="w-full max-w-7xl px-4 sm:px-6 md:px-8 py-12">
               {/* Header with live indicator (dashboard-3) */}
               <div className="mb-8">
@@ -1204,6 +1203,5 @@ export default function Home() {
         )}
       </div>
     </div>
-    </>
   );
 }
