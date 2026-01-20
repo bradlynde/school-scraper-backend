@@ -891,23 +891,21 @@ export default function Home() {
                     </select>
                   </div>
 
-                  {/* Preview row after state selection (dashboard-17) */}
+                  {/* Preview row after state selection */}
                   {selectedState && (() => {
                     const countyCount = STATE_COUNTY_COUNTS[selectedState] || 0;
                     const estimatedSeconds = countyCount * SECONDS_PER_COUNTY;
                     const estimatedTime = formatEstimatedTime(estimatedSeconds);
                     
                     return (
-                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-5">
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <p className="text-gray-500 mb-1">Counties</p>
-                            <p className="font-semibold text-gray-900">{countyCount}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500 mb-1">Est. Time</p>
-                            <p className="font-semibold text-gray-900">{estimatedTime}</p>
-                          </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 border-t border-gray-200">
+                        <div>
+                          <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Counties</p>
+                          <p className="text-3xl font-bold text-gray-900">{countyCount}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Est. Time</p>
+                          <p className="text-3xl font-bold text-gray-900">{estimatedTime}</p>
                         </div>
                       </div>
                     );
@@ -941,18 +939,6 @@ export default function Home() {
                     Start Scan
                   </button>
 
-                  {/* Secondary action link (dashboard-19) */}
-                  <div className="text-center">
-                    <button
-                      onClick={() => {
-                        setSelectedType("finished");
-                        setViewState("start");
-                      }}
-                      className="text-sm text-[#1e3a5f] hover:text-[#2c5282] font-medium underline"
-                    >
-                      View previous runs
-                  </button>
-                  </div>
                 </div>
               </div>
             </div>
@@ -984,15 +970,11 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Stats row: Elapsed, Status, Estimated Remaining */}
+                {/* Stats row: Elapsed, Estimated Remaining, Status */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-8 border-t border-gray-200">
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Elapsed</p>
                     <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Status</p>
-                    <p className="text-3xl font-bold text-[#1e3a5f]">{formatStatusLabel(runProgress)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Estimated Remaining</p>
@@ -1001,6 +983,10 @@ export default function Home() {
                     ) : (
                       <p className="text-3xl font-bold text-gray-900">—</p>
                     )}
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Status</p>
+                    <p className="text-3xl font-bold text-[#1e3a5f]">{formatStatusLabel(runProgress)}</p>
                   </div>
                 </div>
               </div>
