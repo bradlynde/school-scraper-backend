@@ -333,7 +333,42 @@ export default function Home() {
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
 
-  // Show login form if not authenticated
+  // Restore elapsed time from localStorage on page load
+  useEffect(() => {
+    if (typeof window !== 'undefined' && selectedRunId && !startTime) {
+      const storedStartTime = localStorage.getItem(`run_startTime_${selectedRunId}`);
+      if (storedStartTime) {
+        const start = parseInt(storedStartTime, 10);
+        setStartTime(start);
+        const elapsed = (Date.now() - start) / 1000;
+        setElapsedTimeDisplay(elapsed);
+      }
+    }
+  }, [selectedRunId, startTime]);
+
+  // Stop updating when run completes (viewState === "summary")
+  useEffect(() => {
+    if (startTime && viewState === "progress") {
+      const interval = setInterval(() => {
+        const elapsed = (Date.now() - startTime) / 1000;
+        setElapsedTimeDisplay(elapsed);
+      }, 1000);
+      return () => clearInterval(interval);
+    } else if (!startTime) {
+      // Only reset to 0 when startTime is null (before a run starts)
+      setElapsedTimeDisplay(0);
+    }
+  }, [startTime, viewState]);
+
+  useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
+
+  // Show login form if not authenticated (after all hooks are called)
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
