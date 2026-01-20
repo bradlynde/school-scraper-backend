@@ -39,6 +39,28 @@ type PipelineSummary = {
 
 type ViewState = "start" | "progress" | "summary" | "running" | "finished" | "archive";
 
+// Single source of truth for run progress/state
+type RunProgress = {
+  totalCounties: number;
+  completedCounties: number;
+  currentCountyIndex: number; // 1-based index of currently processing county
+  currentCountyName?: string;
+  schoolsProcessed: number;
+  contactsProcessed: number;
+  errorCount: number;
+  status: "idle" | "running" | "paused" | "finished" | "error";
+  elapsedMs: number;
+  etaRemainingMs?: number;
+  lastUpdatedAt?: Date;
+};
+
+// Activity log entry type
+type ActivityLogEntry = {
+  level: "info" | "success" | "warning" | "error";
+  message: string;
+  timestamp: Date;
+};
+
 const US_STATES = [
   { value: "alabama", label: "Alabama" },
   { value: "alaska", label: "Alaska" },
@@ -165,6 +187,79 @@ function formatEstimatedTime(seconds: number): string {
   }
 }
 
+// Formatting helpers for run progress
+function formatCountiesCompleted(runProgress: RunProgress): string {
+  return `${runProgress.completedCounties} / ${runProgress.totalCounties} Counties`;
+}
+
+function formatPercentComplete(runProgress: RunProgress): number {
+  if (runProgress.totalCounties === 0) return 0;
+  return Math.round((runProgress.completedCounties / runProgress.totalCounties) * 100);
+}
+
+function formatCountyPosition(runProgress: RunProgress): string {
+  const base = `County ${runProgress.currentCountyIndex} of ${runProgress.totalCounties}`;
+  if (runProgress.currentCountyName) {
+    return `${base} — ${runProgress.currentCountyName}`;
+  }
+  return base;
+}
+
+function formatStatusLabel(runProgress: RunProgress): string {
+  switch (runProgress.status) {
+    case "running":
+      return "Running";
+    case "paused":
+      return "Paused";
+    case "finished":
+      return "Complete";
+    case "error":
+      return "Attention needed";
+    case "idle":
+      return "Ready";
+    default:
+      return "Unknown";
+  }
+}
+
+// Helper function to derive runProgress from summary and state
+function deriveRunProgress(
+  summary: PipelineSummary | null,
+  elapsedTimeDisplay: number,
+  estimatedTime: number | null,
+  startTime: number | null
+): RunProgress {
+  const countiesProcessed = summary?.countiesProcessed || 0;
+  const totalCounties = summary?.totalCounties || 1;
+  const currentCountyIndex = countiesProcessed + 1;
+  
+  // Determine status from summary
+  let status: RunProgress["status"] = "idle";
+  if (summary?.status === "running") {
+    status = "running";
+  } else if (summary?.status === "paused") {
+    status = "paused";
+  } else if (summary?.status === "completed") {
+    status = "finished";
+  } else if (summary?.status === "error") {
+    status = "error";
+  }
+  
+  return {
+    totalCounties,
+    completedCounties: countiesProcessed,
+    currentCountyIndex,
+    currentCountyName: summary?.currentCounty,
+    schoolsProcessed: summary?.schoolsProcessed || summary?.schoolsFound || 0,
+    contactsProcessed: summary?.totalContacts || 0,
+    errorCount: 0, // TODO: Add error tracking from backend
+    status,
+    elapsedMs: elapsedTimeDisplay * 1000,
+    etaRemainingMs: estimatedTime ? estimatedTime * 1000 : undefined,
+    lastUpdatedAt: startTime ? new Date(startTime) : undefined,
+  };
+}
+
 // Helper function to create cumulative line graph
 function createLineGraph(data: number[], width: number = 200, height: number = 80, color: string = "#6b8e23") {
   if (!data || data.length === 0) return null;
@@ -233,6 +328,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
 
   function downloadCSV(csvContent: string, filename: string) {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -256,26 +352,18 @@ export default function Home() {
     return `${hours}h ${mins}m`;
   }
 
-  // Helper: Format status with consistent copy
-  function formatStatus(status: string, metrics?: { countiesProcessed?: number; totalCounties?: number; schoolsFound?: number; errors?: number }): string {
-    const countiesProcessed = metrics?.countiesProcessed || 0;
-    const totalCounties = metrics?.totalCounties || 0;
-    const schoolsFound = metrics?.schoolsFound || 0;
-    const errors = metrics?.errors || 0;
-
-    switch (status) {
-      case "running":
-        return `Running — County ${countiesProcessed}/${totalCounties}`;
-      case "paused":
-        return "Paused — Waiting";
-      case "completed":
-        return `Complete — ${schoolsFound} schools`;
+  // Helper: Get activity log icon based on level
+  function getActivityIcon(level: ActivityLogEntry["level"]): string {
+    switch (level) {
+      case "success":
+        return "✔";
+      case "warning":
+        return "⚠";
       case "error":
-        return `Error — ${errors} errors`;
-      case "finalizing":
-        return "Finalizing...";
+        return "✖";
+      case "info":
       default:
-        return status;
+        return "→";
     }
   }
 
@@ -367,7 +455,7 @@ export default function Home() {
         
         // If run was selected from Finished tab, show summary; otherwise default behavior
         if (selectedRunId === runId && selectedType === 'finished') {
-          setViewState("summary");
+        setViewState("summary");
         } else if (selectedRunId === runId) {
           setViewState("summary");
         } else {
@@ -414,15 +502,32 @@ export default function Home() {
                 return newSet;
               });
               setCompletedCounties(prev => [...prev, completedCounty]);
+              
+              // Add activity log entry for county completion
+              setActivityLog(prev => [...prev, {
+                level: "success",
+                message: `County ${prevCountiesProcessed + 1} completed`,
+                timestamp: new Date(),
+              }]);
             }
           }
+          
+          // Check if a new county started
+          if (data.currentCounty && data.currentCounty !== summary.currentCounty) {
+            setActivityLog(prev => [...prev, {
+              level: "info",
+              message: `County ${countiesProcessed + 1} started`,
+              timestamp: new Date(),
+            }]);
+          }
+        } else if (data.currentCounty && countiesProcessed === 0) {
+          // First county starting
+          setActivityLog(prev => [...prev, {
+            level: "info",
+            message: "County 1 started",
+            timestamp: new Date(),
+          }]);
         }
-        
-        let statusMsg = data.statusMessage || "Processing...";
-        if (data.currentCounty) {
-          statusMsg = `Processing ${data.currentCounty} County (${countiesProcessed + 1} of ${totalCounties})`;
-        }
-        setStatus(statusMsg);
         
         // If run was selected from Running/Finished tab, switch to progress view
         if (selectedRunId === runId && (selectedType === 'running' || selectedType === 'finished')) {
@@ -485,7 +590,7 @@ export default function Home() {
           errorMessage = errorData.error || errorData.message || errorMessage;
         } catch {
           // If JSON parse fails, use text response
-          const errorText = await response.text();
+        const errorText = await response.text();
           if (errorText) {
             errorMessage = errorText;
           }
@@ -554,6 +659,8 @@ export default function Home() {
     setStartTime(null);
     setElapsedTimeDisplay(0);
     setCompletedCounties([]);
+    setCompletedCountiesSet(new Set());
+    setActivityLog([]);
     setSelectedRunId(null);
     setIsRunning(false);
     
@@ -568,19 +675,6 @@ export default function Home() {
     }
   }
 
-  // Helper function to get current county
-  function getCurrentCounty() {
-    if (summary?.currentCounty) return summary.currentCounty;
-    if (summary?.statusMessage) {
-      const statusMsg = summary.statusMessage.replace(/^Processing\s+/, '');
-      return statusMsg.split('(')[0].trim();
-    }
-    const countiesProcessed = summary?.countiesProcessed || 0;
-    const totalCounties = summary?.totalCounties || 0;
-    if (countiesProcessed > 0) return `${countiesProcessed}/${totalCounties} counties`;
-    if (totalCounties > 0) return "Starting...";
-    return "Initializing...";
-  }
 
   // Restore elapsed time from localStorage on page load
   useEffect(() => {
@@ -618,11 +712,8 @@ export default function Home() {
     };
   }, [pollingInterval]);
 
-  // Calculate progress view variables
-  const countiesProcessed = summary?.countiesProcessed || 0;
-  const totalCounties = summary?.totalCounties || 0;
-  const schoolsProcessed = summary?.schoolsProcessed || summary?.schoolsFound || 0;
-  const currentCounty = getCurrentCounty();
+  // Derive runProgress from summary and state
+  const runProgress = deriveRunProgress(summary, elapsedTimeDisplay, estimatedTime, startTime);
 
   // Render views with fade-in transitions
   return (
@@ -870,25 +961,14 @@ export default function Home() {
         )}
 
         {/* PROGRESS VIEW - Show when progress state OR when run selected from Running tab */}
-        {viewState === "progress" && summary && (() => {
-          // Centralized computed run state (dashboard-28)
-          const countiesCompleted = summary.countiesProcessed || 0;
-          const totalCounties = summary.totalCounties || 1;
-          const currentCountyIndex = countiesCompleted + 1;
-          const currentCountyName = summary.currentCounty || "Starting...";
-          const elapsedTime = elapsedTimeDisplay;
-          const estimatedRemaining = estimatedTime || 0;
-          const runStatus = summary.status || "running";
-          const progressPercent = totalCounties > 0 ? Math.round((countiesCompleted / totalCounties) * 100) : 0;
-
-          return (
+        {viewState === "progress" && summary && (
             <div className="animate-fade-in min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f9fafb' }}>
             <div className="w-full max-w-7xl px-4 sm:px-6 md:px-8 py-12">
-              {/* Header with live indicator (dashboard-3) */}
+              {/* Header with live indicator */}
               <div className="mb-8">
                 <div className="flex items-center gap-3">
                   <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Progress</h1>
-                  {runStatus === "running" && (
+                  {runProgress.status === "running" && (
                     <div className="relative">
                       <div className="absolute inset-0 w-3 h-3 rounded-full bg-[#1e3a5f] opacity-30 animate-ping"></div>
                       <div className="relative w-3 h-3 rounded-full bg-[#1e3a5f]"></div>
@@ -905,54 +985,46 @@ export default function Home() {
                     {/* Primary: X/Y Counties, % complete */}
                     <div className="mb-8">
                       <div className="flex items-baseline gap-3 mb-4">
-                        <span className="text-6xl font-bold text-[#1e3a5f]">{countiesCompleted}</span>
-                        <span className="text-3xl text-gray-500">/ {totalCounties}</span>
-                        <span className="text-2xl font-semibold text-gray-600 ml-auto">{progressPercent}%</span>
+                        <span className="text-6xl font-bold text-[#1e3a5f]">{runProgress.completedCounties}</span>
+                        <span className="text-3xl text-gray-500">/ {runProgress.totalCounties}</span>
+                        <span className="text-2xl font-semibold text-gray-600">Counties</span>
+                        <span className="text-2xl font-semibold text-gray-600 ml-auto">{formatPercentComplete(runProgress)}% complete</span>
                       </div>
                       
-                      {/* Progress bar (dashboard-4) */}
+                      {/* Progress bar */}
                       <div className="w-full bg-gray-200 rounded-full h-3 mb-5">
                         <div 
                           className="bg-[#1e3a5f] h-3 rounded-full transition-all duration-500"
-                          style={{ width: `${progressPercent}%` }}
+                          style={{ width: `${formatPercentComplete(runProgress)}%` }}
                         ></div>
                       </div>
                       
-                      {/* Primary text (dashboard-7) - Typographic hierarchy (dashboard-25) */}
+                      {/* Primary text */}
                       <p className="text-2xl font-bold text-gray-900 mb-2">
-                        Processing County {currentCountyIndex} of {totalCounties}
+                        {formatCountyPosition(runProgress).split(' — ')[0]}
                       </p>
                       
-                      {/* Subtext (dashboard-8) - Muted secondary label */}
-                      <p className="text-sm text-gray-500 font-medium">Discovering and processing schools…</p>
+                      {/* Subtext */}
+                      <p className="text-sm text-gray-500 font-medium">Discovering schools in this county…</p>
                     </div>
 
-                    {/* 3 sub-metrics row - Typographic hierarchy (dashboard-25) */}
+                    {/* 3 sub-metrics row */}
                     <div className="grid grid-cols-3 gap-8 pt-8 border-t border-gray-200">
                       <div>
                         <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Schools</p>
-                        <p className="text-3xl font-bold text-gray-900">{schoolsProcessed}</p>
+                        <p className="text-3xl font-bold text-gray-900">{runProgress.schoolsProcessed}</p>
                       </div>
                       <div>
                         <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Contacts</p>
-                        <p className="text-3xl font-bold text-gray-900">{summary.totalContacts || 0}</p>
+                        <p className="text-3xl font-bold text-gray-900">{runProgress.contactsProcessed}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Current</p>
-                        <p className="text-xl font-semibold text-gray-900 truncate" title={currentCountyName}>
-                          {truncateText(currentCountyName, 20)}
-                        </p>
+                        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-2">Errors</p>
+                        <p className="text-3xl font-bold text-gray-900">{runProgress.errorCount}</p>
                       </div>
                     </div>
-
-                    {/* Last updated footer (dashboard-5) */}
-                    {startTime && (
-                      <div className="mt-4 pt-4 border-t border-gray-100">
-                        <p className="text-xs text-gray-400">Last updated: {formatRelativeTime(startTime)}</p>
-                        </div>
-                    )}
-                      </div>
-                      </div>
+                  </div>
+                    </div>
 
                 {/* RunStatsCard - 30-35% width (3 columns) */}
                 <div className="lg:col-span-3">
@@ -960,19 +1032,27 @@ export default function Home() {
                     <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-8">Run Statistics</h3>
                     <div className="flex-1 flex flex-col justify-center space-y-8">
                       <div>
-                        <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Elapsed Time</p>
-                        <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTime)}</p>
-                      </div>
-                      {estimatedRemaining > 0 && (
+                        <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Elapsed</p>
+                        <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
+                        </div>
+                      {runProgress.etaRemainingMs && runProgress.etaRemainingMs > 0 ? (
                         <div>
                           <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Estimated Remaining</p>
-                          <p className="text-3xl font-bold text-gray-900">{formatTime(estimatedRemaining)}</p>
-                        </div>
+                          <p className="text-3xl font-bold text-gray-900">{formatTime(runProgress.etaRemainingMs / 1000)}</p>
+                      </div>
+                      ) : (
+                        <div>
+                          <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Estimated Remaining</p>
+                          <p className="text-3xl font-bold text-gray-900">—</p>
+                      </div>
                       )}
                       <div>
                         <p className="text-xs text-gray-500 mb-3 uppercase tracking-wide font-medium">Status</p>
-                        <p className="text-lg font-semibold text-[#1e3a5f]">
-                          {formatStatus(runStatus, { countiesProcessed, totalCounties, schoolsFound: schoolsProcessed })}
+                        <p className="text-3xl font-bold text-[#1e3a5f] mb-1">
+                          {formatStatusLabel(runProgress)}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          {formatCountyPosition(runProgress).split(' — ')[0]}
                         </p>
                       </div>
                     </div>
@@ -980,12 +1060,11 @@ export default function Home() {
                     </div>
                   </div>
 
-              {/* Activity Log Section - Increased spacing (dashboard-26) */}
+              {/* Activity Log Section */}
               <div className="space-y-8 mt-10">
-
-                {/* Activity Log Panel (dashboard-11, dashboard-12, dashboard-13, dashboard-14, dashboard-15) */}
+                {/* Activity Log Panel */}
                 <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
-                  {/* Header with controls (dashboard-13) - Typographic hierarchy (dashboard-25) */}
+                  {/* Header with controls */}
                   <div className="flex items-center justify-between mb-8">
                     <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Activity</h3>
                     <div className="flex items-center gap-4">
@@ -998,44 +1077,46 @@ export default function Home() {
                   
                   {/* Activity entries with severity icons and timestamps */}
                     <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {summary?.currentCounty && (
-                      <div className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                        <div className="flex-1">
-                          <span className="text-[#1e3a5f] font-semibold">Processing {summary.currentCounty} County</span>
-                        </div>
-                        {startTime && (
-                          <div className="text-xs text-gray-400 flex-shrink-0">
-                            {formatRelativeTime(startTime)}
+                    {activityLog.length > 0 ? (
+                      activityLog.slice().reverse().map((entry, index) => (
+                        <div key={index} className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors">
+                          <div className="flex-shrink-0 w-6 text-center">
+                            <span className={`${
+                              entry.level === "error" ? "text-red-600" :
+                              entry.level === "warning" ? "text-yellow-600" :
+                              entry.level === "success" ? "text-green-600" :
+                              "text-[#1e3a5f]"
+                            }`}>
+                              {getActivityIcon(entry.level)}
+                            </span>
                           </div>
-                        )}
+                          <div className="flex-1">
+                            <span className={`${
+                              entry.level === "error" ? "text-red-700" :
+                              entry.level === "warning" ? "text-yellow-700" :
+                              entry.level === "success" ? "text-green-700" :
+                              "text-gray-700"
+                            }`}>
+                              {entry.message}
+                            </span>
                         </div>
-                      )}
-                      {completedCounties.length > 0 ? (
-                      completedCounties.slice().reverse().map((county, index) => {
-                        const timestamp = startTime ? startTime + (index * 60000) : Date.now();
-                        return (
-                          <div key={index} className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                            <div className="flex-1">
-                              <span className="text-gray-700 font-medium">County completed: {county}</span>
-                        </div>
-                            <div className="text-xs text-gray-400 flex-shrink-0">
-                              {formatRelativeTime(timestamp)}
-                    </div>
-                  </div>
-                        );
-                      })
-                    ) : (
+                          <div className="text-xs text-gray-400 flex-shrink-0">
+                            {formatRelativeTime(entry.timestamp.getTime())}
+                          </div>
+                          </div>
+                        ))
+                      ) : (
                       <div className="flex items-center gap-4 text-sm py-2 px-3 text-gray-500">
                         <div className="flex-1">
-                          <span>Waiting for county completion…</span>
-                      </div>
+                          <span>Waiting for activity…</span>
+                        </div>
                         </div>
                       )}
                     </div>
                   </div>
                 </div>
 
-                {/* Results Preview (Optional) - dashboard-27 */}
+                {/* Results Preview (Optional) */}
                 {summary && (summary.totalContacts || 0) > 0 && (
                   <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
                     <div className="flex items-center justify-between mb-6">
@@ -1043,7 +1124,7 @@ export default function Home() {
                       <span className="text-xs text-gray-500">
                         {summary.totalContacts || 0} total contacts
                       </span>
-                        </div>
+                      </div>
                     <div className="space-y-3">
                       {/* Show last 5 schools if available */}
                       {summary.countyContacts && summary.countyContacts.length > 0 ? (
@@ -1055,20 +1136,19 @@ export default function Home() {
                           Contact details will appear here as counties are processed
                       </div>
                       )}
-                      {error && (
+                  {error && (
                         <div className="mt-4 pt-4 border-t border-gray-200">
                           <div className="flex items-center gap-2 text-sm text-red-600">
                             <span>Errors detected - check activity log for details</span>
+                        </div>
+                        </div>
+                      )}
                       </div>
                     </div>
                   )}
-                </div>
-              </div>
-                )}
-            </div>
           </div>
-          );
-        })()}
+          </div>
+        )}
 
         {/* SUMMARY VIEW - Show when summary state */}
         {viewState === "summary" && summary && (
