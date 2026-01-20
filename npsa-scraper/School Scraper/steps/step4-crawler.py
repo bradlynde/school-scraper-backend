@@ -1032,6 +1032,3 @@ if __name__ == "__main__":
                 driver.quit()
         except:
             pass  # Don't let cleanup fail
-        finally:
-            # No cleanup needed - subprocess will die naturally and take children with it
-                pass
