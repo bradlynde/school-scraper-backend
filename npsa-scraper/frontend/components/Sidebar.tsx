@@ -52,19 +52,33 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
   const formatDate = (dateString?: string) => {
     if (!dateString) return "Unknown";
     try {
+      // Parse the date string - handle both ISO strings and other formats
       const date = new Date(dateString);
+      
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return dateString;
+      }
+      
       // Convert to US Central Time
-      return date.toLocaleDateString('en-US', { 
+      const centralDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+      
+      // Format date and time in Central Time
+      const dateStr = date.toLocaleDateString('en-US', { 
         timeZone: 'America/Chicago',
         month: 'numeric',
         day: 'numeric',
         year: 'numeric'
-      }) + " " + date.toLocaleTimeString('en-US', { 
+      });
+      
+      const timeStr = date.toLocaleTimeString('en-US', { 
         timeZone: 'America/Chicago',
         hour: '2-digit', 
         minute: '2-digit',
         hour12: true
       });
+      
+      return `${dateStr} ${timeStr}`;
     } catch {
       return dateString;
     }
@@ -105,9 +119,9 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
   };
 
   return (
-    <aside className="h-full w-64 bg-white border-r border-gray-200 shadow-sm flex flex-col" style={{ backgroundColor: '#fafafa' }}>
+    <aside className="h-full w-80 bg-white border-r border-gray-200 shadow-sm flex flex-col" style={{ backgroundColor: '#1e3a5f' }}>
         {/* Logo Section */}
-        <div className="p-6 border-b border-gray-200 flex items-center justify-center">
+        <div className="p-6 border-b border-gray-300 flex items-center justify-center" style={{ borderColor: 'rgba(255, 255, 255, 0.2)' }}>
           <Image
             src="/npsa-logo.png"
             alt="Nonprofit Security Advisors"
@@ -119,13 +133,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
         </div>
 
         {/* Navigation Items */}
-      <nav className="p-4 space-y-2 border-b border-gray-200">
+      <nav className="p-4 space-y-2 border-b border-gray-300" style={{ borderColor: 'rgba(255, 255, 255, 0.2)' }}>
           <button
             onClick={() => onTabChange('school')}
             className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
               activeTab === 'school'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
+                ? 'bg-white text-[#1e3a5f] shadow-md'
+                : 'text-white hover:bg-white/20'
             }`}
           >
             <svg
@@ -148,8 +162,8 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
             onClick={() => onTabChange('church')}
             className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
               activeTab === 'church'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
+                ? 'bg-white text-[#1e3a5f] shadow-md'
+                : 'text-white hover:bg-white/20'
             }`}
           >
             <svg
@@ -172,8 +186,8 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
           onClick={() => onTabChange('running')}
           className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
             activeTab === 'running'
-              ? 'bg-[#1e3a5f] text-white shadow-md'
-              : 'text-gray-700 hover:bg-gray-100'
+              ? 'bg-white text-[#1e3a5f] shadow-md'
+              : 'text-white hover:bg-white/20'
           }`}
         >
           <svg
@@ -202,8 +216,8 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
           onClick={() => onTabChange('finished')}
           className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
             activeTab === 'finished'
-              ? 'bg-[#1e3a5f] text-white shadow-md'
-              : 'text-gray-700 hover:bg-gray-100'
+              ? 'bg-white text-[#1e3a5f] shadow-md'
+              : 'text-white hover:bg-white/20'
           }`}
         >
           <svg
@@ -226,8 +240,8 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
             onClick={() => onTabChange('archive')}
             className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
               activeTab === 'archive'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
+                ? 'bg-white text-[#1e3a5f] shadow-md'
+                : 'text-white hover:bg-white/20'
             }`}
           >
             <svg
@@ -251,11 +265,11 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
       {(activeTab === 'running' || activeTab === 'finished' || activeTab === 'archive') && (
         <div className="flex-1 overflow-y-auto">
           <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+            <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider mb-3">
               {activeTab === 'running' ? 'Active Runs' : activeTab === 'archive' ? 'Archived Runs' : 'Completed Runs'}
             </h3>
             {loading ? (
-              <div className="text-center text-gray-500 py-4">Loading...</div>
+              <div className="text-center text-white/70 py-4">Loading...</div>
             ) : (
               (() => {
                 const filteredRuns = runs.filter(run => {
@@ -270,7 +284,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                 
                 if (filteredRuns.length === 0) {
                   return (
-                    <div className="text-center text-gray-500 py-4 text-sm">
+                    <div className="text-center text-white/70 py-4 text-sm">
                       {activeTab === 'running' ? 'No active runs' : activeTab === 'archive' ? 'No archived runs' : 'No completed runs'}
                     </div>
                   );
@@ -286,7 +300,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                       return (
                       <div
                         key={run.run_id}
-                        className="p-4 bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-lg transition-all relative group"
+                        className="p-4 bg-white/10 rounded-2xl border border-white/20 shadow-sm hover:shadow-lg transition-all relative group"
                         style={{ borderRadius: '16px' }}
                       >
                         <div 
@@ -295,10 +309,10 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                         >
                           <div className="flex items-start justify-between mb-3">
                             <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-sm text-gray-900 truncate">
+                              <div className="font-semibold text-sm text-white truncate">
                                 {run.state?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown State'}
                               </div>
-                              <div className="text-xs text-gray-500 mt-1">
+                              <div className="text-xs text-white/70 mt-1">
                                 {formatDate(run.created_at)}
                               </div>
                             </div>
@@ -319,7 +333,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                           {/* Tiny progress indicator (dashboard-21) */}
                           {run.status === "running" && totalCount > 0 && (
                             <div className="mb-2">
-                              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                              <div className="flex items-center justify-between text-xs text-white/80 mb-1">
                                 <span>{completedCount}/{totalCount}</span>
                                 <span>{progressPercent}%</span>
                               </div>
@@ -333,14 +347,14 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                           )}
                           
                           {run.total_contacts !== undefined && (
-                            <div className="text-xs text-gray-600 mt-2">
+                            <div className="text-xs text-white/80 mt-2">
                               {run.total_contacts} contacts
                             </div>
                           )}
                         </div>
                         
                         {/* Quick action icon buttons (dashboard-22) */}
-                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-white/20">
                           {/* Delete button - trash icon */}
                           <button
                             onClick={async (e) => {

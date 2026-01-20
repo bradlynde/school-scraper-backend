@@ -717,7 +717,7 @@ export default function Home() {
 
   // Render views with fade-in transitions
   return (
-    <div className="min-h-screen h-screen bg-white flex">
+    <div className="min-h-screen h-screen bg-gray-50 flex">
       {/* Mobile Hamburger Menu */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -736,7 +736,7 @@ export default function Home() {
         />
       )}
 
-      <div className={`fixed left-0 top-0 h-screen w-64 z-50 transition-transform duration-300 ${
+      <div className={`fixed left-0 top-0 h-screen w-80 z-50 transition-transform duration-300 ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
       } md:translate-x-0 md:relative md:z-auto md:h-full flex-shrink-0`}>
         <Sidebar 
@@ -948,7 +948,7 @@ export default function Home() {
 
         {/* PROGRESS VIEW - Show when progress state OR when run selected from Running tab */}
         {viewState === "progress" && summary && (
-            <div className="animate-fade-in min-h-screen flex items-center justify-center" style={{ backgroundColor: '#ffffff' }}>
+            <div className="animate-fade-in min-h-screen flex items-center justify-center bg-gray-50">
             <div className="w-full max-w-4xl px-4 sm:px-6 md:px-8 py-12">
               {/* Single Card with all progress information */}
               <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
