@@ -42,6 +42,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from pipeline import StreamingPipeline
 from assets.shared.models import Contact
 
+# Import authentication module
+from external_services.auth import require_auth, verify_password, generate_token
+
 # Handle hyphens in filenames using importlib.util
 import importlib.util
 _parent_dir = Path(__file__).parent.parent
@@ -60,8 +63,13 @@ step13_final_compiler = load_module_with_hyphen('step13-compiler.py', 'step13_co
 
 app = Flask(__name__)
 
-# Enable CORS - allow all origins for now (restrict in production)
-CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type"]}})
+# CORS configuration - restrict to allowed origin if set, otherwise allow current API origin
+ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "*")
+CORS(app, resources={r"/*": {
+    "origins": ALLOWED_ORIGIN,
+    "methods": ["GET", "POST", "DELETE", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization"]
+}})
 
 # In-memory storage for pipeline runs (use Redis or database in production)
 pipeline_runs = {}
@@ -679,10 +687,10 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
     run_dir.mkdir(parents=True, exist_ok=True)
     result_file = str(run_dir / f"{county.replace(' ', '_')}_result.json")
     
-    # Update progress
+        # Update progress
     pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
-    pipeline_runs[run_id]["currentCounty"] = county
-    pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
+        pipeline_runs[run_id]["currentCounty"] = county
+        pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
     pipeline_runs[run_id]["currentStep"] = 1
     
     # Start subprocess to run county
@@ -863,8 +871,8 @@ def aggregate_final_results(run_id: str, state: str):
             def finalize_completion():
                 time.sleep(120)  # 2-minute cooldown
                 if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "finalizing":
-                    pipeline_runs[run_id]["status"] = "completed"
-                    pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found."
+            pipeline_runs[run_id]["status"] = "completed"
+            pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found."
                     pipeline_runs[run_id]["completedAt"] = time.time()
             
             finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
@@ -1171,11 +1179,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                     completed_counties.append(county)
                             
                             completed = len(completed_counties)
-                            progress_pct = int((completed / total_counties) * 100)
+                    progress_pct = int((completed / total_counties) * 100)
                             
                             # Update pipeline_runs state
                             with progress_lock:
-                                pipeline_runs[run_id]["progress"] = progress_pct
+                    pipeline_runs[run_id]["progress"] = progress_pct
                                 pipeline_runs[run_id]["statusMessage"] = f"Processing {completed}/{total_counties} counties..."
                                 pipeline_runs[run_id]["countiesProcessed"] = completed
                                 # Set currentCounty to show progress (since we're processing in parallel, show the count)
@@ -1202,7 +1210,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                 pipeline_runs[run_id]["countySchools"].append(result.get('schools', 0))
                             
                             print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
-                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
+                    print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
                     
                             # Save checkpoint after every county (CHECKPOINT_BATCH_SIZE=1) or at completion
                             # This is for progress tracking only - runs always start fresh, no resume logic
@@ -1239,7 +1247,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                             log_resource_usage()
                             
                             # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                            gc.collect()
+                        gc.collect()
                             
                             # 2-second delay between counties to provide buffer for cleanup
                             if completed < total_counties:
@@ -1254,10 +1262,10 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                         pipeline_runs[run_id]["status"] = "cancelled"
                         pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
                         return
-                    except Exception as e:
+                except Exception as e:
                         print(f"[{run_id}] Error in pool processing: {e}")
-                        import traceback
-                        traceback.print_exc()
+                    import traceback
+                    traceback.print_exc()
                         # Save checkpoint before terminating
                         save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
                         pool.terminate()
@@ -1282,7 +1290,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed ({len(completed_counties)}/{total_counties}), starting aggregation...")
             try:
-                aggregate_final_results(run_id, state)
+            aggregate_final_results(run_id, state)
             except Exception as e:
                 print(f"[{run_id}] Error during aggregation: {e}")
                 import traceback
@@ -1380,9 +1388,9 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "error"
-                pipeline_runs[run_id]["error"] = error_msg
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            pipeline_runs[run_id]["status"] = "error"
+            pipeline_runs[run_id]["error"] = error_msg
+            pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
             import traceback
             traceback.print_exc()
         except Exception as e:
@@ -1406,9 +1414,9 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "error"
-                pipeline_runs[run_id]["error"] = error_msg
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            pipeline_runs[run_id]["status"] = "error"
+            pipeline_runs[run_id]["error"] = error_msg
+        pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
     
     # Wrapper to ensure thread always completes and updates status
     def process_all_counties_with_error_handling():
@@ -1416,8 +1424,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             process_all_counties()
         except Exception as e:
             print(f"[{run_id}] Unhandled exception in process_all_counties: {e}")
-            import traceback
-            traceback.print_exc()
+        import traceback
+        traceback.print_exc()
             # Ensure status is updated even on unhandled exceptions
             if run_id in pipeline_runs:
                 pipeline_runs[run_id]["status"] = "error"
@@ -1458,11 +1466,94 @@ def root():
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check endpoint"""
+    """Health check endpoint - public"""
     return jsonify({"status": "healthy"}), 200
 
 
+# Rate limiting for login endpoint (simple in-memory implementation)
+login_attempts = {}
+LOGIN_RATE_LIMIT = 5  # Max attempts per IP
+LOGIN_RATE_WINDOW = 300  # 5 minutes in seconds
+
+def check_rate_limit(ip_address: str) -> bool:
+    """Check if IP has exceeded rate limit"""
+    current_time = time.time()
+    if ip_address not in login_attempts:
+        login_attempts[ip_address] = []
+    
+    # Clean old attempts
+    login_attempts[ip_address] = [
+        attempt_time for attempt_time in login_attempts[ip_address]
+        if current_time - attempt_time < LOGIN_RATE_WINDOW
+    ]
+    
+    # Check if limit exceeded
+    if len(login_attempts[ip_address]) >= LOGIN_RATE_LIMIT:
+        return False
+    
+    # Record this attempt
+    login_attempts[ip_address].append(current_time)
+    return True
+
+
+@app.route("/login", methods=["POST", "OPTIONS"])
+def login():
+    """Login endpoint - authenticate user and return JWT token"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    try:
+        # Rate limiting
+        client_ip = request.remote_addr or "unknown"
+        if not check_rate_limit(client_ip):
+            return jsonify({
+                "status": "error",
+                "error": "Too many login attempts. Please try again later."
+            }), 429
+        
+        data = request.get_json() or {}
+        username = data.get("username", "").strip()
+        password = data.get("password", "")
+        
+        if not username or not password:
+            return jsonify({
+                "status": "error",
+                "error": "Username and password are required"
+            }), 400
+        
+        # Verify credentials
+        if not verify_password(username, password):
+            return jsonify({
+                "status": "error",
+                "error": "Invalid username or password"
+            }), 401
+        
+        # Generate token
+        token = generate_token(username)
+        
+        response = jsonify({
+            "status": "success",
+            "token": token,
+            "username": username
+        })
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        return response, 200
+        
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        return error_response, 500
+
+
 @app.route("/run-pipeline", methods=["POST", "OPTIONS"])
+@require_auth
 def run_pipeline():
     """Start the pipeline and return run ID for status polling"""
     if request.method == "OPTIONS":
@@ -1571,6 +1662,7 @@ def run_pipeline():
 
 
 @app.route("/pipeline-status/<run_id>", methods=["GET"])
+@require_auth
 def pipeline_status(run_id):
     """Get status of a running pipeline"""
     if run_id not in pipeline_runs:
@@ -1667,6 +1759,7 @@ def method_not_allowed(e):
 
 # Error handler for 404 Not Found
 @app.route("/runs", methods=["GET"])
+@require_auth
 def list_runs():
     """List all runs from persistent storage"""
     try:
@@ -1692,6 +1785,7 @@ def list_runs():
 
 
 @app.route("/runs/<run_id>/stop", methods=["POST", "OPTIONS"])
+@require_auth
 def stop_run(run_id: str):
     """Stop a running pipeline"""
     if request.method == "OPTIONS":
@@ -1751,6 +1845,7 @@ def stop_run(run_id: str):
 
 
 @app.route("/runs/<run_id>/resume", methods=["POST", "OPTIONS"])
+@require_auth
 def resume_run(run_id: str):
     """Resume a run from checkpoint. Loads checkpoint and skips counties that have data files."""
     if request.method == "OPTIONS":
@@ -1830,6 +1925,7 @@ def resume_run(run_id: str):
 
 
 @app.route("/runs/<run_id>/delete", methods=["DELETE", "OPTIONS"])
+@require_auth
 def delete_run(run_id: str):
     """Delete a run - marks as deleted in metadata instead of actually deleting files.
     If run is running, stops it first."""
@@ -1892,6 +1988,7 @@ def delete_run(run_id: str):
 
 
 @app.route("/runs/<run_id>/archive", methods=["POST", "OPTIONS"])
+@require_auth
 def archive_run(run_id: str):
     """Archive a completed run"""
     if request.method == "OPTIONS":
@@ -1937,6 +2034,7 @@ def archive_run(run_id: str):
 
 
 @app.route("/runs/<run_id>/unarchive", methods=["POST", "OPTIONS"])
+@require_auth
 def unarchive_run(run_id: str):
     """Unarchive a run"""
     if request.method == "OPTIONS":
@@ -1982,6 +2080,7 @@ def unarchive_run(run_id: str):
 
 
 @app.route("/runs/<run_id>/download", methods=["GET"])
+@require_auth
 def download_run_csv(run_id: str):
     """Download the final CSV for a completed run"""
     try:

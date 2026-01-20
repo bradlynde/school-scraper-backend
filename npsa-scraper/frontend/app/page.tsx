@@ -3,6 +3,8 @@
 
 import React, { useState, useEffect } from "react";
 import Sidebar from "../components/Sidebar";
+import LoginForm from "../components/LoginForm";
+import { useAuth } from "../contexts/AuthContext";
 
 type StepSummary = {
   name: string;
@@ -309,6 +311,7 @@ function createLineGraph(data: number[], width: number = 200, height: number = 8
 }
 
 export default function Home() {
+  const { isAuthenticated, token, loading, logout } = useAuth();
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
   const [selectedType, setSelectedType] = useState<"school" | "church" | "running" | "finished" | "archive">("school");
@@ -329,6 +332,19 @@ export default function Home() {
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+
+  // Show login form if not authenticated
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
+        <div className="text-gray-600">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginForm />;
+  }
 
   function downloadCSV(csvContent: string, filename: string) {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -391,10 +407,15 @@ export default function Home() {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
         },
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          logout();
+          return;
+        }
         if (response.status === 404) {
           const errorData = await response.json().catch(() => ({ error: "Run ID not found" }));
           if (pollingInterval) {
@@ -575,6 +596,7 @@ export default function Home() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
         },
         body: JSON.stringify({ 
           state: selectedState.toLowerCase().replace(' ', '_'),
@@ -583,6 +605,11 @@ export default function Home() {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          // Unauthorized - token expired or invalid
+          logout();
+          return;
+        }
         // Try to parse error response as JSON
         let errorMessage = `Backend responded with ${response.status}: ${response.statusText}`;
         try {
@@ -760,7 +787,11 @@ export default function Home() {
             const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
             try {
               // First, try to get run from /runs endpoint to get metadata
-              const runsResponse = await fetch(`${apiUrl}/runs`);
+              const runsResponse = await fetch(`${apiUrl}/runs`, {
+                headers: {
+                  "Authorization": `Bearer ${token}`,
+                },
+              });
               let runMetadata = null;
               if (runsResponse.ok) {
                 const runsData = await runsResponse.json();
@@ -768,7 +799,11 @@ export default function Home() {
               }
               
               // Then try pipeline-status endpoint
-              const response = await fetch(`${apiUrl}/pipeline-status/${runId}`);
+              const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
+                headers: {
+                  "Authorization": `Bearer ${token}`,
+                },
+              });
               if (response.ok) {
                 const data = await response.json();
                 if (data.status === "running") {
@@ -813,6 +848,10 @@ export default function Home() {
                   setViewState("summary");
                   setIsRunning(false);
                 }
+              } else if (response.status === 401) {
+                logout();
+              } else if (response.status === 401) {
+                logout();
               } else if (response.status === 410 || response.status === 404) {
                 // Run is completed and status endpoint no longer available, use metadata
                 if (runMetadata) {
@@ -1047,7 +1086,11 @@ export default function Home() {
                         if (selectedRunId) {
                           const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-200036585956.us-central1.run.app").replace(/\/+$/, '');
                           try {
-                            const response = await fetch(`${apiUrl}/runs/${selectedRunId}/download`);
+                            const response = await fetch(`${apiUrl}/runs/${selectedRunId}/download`, {
+                              headers: {
+                                "Authorization": `Bearer ${token}`,
+                              },
+                            });
                             if (response.ok) {
                               const blob = await response.blob();
                               const url = window.URL.createObjectURL(blob);
