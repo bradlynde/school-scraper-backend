@@ -635,6 +635,21 @@ export default function Home() {
       console.log("Starting pipeline with API URL:", apiUrl);
       console.log("Request payload:", { state: selectedState.toLowerCase().replace(' ', '_'), type: selectedType });
 
+      // First, verify the backend is reachable
+      try {
+        const healthCheck = await fetch(`${apiUrl}/health`, {
+          method: "GET",
+          signal: AbortSignal.timeout(5000), // 5 second timeout for health check
+        });
+        if (!healthCheck.ok) {
+          throw new Error(`Backend health check failed with status ${healthCheck.status}`);
+        }
+        console.log("Backend health check passed");
+      } catch (healthError) {
+        console.error("Backend health check failed:", healthError);
+        throw new Error(`Cannot reach backend API at ${apiUrl}. The backend server may be down or unreachable.`);
+      }
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
