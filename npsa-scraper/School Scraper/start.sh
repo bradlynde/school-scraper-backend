@@ -30,12 +30,12 @@ fi
 CURRENT_PID=$$
 PID1_NAME=$(ps -p 1 -o comm= 2>/dev/null || echo "unknown")
 if [ "$CURRENT_PID" = "1" ] && [ "$PID1_NAME" != "dumb-init" ] && [ -n "$DUMB_INIT_PATH" ]; then
-    exec "$DUMB_INIT_PATH" -- "$0" "$@"
+        exec "$DUMB_INIT_PATH" -- "$0" "$@"
 fi
 
 # If PID 1 is not dumb-init and we're not PID 1, try to exec into dumb-init
 if [ "$PID1_NAME" != "dumb-init" ] && [ "$CURRENT_PID" != "1" ] && [ -n "$DUMB_INIT_PATH" ]; then
-    exec "$DUMB_INIT_PATH" -- "$0" "$@"
+        exec "$DUMB_INIT_PATH" -- "$0" "$@"
 fi
 
 # Get port from environment variable (default 8080)

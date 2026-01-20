@@ -319,7 +319,7 @@ export default function Home() {
         
         // If run was selected from Finished tab, show summary; otherwise default behavior
         if (selectedRunId === runId && selectedType === 'finished') {
-          setViewState("summary");
+        setViewState("summary");
         } else if (selectedRunId === runId) {
           setViewState("summary");
         } else {
@@ -850,7 +850,7 @@ export default function Home() {
                       className="text-sm text-[#1e3a5f] hover:text-[#2c5282] font-medium underline"
                     >
                       View previous runs
-                    </button>
+                  </button>
                   </div>
                 </div>
               </div>
@@ -872,9 +872,8 @@ export default function Home() {
           const progressPercent = totalCounties > 0 ? Math.round((countiesCompleted / totalCounties) * 100) : 0;
 
           return (
-          <div className="animate-fade-in min-h-screen" style={{ backgroundColor: '#f9fafb' }}>
-            <div className="flex items-center justify-center py-12 px-4 sm:px-6 md:px-8">
-            <div className="w-full max-w-7xl">
+          <div className="animate-fade-in min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f9fafb' }}>
+            <div className="w-full max-w-7xl px-4 sm:px-6 md:px-8 py-12">
               {/* Header with live indicator (dashboard-3) */}
               <div className="mb-8">
                 <div className="flex items-center gap-3">
@@ -940,10 +939,10 @@ export default function Home() {
                     {startTime && (
                       <div className="mt-4 pt-4 border-t border-gray-100">
                         <p className="text-xs text-gray-400">Last updated: {formatRelativeTime(startTime)}</p>
-                      </div>
+                        </div>
                     )}
-                  </div>
-                </div>
+                      </div>
+                      </div>
 
                 {/* RunStatsCard - 30-35% width (3 columns) */}
                 <div className="lg:col-span-3">
@@ -968,8 +967,8 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
+                    </div>
+                  </div>
 
               {/* Activity Log Section - Increased spacing (dashboard-26) */}
               <div className="space-y-8 mt-10">
@@ -988,12 +987,9 @@ export default function Home() {
                   </div>
                   
                   {/* Activity entries with severity icons and timestamps */}
-                  <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {summary?.currentCounty && (
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {summary?.currentCounty && (
                       <div className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                        <div className="flex-shrink-0">
-                          <span className="text-[#1e3a5f] text-lg">→</span>
-                        </div>
                         <div className="flex-1">
                           <span className="text-[#1e3a5f] font-semibold">Processing {summary.currentCounty} County</span>
                         </div>
@@ -1002,37 +998,31 @@ export default function Home() {
                             {formatRelativeTime(startTime)}
                           </div>
                         )}
-                      </div>
-                    )}
-                    {completedCounties.length > 0 ? (
+                        </div>
+                      )}
+                      {completedCounties.length > 0 ? (
                       completedCounties.slice().reverse().map((county, index) => {
                         const timestamp = startTime ? startTime + (index * 60000) : Date.now();
                         return (
                           <div key={index} className="flex items-center gap-4 text-sm py-2 px-3 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
-                            <div className="flex-shrink-0">
-                              <span className="text-green-600 text-lg">✔</span>
-                            </div>
                             <div className="flex-1">
                               <span className="text-gray-700 font-medium">County completed: {county}</span>
-                            </div>
+                        </div>
                             <div className="text-xs text-gray-400 flex-shrink-0">
                               {formatRelativeTime(timestamp)}
-                            </div>
-                          </div>
+                    </div>
+                  </div>
                         );
                       })
                     ) : (
                       <div className="flex items-center gap-4 text-sm py-2 px-3 text-gray-500">
-                        <div className="flex-shrink-0">
-                          <span className="text-gray-400 text-lg">⏳</span>
-                        </div>
                         <div className="flex-1">
                           <span>Waiting for county completion…</span>
-                        </div>
                       </div>
-                    )}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
 
                 {/* Results Preview (Optional) - dashboard-27 */}
                 {summary && (summary.totalContacts || 0) > 0 && (
@@ -1042,7 +1032,7 @@ export default function Home() {
                       <span className="text-xs text-gray-500">
                         {summary.totalContacts || 0} total contacts
                       </span>
-                    </div>
+                        </div>
                     <div className="space-y-3">
                       {/* Show last 5 schools if available */}
                       {summary.countyContacts && summary.countyContacts.length > 0 ? (
@@ -1052,22 +1042,19 @@ export default function Home() {
                       ) : (
                         <div className="text-sm text-gray-500 italic">
                           Contact details will appear here as counties are processed
-                        </div>
+                      </div>
                       )}
                       {error && (
                         <div className="mt-4 pt-4 border-t border-gray-200">
                           <div className="flex items-center gap-2 text-sm text-red-600">
-                            <span>✖</span>
                             <span>Errors detected - check activity log for details</span>
-                          </div>
-                        </div>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
+                )}
             </div>
-          </div>
           </div>
           );
         })()}
