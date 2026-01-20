@@ -10,8 +10,10 @@ from datetime import datetime, timedelta
 from functools import wraps
 from flask import request, jsonify
 
-# JWT Secret Key (from environment variable, fallback for development)
-JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-key-change-in-production")
+# JWT Secret Key (from environment variable, REQUIRED in production)
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    raise ValueError("JWT_SECRET environment variable must be set. This is required for security.")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 

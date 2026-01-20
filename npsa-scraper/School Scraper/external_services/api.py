@@ -24,6 +24,7 @@ import resource  # For memory monitoring
 import logging  # For logging
 import platform  # For OS detection
 import multiprocessing  # For subprocess isolation
+import re  # For regex validation
 
 # Try to import psutil for process tree killing (optional)
 try:
@@ -63,8 +64,15 @@ step13_final_compiler = load_module_with_hyphen('step13-compiler.py', 'step13_co
 
 app = Flask(__name__)
 
-# CORS configuration - restrict to allowed origin if set, otherwise allow current API origin
-ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "*")
+# CORS configuration - restrict to allowed origin (REQUIRED in production)
+ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN")
+if not ALLOWED_ORIGIN:
+    # Allow wildcard only if explicitly set to "*" for development
+    # In production, ALLOWED_ORIGIN must be set to your frontend URL
+    import sys
+    print("WARNING: ALLOWED_ORIGIN not set. Defaulting to '*' for development.")
+    print("SECURITY: Set ALLOWED_ORIGIN environment variable in production to your frontend URL.")
+    ALLOWED_ORIGIN = "*"
 CORS(app, resources={r"/*": {
     "origins": ALLOWED_ORIGIN,
     "methods": ["GET", "POST", "DELETE", "OPTIONS"],
@@ -120,6 +128,19 @@ RESET = '\033[0m'
 def bold(text: str) -> str:
     """Make text bold in terminal output"""
     return f"{BOLD}{text}{RESET}"
+
+
+# Security: Validate run_id to prevent path traversal attacks
+UUID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+
+def validate_run_id(run_id: str) -> bool:
+    """
+    Validate that run_id is a valid UUID format.
+    This prevents path traversal attacks (e.g., '../../../etc/passwd').
+    """
+    if not run_id or not isinstance(run_id, str):
+        return False
+    return bool(UUID_PATTERN.match(run_id.strip()))
 
 
 def list_chrome_processes():
@@ -443,6 +464,9 @@ def log_resource_usage():
 
 def save_checkpoint(run_id: str, state: str, completed_counties: list, next_county_index: int, total_counties: int):
     """Save checkpoint to persistent storage"""
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        raise ValueError(f"Invalid run_id format: {run_id}")
     checkpoint_path = CHECKPOINTS_DIR / f"{run_id}.json"
     checkpoint_data = {
         "run_id": run_id,
@@ -465,6 +489,9 @@ def save_checkpoint(run_id: str, state: str, completed_counties: list, next_coun
 
 def load_checkpoint(run_id: str) -> dict:
     """Load checkpoint from persistent storage"""
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return None
     checkpoint_path = CHECKPOINTS_DIR / f"{run_id}.json"
     if not checkpoint_path.exists():
         return None
@@ -480,6 +507,9 @@ def load_checkpoint(run_id: str) -> dict:
 
 def save_run_metadata(run_id: str, metadata: dict):
     """Save run metadata to persistent storage"""
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        raise ValueError(f"Invalid run_id format: {run_id}")
     metadata_path = METADATA_DIR / f"{run_id}.json"
     try:
         # Add timestamp if not present
@@ -497,6 +527,9 @@ def save_run_metadata(run_id: str, metadata: dict):
 
 def load_run_metadata(run_id: str) -> dict:
     """Load run metadata from persistent storage"""
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return None
     metadata_path = METADATA_DIR / f"{run_id}.json"
     if not metadata_path.exists():
         return None
@@ -1667,6 +1700,13 @@ def run_pipeline():
 @require_auth
 def pipeline_status(run_id):
     """Get status of a running pipeline"""
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
     if run_id not in pipeline_runs:
         # Track repeated 404 requests to prevent spam from stale browser tabs
         current_time = time.time()
@@ -1797,6 +1837,13 @@ def stop_run(run_id: str):
         response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
     
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
     try:
         # Check metadata first (persistent storage)
         metadata = load_run_metadata(run_id)
@@ -1857,6 +1904,13 @@ def resume_run(run_id: str):
         response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
+    
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
     
     try:
         # Check metadata first (persistent storage)
@@ -1939,6 +1993,13 @@ def delete_run(run_id: str):
         response.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
         return response, 200
     
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
     try:
         # Load metadata to check if run exists
         metadata = load_run_metadata(run_id)
@@ -2002,6 +2063,13 @@ def archive_run(run_id: str):
         response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
     
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
     try:
         metadata = load_run_metadata(run_id)
         if not metadata:
@@ -2049,6 +2117,13 @@ def unarchive_run(run_id: str):
         response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
     
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
     try:
         metadata = load_run_metadata(run_id)
         if not metadata:
@@ -2089,6 +2164,13 @@ def unarchive_run(run_id: str):
 @require_auth
 def download_run_csv(run_id: str):
     """Download the final CSV for a completed run"""
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
     try:
         # Load metadata to get CSV path
         metadata = load_run_metadata(run_id)
