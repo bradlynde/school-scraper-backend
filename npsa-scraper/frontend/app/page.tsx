@@ -569,7 +569,7 @@ export default function Home() {
   }
 
   // Helper function to get current county
-  const getCurrentCounty = () => {
+  function getCurrentCounty() {
     if (summary?.currentCounty) return summary.currentCounty;
     if (summary?.statusMessage) {
       const statusMsg = summary.statusMessage.replace(/^Processing\s+/, '');
@@ -580,7 +580,7 @@ export default function Home() {
     if (countiesProcessed > 0) return `${countiesProcessed}/${totalCounties} counties`;
     if (totalCounties > 0) return "Starting...";
     return "Initializing...";
-  };
+  }
 
   // Restore elapsed time from localStorage on page load
   useEffect(() => {
@@ -626,7 +626,6 @@ export default function Home() {
 
   // Render views with fade-in transitions
   return (
-    <React.Fragment>
     <div className="min-h-screen h-screen bg-gray-50 flex">
       {/* Mobile Hamburger Menu */}
       <button
@@ -1204,6 +1203,5 @@ export default function Home() {
         )}
       </div>
     </div>
-    </React.Fragment>
   );
 }
