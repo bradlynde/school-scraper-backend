@@ -1597,6 +1597,11 @@ def login():
 @require_auth
 def run_pipeline():
     """Start the pipeline and return run ID for status polling"""
+    # Debug logging
+    print(f"[DEBUG] /run-pipeline called with method: {request.method}")
+    print(f"[DEBUG] Request path: {request.path}")
+    print(f"[DEBUG] Request headers: {dict(request.headers)}")
+    
     # OPTIONS is handled by require_auth decorator, which calls this function
     # We need to explicitly handle OPTIONS here to set CORS headers correctly
     if request.method == "OPTIONS":
