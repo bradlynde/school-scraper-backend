@@ -694,6 +694,13 @@ export default function Home() {
           const responseClone = response.clone();
           errorData = await responseClone.json();
           errorMessage = errorData.error || errorData.message || errorMessage;
+          console.error("Error response data:", errorData);
+          console.error("Full error response:", {
+            status: response.status,
+            statusText: response.statusText,
+            headers: Object.fromEntries(response.headers.entries()),
+            errorData
+          });
         } catch {
           // If JSON parse fails, try text (but we can only read once, so use original response)
           try {
