@@ -568,6 +568,20 @@ export default function Home() {
     }
   }
 
+  // Helper function to get current county
+  const getCurrentCounty = () => {
+    if (summary?.currentCounty) return summary.currentCounty;
+    if (summary?.statusMessage) {
+      const statusMsg = summary.statusMessage.replace(/^Processing\s+/, '');
+      return statusMsg.split('(')[0].trim();
+    }
+    const countiesProcessed = summary?.countiesProcessed || 0;
+    const totalCounties = summary?.totalCounties || 0;
+    if (countiesProcessed > 0) return `${countiesProcessed}/${totalCounties} counties`;
+    if (totalCounties > 0) return "Starting...";
+    return "Initializing...";
+  };
+
   // Restore elapsed time from localStorage on page load
   useEffect(() => {
     if (typeof window !== 'undefined' && selectedRunId && !startTime) {
@@ -608,18 +622,6 @@ export default function Home() {
   const countiesProcessed = summary?.countiesProcessed || 0;
   const totalCounties = summary?.totalCounties || 0;
   const schoolsProcessed = summary?.schoolsProcessed || summary?.schoolsFound || 0;
-  
-  // Use currentCounty if available, otherwise derive from statusMessage, otherwise show progress-based message
-  const getCurrentCounty = () => {
-    if (summary?.currentCounty) return summary.currentCounty;
-    if (summary?.statusMessage) {
-      const statusMsg = summary.statusMessage.replace(/^Processing\s+/, '');
-      return statusMsg.split('(')[0].trim();
-    }
-    if (countiesProcessed > 0) return `${countiesProcessed}/${totalCounties} counties`;
-    if (totalCounties > 0) return "Starting...";
-    return "Initializing...";
-  };
   const currentCounty = getCurrentCounty();
 
   // Render views with fade-in transitions
