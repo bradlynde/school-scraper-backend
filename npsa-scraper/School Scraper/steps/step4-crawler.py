@@ -197,9 +197,22 @@ class ContentCollector:
             # Remove implicit wait, use explicit waits instead
             # driver.implicitly_wait(2)  # Removed - use explicit waits
             
-            # Note: PID 1 check removed - dumb-init is properly configured in Dockerfile
-            # This check was causing false warnings in some Railway environments
-            # Process cleanup via maxtasksperchild=1 and explicit Chrome cleanup handles process management
+            # Verify dumb-init is PID 1 (critical for proper process reaping)
+            # If PID 1 is not dumb-init, Railway may have overridden ENTRYPOINT
+            # This will cause zombie processes to accumulate over time
+            if HAS_PSUTIL:
+                try:
+                    pid1 = psutil.Process(1)
+                    pid1_name = pid1.name().lower()
+                    # Check if PID 1 is dumb-init (or init system)
+                    if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
+                        # This is a real issue - log it once per driver setup
+                        # Don't spam logs, but make it clear this needs attention
+                        import sys
+                        print(f"    {bold('[SELENIUM]')} WARNING: PID 1 is '{pid1_name}', expected 'dumb-init'. Process reaping may not work correctly.", file=sys.stderr)
+                        print(f"    {bold('[SELENIUM]')} This may cause zombie Chrome processes. Check Railway ENTRYPOINT configuration.", file=sys.stderr)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass  # Can't verify, but continue anyway
             
             return driver
         except Exception as e:
