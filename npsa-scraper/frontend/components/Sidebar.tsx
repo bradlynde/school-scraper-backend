@@ -332,143 +332,141 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                         className="p-4 bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-lg transition-all relative group"
                         style={{ borderRadius: '16px' }}
                       >
-                        <div 
-                          className="cursor-pointer"
-                          onClick={() => onRunSelect?.(run.run_id)}
-                        >
-                          <div className="flex items-start justify-between mb-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-sm text-gray-900 truncate">
-                                {run.state?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown State'}
-                              </div>
-                              <div className="text-xs text-gray-500 mt-1">
-                                {formatDate(run.created_at)}
-                              </div>
-                            </div>
-                            {/* Live badge/pill with pulsing dot for running (dashboard-20) */}
-                            <div className="flex items-center gap-2 flex-shrink-0 ml-2">
-                              {run.status === "running" && (
-                                <div className="relative">
-                                  <div className="absolute inset-0 w-2 h-2 rounded-full bg-blue-500 opacity-30 animate-ping"></div>
-                                  <div className="relative w-2 h-2 rounded-full bg-blue-500"></div>
-                                </div>
-                              )}
-                              <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusColor(run.status)}`}>
-                                {run.status === "running" ? "Running" : run.status === "completed" ? "Finished" : run.status === "error" ? "Error" : run.status === "finalizing" ? "Finalizing" : run.status}
-                              </span>
-                            </div>
-                          </div>
-                          
-                          {/* Tiny progress indicator (dashboard-21) */}
-                          {run.status === "running" && totalCount > 0 && (
-                            <div className="mb-2">
-                              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-                                <span>{completedCount}/{totalCount}</span>
-                                <span>{progressPercent}%</span>
-                              </div>
-                              <div className="w-full bg-gray-200 rounded-full h-1.5">
-                                <div 
-                                  className="bg-[#1e3a5f] h-1.5 rounded-full transition-all duration-300"
-                                  style={{ width: `${progressPercent}%` }}
-                                ></div>
-                              </div>
-                            </div>
-                          )}
-                          
-                          {run.total_contacts !== undefined && (
-                            <div className="text-xs text-gray-600 mt-2">
-                              {run.total_contacts} contacts
-                            </div>
-                          )}
-                        </div>
-                        
-                        {/* Quick action icon buttons (dashboard-22) */}
-                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 relative">
-                          {/* Delete button - show confirmation modal */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirmRunId(run.run_id);
-                            }}
-                            className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete run"
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                          </button>
-                          
-                          {/* Delete Confirmation Modal */}
-                          {deleteConfirmRunId === run.run_id && (
-                            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
-                              <div className="bg-white rounded-lg shadow-xl p-4 mx-2 max-w-xs w-full">
-                                <p className="text-sm font-semibold text-gray-900 mb-4 text-center">Delete Permanently?</p>
-                                <div className="flex items-center justify-center gap-3">
-                                  {/* Deny button */}
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setDeleteConfirmRunId(null);
-                                    }}
-                                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                    <span className="text-sm font-medium">Cancel</span>
-                                  </button>
-                                  {/* Confirm button */}
-                                  <button
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      setDeleteConfirmRunId(null);
+                        {deleteConfirmRunId === run.run_id ? (
+                          /* Delete Confirmation - replaces card content */
+                          <div className="flex flex-col items-center justify-center py-6">
+                            <p className="text-sm font-semibold text-gray-900 mb-4 text-center">Delete Permanently?</p>
+                            <div className="flex items-center justify-center gap-3">
+                              {/* Deny button */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmRunId(null);
+                                }}
+                                className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                                <span className="text-sm font-medium">Cancel</span>
+                              </button>
+                              {/* Confirm button */}
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmRunId(null);
+                                  try {
+                                    // Ensure API URL includes protocol
+                                    let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+                                    apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+                                    if (!apiUrl.match(/^https?:\/\//)) {
+                                      // If no protocol, assume https
+                                      apiUrl = `https://${apiUrl}`;
+                                    }
+                                    const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
+                                      method: 'DELETE',
+                                      headers: {
+                                        "Authorization": `Bearer ${token}`,
+                                      },
+                                    });
+                                    if (response.ok) {
+                                      // Remove locally so it never reappears in the list this session
+                                      setRuns(prev => prev.filter(r => r.run_id !== run.run_id));
+                                    } else if (response.status === 401) {
+                                      logout();
+                                    } else {
+                                      // Try to surface backend error for easier debugging
                                       try {
-                                        // Ensure API URL includes protocol
-                                        let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-                                        apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-                                        if (!apiUrl.match(/^https?:\/\//)) {
-                                          // If no protocol, assume https
-                                          apiUrl = `https://${apiUrl}`;
-                                        }
-                                        const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
-                                          method: 'DELETE',
-                                          headers: {
-                                            "Authorization": `Bearer ${token}`,
-                                          },
-                                        });
-                                        if (response.ok) {
-                                          // Remove locally so it never reappears in the list this session
-                                          setRuns(prev => prev.filter(r => r.run_id !== run.run_id));
-                                        } else if (response.status === 401) {
-                                          logout();
-                                        } else {
-                                          // Try to surface backend error for easier debugging
-                                          try {
-                                            const errorData = await response.json();
-                                            alert(errorData.error || 'Failed to delete run');
-                                          } catch {
-                                            alert('Failed to delete run');
-                                          }
-                                        }
-                                      } catch (error) {
-                                        console.error('Error deleting run:', error);
+                                        const errorData = await response.json();
+                                        alert(errorData.error || 'Failed to delete run');
+                                      } catch {
                                         alert('Failed to delete run');
                                       }
-                                    }}
-                                    className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
-                                  >
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                    </svg>
-                                    <span className="text-sm font-medium">Delete</span>
-                                  </button>
+                                    }
+                                  } catch (error) {
+                                    console.error('Error deleting run:', error);
+                                    alert('Failed to delete run');
+                                  }
+                                }}
+                                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                <span className="text-sm font-medium">Delete</span>
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div 
+                              className="cursor-pointer"
+                              onClick={() => onRunSelect?.(run.run_id)}
+                            >
+                              <div className="flex items-start justify-between mb-3">
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-semibold text-sm text-gray-900 truncate">
+                                    {run.state?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown State'}
+                                  </div>
+                                  <div className="text-xs text-gray-500 mt-1">
+                                    {formatDate(run.created_at)}
+                                  </div>
+                                </div>
+                                {/* Live badge/pill with pulsing dot for running (dashboard-20) */}
+                                <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                                  {run.status === "running" && (
+                                    <div className="relative">
+                                      <div className="absolute inset-0 w-2 h-2 rounded-full bg-blue-500 opacity-30 animate-ping"></div>
+                                      <div className="relative w-2 h-2 rounded-full bg-blue-500"></div>
+                                    </div>
+                                  )}
+                                  <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusColor(run.status)}`}>
+                                    {run.status === "running" ? "Running" : run.status === "completed" ? "Finished" : run.status === "error" ? "Error" : run.status === "finalizing" ? "Finalizing" : run.status}
+                                  </span>
                                 </div>
                               </div>
+                              
+                              {/* Tiny progress indicator (dashboard-21) */}
+                              {run.status === "running" && totalCount > 0 && (
+                                <div className="mb-2">
+                                  <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                                    <span>{completedCount}/{totalCount}</span>
+                                    <span>{progressPercent}%</span>
+                                  </div>
+                                  <div className="w-full bg-gray-200 rounded-full h-1.5">
+                                    <div 
+                                      className="bg-[#1e3a5f] h-1.5 rounded-full transition-all duration-300"
+                                      style={{ width: `${progressPercent}%` }}
+                                    ></div>
+                                  </div>
+                                </div>
+                              )}
+                              
+                              {run.total_contacts !== undefined && (
+                                <div className="text-xs text-gray-600 mt-2">
+                                  {run.total_contacts} contacts
+                                </div>
+                              )}
                             </div>
-                          )}
-                          
-                          {/* Archive button - only in finished tab */}
-                          {activeTab === 'finished' && (
+                            
+                            {/* Quick action icon buttons (dashboard-22) */}
+                            <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+                              {/* Delete button - show confirmation */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmRunId(run.run_id);
+                                }}
+                                className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                                title="Delete run"
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                              
+                              {/* Archive button - only in finished tab */}
+                              {activeTab === 'finished' && (
                             <button
                               onClick={async (e) => {
                                 e.stopPropagation();
@@ -547,19 +545,21 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                             </button>
                           )}
                           
-                          {/* Download CSV button */}
-                          {run.status === "completed" && run.csv_filename && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                downloadCSV(run.run_id, run.csv_filename);
-                              }}
-                              className="ml-auto text-xs px-2 py-1 bg-[#1e3a5f] text-white rounded hover:bg-[#2a4f7a] transition-colors"
-                            >
-                              Download CSV
-                            </button>
-                          )}
-                        </div>
+                              {/* Download CSV button */}
+                              {run.status === "completed" && run.csv_filename && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    downloadCSV(run.run_id, run.csv_filename);
+                                  }}
+                                  className="ml-auto text-xs px-2 py-1 bg-[#1e3a5f] text-white rounded hover:bg-[#2a4f7a] transition-colors"
+                                >
+                                  Download CSV
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </div>
                       );
                     })}
