@@ -73,11 +73,19 @@ if not ALLOWED_ORIGIN:
     print("WARNING: ALLOWED_ORIGIN not set. Defaulting to '*' for development.")
     print("SECURITY: Set ALLOWED_ORIGIN environment variable in production to your frontend URL.")
     ALLOWED_ORIGIN = "*"
-CORS(app, resources={r"/*": {
-    "origins": ALLOWED_ORIGIN,
-    "methods": ["GET", "POST", "DELETE", "OPTIONS"],
-    "allow_headers": ["Content-Type", "Authorization"]
-}})
+
+# Configure CORS to automatically handle OPTIONS preflight requests
+CORS(app, 
+     resources={r"/*": {
+         "origins": ALLOWED_ORIGIN if isinstance(ALLOWED_ORIGIN, str) and ALLOWED_ORIGIN != "*" else "*",
+         "methods": ["GET", "POST", "DELETE", "OPTIONS", "PUT"],
+         "allow_headers": ["Content-Type", "Authorization"],
+         "expose_headers": ["Content-Type"],
+         "supports_credentials": False,
+         "max_age": 86400  # 24 hours
+     }},
+     automatic_options=True  # Automatically handle OPTIONS requests
+)
 
 # In-memory storage for pipeline runs (use Redis or database in production)
 pipeline_runs = {}
