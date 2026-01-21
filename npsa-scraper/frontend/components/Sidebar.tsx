@@ -77,10 +77,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
         return dateString;
       }
       
-      // Convert to US Central Time
-      const centralDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-      
-      // Format date and time in Central Time
+      // Format date and time in US Central Time
       const dateStr = date.toLocaleDateString('en-US', { 
         timeZone: 'America/Chicago',
         month: 'numeric',
