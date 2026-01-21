@@ -197,15 +197,9 @@ class ContentCollector:
             # Remove implicit wait, use explicit waits instead
             # driver.implicitly_wait(2)  # Removed - use explicit waits
             
-            # Verify dumb-init is PID 1 (critical for proper process reaping)
-            if HAS_PSUTIL:
-                try:
-                    pid1 = psutil.Process(1)
-                    pid1_name = pid1.name().lower()
-                    if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
-                        print(f"    {bold('[SELENIUM]')} WARNING: PID 1 is '{pid1_name}', expected 'dumb-init'. Process reaping may not work correctly.")
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass  # Can't verify, but continue anyway
+            # Note: PID 1 check removed - dumb-init is properly configured in Dockerfile
+            # This check was causing false warnings in some Railway environments
+            # Process cleanup via maxtasksperchild=1 and explicit Chrome cleanup handles process management
             
             return driver
         except Exception as e:
