@@ -408,7 +408,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                                   } else if (response.status === 401) {
                                     logout();
                                   } else {
-                                    alert('Failed to delete run');
+                                    // Try to surface backend error for easier debugging
+                                    try {
+                                      const errorData = await response.json();
+                                      alert(errorData.error || 'Failed to delete run');
+                                    } catch {
+                                      alert('Failed to delete run');
+                                    }
                                   }
                                 } catch (error) {
                                   console.error('Error deleting run:', error);

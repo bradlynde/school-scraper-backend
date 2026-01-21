@@ -2023,8 +2023,10 @@ def delete_run(run_id: str):
     If run is running, stops it first."""
     if request.method == "OPTIONS":
         response = jsonify({})
+        # CORS preflight: allow auth header for DELETE requests
         response.headers.add("Access-Control-Allow-Origin", "*")
         response.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         return response, 200
     
     # Security: Validate run_id to prevent path traversal
