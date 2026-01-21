@@ -901,9 +901,9 @@ export default function Home() {
                   setViewState("progress");
                   setIsRunning(true);
                   // Start polling
-                  if (pollingInterval) {
-                    clearInterval(pollingInterval);
-                  }
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
                   const interval = setInterval(() => {
                     checkPipelineStatus(runId);
                   }, 60000);
@@ -923,7 +923,7 @@ export default function Home() {
                     csvData: data.csvData,
                     csvFilename: data.csvFilename || runMetadata?.csv_filename,
                   };
-                  
+    
                   // Calculate elapsed time
                   if (runMetadata?.created_at && runMetadata?.completed_at) {
                     const start = new Date(runMetadata.created_at).getTime();
@@ -1089,38 +1089,38 @@ export default function Home() {
                     <span className="text-3xl text-gray-500">/ {runProgress.totalCounties}</span>
                     <span className="text-2xl font-semibold text-gray-600">Counties</span>
                     <span className="text-2xl font-semibold text-gray-600 ml-auto">{formatPercentComplete(runProgress)}% complete</span>
-                  </div>
-                  
+              </div>
+
                   {/* Progress bar */}
                   <div className="w-full bg-gray-200 rounded-full h-3">
                     <div 
                       className="bg-[#1e3a5f] h-3 rounded-full transition-all duration-500"
                       style={{ width: `${formatPercentComplete(runProgress)}%` }}
                     ></div>
-                  </div>
-                </div>
+                      </div>
+                    </div>
 
                 {/* Stats row: Elapsed, Estimated Remaining, Status */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-8 border-t border-gray-200">
-                  <div>
+                      <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Elapsed</p>
-                    <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
-                  </div>
-                  <div>
+                        <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
+                      </div>
+                        <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Estimated Remaining</p>
                     {runProgress.etaRemainingMs && runProgress.etaRemainingMs > 0 ? (
                       <p className="text-3xl font-bold text-gray-900">{formatTime(runProgress.etaRemainingMs / 1000)}</p>
                     ) : (
                       <p className="text-3xl font-bold text-gray-900">—</p>
                     )}
-                  </div>
-                  <div>
+                        </div>
+                      <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Status</p>
                     <p className="text-3xl font-bold text-[#1e3a5f]">{formatStatusLabel(runProgress)}</p>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </div>
+          </div>
           </div>
         )}
 

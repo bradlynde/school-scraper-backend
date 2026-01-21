@@ -619,7 +619,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
               </div>
             )}
           </div>
-        </div>
+      </div>
     </aside>
   );
 };
