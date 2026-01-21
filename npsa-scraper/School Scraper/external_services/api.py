@@ -2248,24 +2248,54 @@ def not_found(e):
 
 # Production: Use Waitress server
 # NOTE: If Railway runs this file directly (bypassing Dockerfile ENTRYPOINT),
-# dumb-init won't be PID 1, which may cause zombie Chrome processes.
-# Ideally Railway should respect Dockerfile ENTRYPOINT ["dumb-init", "--"] CMD ["/app/start.sh"]
+# we need to exec into dumb-init ourselves to ensure proper process reaping.
 if __name__ == "__main__":
     import subprocess
     import sys
+    import os
     
     # Check if dumb-init is PID 1 (it should be if Dockerfile ENTRYPOINT is respected)
+    needs_dumb_init = False
     if HAS_PSUTIL:
         try:
             pid1 = psutil.Process(1)
             pid1_name = pid1.name().lower()
             if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
-                print(f"WARNING: Running directly - PID 1 is '{pid1_name}', not 'dumb-init'", file=sys.stderr)
-                print(f"WARNING: This may cause zombie Chrome processes to accumulate", file=sys.stderr)
-                print(f"WARNING: Railway should use Dockerfile ENTRYPOINT to ensure dumb-init is PID 1", file=sys.stderr)
+                needs_dumb_init = True
+                print(f"WARNING: PID 1 is '{pid1_name}', not 'dumb-init'", file=sys.stderr)
+                print(f"Attempting to exec into dumb-init to fix this...", file=sys.stderr)
         except:
             pass  # Can't verify, continue anyway
     
+    # If dumb-init is not PID 1, exec into it with waitress-serve as the command
+    # This ensures dumb-init becomes PID 1 and properly reaps zombie processes
+    if needs_dumb_init:
+        # Find dumb-init
+        dumb_init_path = None
+        for path in ['/usr/bin/dumb-init', '/usr/local/bin/dumb-init', '/bin/dumb-init']:
+            if os.path.exists(path) and os.access(path, os.X_OK):
+                dumb_init_path = path
+                break
+        
+        if dumb_init_path:
+            port = os.environ.get("PORT", "8080")
+            print(f"Execing into {dumb_init_path} with waitress-serve command", file=sys.stderr)
+            # Exec into dumb-init, passing waitress-serve as the command
+            # This replaces the current Python process with dumb-init, which then runs waitress
+            os.execv(dumb_init_path, [
+                dumb_init_path, '--',
+                'waitress-serve',
+                '--host=0.0.0.0',
+                f'--port={port}',
+                '--threads=4',
+                '--channel-timeout=300',
+                'external_services.api:app'
+            ])
+        else:
+            print(f"ERROR: dumb-init not found, cannot fix PID 1 issue", file=sys.stderr)
+            print(f"Zombie processes may accumulate", file=sys.stderr)
+    
+    # If we reach here, either dumb-init is already PID 1, or we couldn't find it
     port = os.environ.get("PORT", "8080")
     print(f"Starting Waitress WSGI server on port {port}")
     print(f"Using production WSGI server (Waitress) instead of Flask dev server")
