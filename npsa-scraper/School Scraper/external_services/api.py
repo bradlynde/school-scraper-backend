@@ -2246,23 +2246,35 @@ def not_found(e):
         "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete"]
     }), 404
 
-# CRITICAL: DO NOT run this file directly in production
-# Railway should use the Dockerfile ENTRYPOINT/CMD which runs start.sh
-# start.sh ensures dumb-init is PID 1 and then runs waitress-serve
-# If you run this file directly, dumb-init won't be PID 1 and zombie processes will accumulate
-#
-# For local development only, uncomment the block below:
-# if __name__ == "__main__":
-#     import subprocess
-#     import sys
-#     port = os.environ.get("PORT", "8080")
-#     print(f"WARNING: Running directly - dumb-init is not PID 1!")
-#     print(f"Starting Waitress WSGI server on port {port}")
-#     subprocess.run([
-#         sys.executable, "-m", "waitress",
-#         "--host=0.0.0.0",
-#         f"--port={port}",
-#         "--threads=4",
-#         "--channel-timeout=300",
-#         "external_services.api:app"
-#     ])
+# Production: Use Waitress server
+# NOTE: If Railway runs this file directly (bypassing Dockerfile ENTRYPOINT),
+# dumb-init won't be PID 1, which may cause zombie Chrome processes.
+# Ideally Railway should respect Dockerfile ENTRYPOINT ["dumb-init", "--"] CMD ["/app/start.sh"]
+if __name__ == "__main__":
+    import subprocess
+    import sys
+    
+    # Check if dumb-init is PID 1 (it should be if Dockerfile ENTRYPOINT is respected)
+    if HAS_PSUTIL:
+        try:
+            pid1 = psutil.Process(1)
+            pid1_name = pid1.name().lower()
+            if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
+                print(f"WARNING: Running directly - PID 1 is '{pid1_name}', not 'dumb-init'", file=sys.stderr)
+                print(f"WARNING: This may cause zombie Chrome processes to accumulate", file=sys.stderr)
+                print(f"WARNING: Railway should use Dockerfile ENTRYPOINT to ensure dumb-init is PID 1", file=sys.stderr)
+        except:
+            pass  # Can't verify, continue anyway
+    
+    port = os.environ.get("PORT", "8080")
+    print(f"Starting Waitress WSGI server on port {port}")
+    print(f"Using production WSGI server (Waitress) instead of Flask dev server")
+    # Use Waitress even when file is run directly (fallback for Railway)
+    subprocess.run([
+        sys.executable, "-m", "waitress",
+        "--host=0.0.0.0",
+        f"--port={port}",
+        "--threads=4",
+        "--channel-timeout=300",
+        "external_services.api:app"
+    ])
