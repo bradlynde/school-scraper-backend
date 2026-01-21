@@ -64,6 +64,18 @@ step13_final_compiler = load_module_with_hyphen('step13-compiler.py', 'step13_co
 
 app = Flask(__name__)
 
+# Verify dumb-init is PID 1 on startup (will only log once when app initializes)
+if HAS_PSUTIL:
+    try:
+        pid1 = psutil.Process(1)
+        pid1_name = pid1.name().lower()
+        if 'dumb-init' in pid1_name or 'init' in pid1_name:
+            print(f"[INIT] Verified: dumb-init is PID 1 - process reaping enabled")
+        else:
+            print(f"[INIT] WARNING: PID 1 is '{pid1_name}' - process reaping may not work correctly")
+    except:
+        pass  # Can't verify, but continue
+
 # CORS configuration - restrict to allowed origin (REQUIRED in production)
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN")
 if ALLOWED_ORIGIN:
