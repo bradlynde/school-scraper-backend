@@ -1128,16 +1128,16 @@ export default function Home() {
         {viewState === "summary" && summary && (
           <div className="animate-fade-in">
               <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
-              <div className="w-full max-w-7xl">
+              <div className="w-full max-w-4xl">
                 {/* Header */}
                 <div className="mb-10 text-center">
                   <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">Scraping Complete</h1>
                 </div>
 
                 {/* 2 Card Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8 mb-10">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 md:gap-6 mb-10">
                   {/* Card 1: Total Contacts */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-4 md:p-5">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-3 md:p-4">
                     <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Contacts Extracted</h3>
                     <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
                       {summary.totalContacts || 0}
@@ -1148,7 +1148,7 @@ export default function Home() {
                   </div>
 
                   {/* Card 2: Processing Time */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-4 md:p-5">
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-3 md:p-4">
                     <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Processing Time</h3>
                     <div className="text-6xl font-bold text-[#1e3a5f]">
                       {formatTime(elapsedTimeDisplay || 0)}
