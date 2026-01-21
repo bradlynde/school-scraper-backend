@@ -25,6 +25,7 @@ import logging  # For logging
 import platform  # For OS detection
 import multiprocessing  # For subprocess isolation
 import re  # For regex validation
+import contextlib  # For suppressing noisy stdout/stderr
 
 # Try to import psutil for process tree killing (optional)
 try:
@@ -648,17 +649,18 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
             state=state
         )
         
-        # Run pipeline for this single county - collects all contacts
-        pipeline.run(
-            counties=[county],  # Process only this county
-            batch_size=0,  # Process all schools in county
-            output_csv=output_csv
-        )
+        # Run pipeline for this single county - suppress noisy stdout/stderr from inner steps
+        with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+            pipeline.run(
+                counties=[county],  # Process only this county
+                batch_size=0,  # Process all schools in county
+                output_csv=output_csv
+            )
         
         # Pipeline.run() already handles all compilation and writes to output_csv
         # Just verify the file was created
         all_contacts = pipeline.all_contacts
-        print(f"[{run_id}] SUCCESS {county}: {len(all_contacts)} contacts")
+        print(f"[{run_id}] COUNTY_DONE {county} ({county_index + 1}/{total_counties}) contacts={len(all_contacts)} schools_processed={pipeline.stats.get('schools_processed', 0)} csv={output_csv}")
         
         # Count contacts with and without emails
         contacts_with_emails = [c for c in all_contacts if c.has_email()]
@@ -845,22 +847,14 @@ def aggregate_final_results(run_id: str, state: str):
                 if not county_csv.exists():
                     all_complete = False
                     missing_counties.append(county)
-                else:
-                    # Debug: Check if file exists and its size
-                    file_size = county_csv.stat().st_size if county_csv.exists() else 0
-                    if file_size == 0:
-                        print(f"[{run_id}] DEBUG: {county} CSV exists but is empty ({file_size} bytes)")
             
             if all_complete:
-                print(f"[{run_id}] All {len(counties)} counties completed, proceeding with aggregation...")
+                print(f"[{run_id}] AGGREGATION ready: all {len(counties)} counties completed")
                 break
             
-            if elapsed_time % 30 == 0:  # Log every 30 seconds
-                print(f"[{run_id}] Waiting for {len(missing_counties)} counties to complete: {', '.join(missing_counties[:3])}...")
-                # Debug: List what files we're checking for
-                for county in missing_counties[:3]:
-                    expected_path = run_dir / county.replace(' ', '_') / "final_contacts.csv"
-                    print(f"[{run_id}] DEBUG: Checking for {expected_path} (exists: {expected_path.exists()})")
+            if elapsed_time % 60 == 0:  # Log every minute
+                sample = ", ".join(missing_counties[:3])
+                print(f"[{run_id}] WAITING for {len(missing_counties)} counties... {sample}")
             
             time.sleep(wait_interval)
             elapsed_time += wait_interval
