@@ -845,6 +845,11 @@ def aggregate_final_results(run_id: str, state: str):
                 if not county_csv.exists():
                     all_complete = False
                     missing_counties.append(county)
+                else:
+                    # Debug: Check if file exists and its size
+                    file_size = county_csv.stat().st_size if county_csv.exists() else 0
+                    if file_size == 0:
+                        print(f"[{run_id}] DEBUG: {county} CSV exists but is empty ({file_size} bytes)")
             
             if all_complete:
                 print(f"[{run_id}] All {len(counties)} counties completed, proceeding with aggregation...")
@@ -852,6 +857,10 @@ def aggregate_final_results(run_id: str, state: str):
             
             if elapsed_time % 30 == 0:  # Log every 30 seconds
                 print(f"[{run_id}] Waiting for {len(missing_counties)} counties to complete: {', '.join(missing_counties[:3])}...")
+                # Debug: List what files we're checking for
+                for county in missing_counties[:3]:
+                    expected_path = run_dir / county.replace(' ', '_') / "final_contacts.csv"
+                    print(f"[{run_id}] DEBUG: Checking for {expected_path} (exists: {expected_path.exists()})")
             
             time.sleep(wait_interval)
             elapsed_time += wait_interval
