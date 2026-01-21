@@ -1609,7 +1609,10 @@ def run_pipeline():
     print(f"[DEBUG] Request headers: {dict(request.headers)}")
     
     # Flask-CORS handles OPTIONS preflight requests automatically
-    # No need to manually handle OPTIONS here
+    # But we need to ensure OPTIONS returns early to avoid hitting POST validation
+    if request.method == "OPTIONS":
+        # Flask-CORS will add the headers automatically
+        return jsonify({}), 200
     
     # Ensure POST method (should never reach here for OPTIONS since handled above)
     if request.method != "POST":
