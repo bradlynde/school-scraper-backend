@@ -385,11 +385,35 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                         <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
                           {/* Delete button - remove from UI only (no backend delete) */}
                           <button
-                            onClick={(e) => {
+                            onClick={async (e) => {
                               e.stopPropagation();
-                              if (confirm(`Hide this run from the list? It will not be deleted from the backend.`)) {
-                                // Frontend-only removal: filter the local runs list
-                                setRuns(prev => prev.filter(r => r.run_id !== run.run_id));
+                              if (confirm(`Delete this run permanently? It will be removed from the backend and this list.`)) {
+                                try {
+                                  // Ensure API URL includes protocol
+                                  let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+                                  apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+                                  if (!apiUrl.match(/^https?:\/\//)) {
+                                    // If no protocol, assume https
+                                    apiUrl = `https://${apiUrl}`;
+                                  }
+                                  const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
+                                    method: 'DELETE',
+                                    headers: {
+                                      "Authorization": `Bearer ${token}`,
+                                    },
+                                  });
+                                  if (response.ok) {
+                                    // Remove locally so it never reappears in the list this session
+                                    setRuns(prev => prev.filter(r => r.run_id !== run.run_id));
+                                  } else if (response.status === 401) {
+                                    logout();
+                                  } else {
+                                    alert('Failed to delete run');
+                                  }
+                                } catch (error) {
+                                  console.error('Error deleting run:', error);
+                                  alert('Failed to delete run');
+                                }
                               }
                             }}
                             className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors ml-auto"
