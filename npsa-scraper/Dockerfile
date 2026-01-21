@@ -12,7 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl gnupg unzip ca-certificates \
     chromium chromium-driver \
     dumb-init \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/* \
+    && echo "Verifying dumb-init installation..." \
+    && which dumb-init || echo "ERROR: dumb-init not in PATH" \
+    && dumb-init --version || echo "ERROR: dumb-init not executable" \
+    && ls -la /usr/bin/dumb-init || echo "ERROR: /usr/bin/dumb-init not found"
 
 # Note: Pinning specific versions requires checking available versions in apt
 # For now, we install latest but Selenium will use explicit path to bypass Manager
