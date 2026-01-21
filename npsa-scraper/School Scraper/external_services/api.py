@@ -25,7 +25,6 @@ import logging  # For logging
 import platform  # For OS detection
 import multiprocessing  # For subprocess isolation
 import re  # For regex validation
-import contextlib  # For suppressing noisy stdout/stderr
 
 # Try to import psutil for process tree killing (optional)
 try:
@@ -649,7 +648,7 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
             state=state
         )
         
-        # Run pipeline for this single county - allow per-school logging to surface
+        # Run pipeline for this single county - collects all contacts
         pipeline.run(
             counties=[county],  # Process only this county
             batch_size=0,  # Process all schools in county
@@ -659,7 +658,7 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         # Pipeline.run() already handles all compilation and writes to output_csv
         # Just verify the file was created
         all_contacts = pipeline.all_contacts
-        print(f"[{run_id}] COUNTY_DONE {county} ({county_index + 1}/{total_counties}) contacts={len(all_contacts)} schools_processed={pipeline.stats.get('schools_processed', 0)} csv={output_csv}")
+        print(f"[{run_id}] SUCCESS {county}: {len(all_contacts)} contacts")
         
         # Count contacts with and without emails
         contacts_with_emails = [c for c in all_contacts if c.has_email()]
@@ -846,14 +845,17 @@ def aggregate_final_results(run_id: str, state: str):
                 if not county_csv.exists():
                     all_complete = False
                     missing_counties.append(county)
+                else:
+                    # File exists, check if empty
+                    file_size = county_csv.stat().st_size if county_csv.exists() else 0
+                    # Skip empty files - they'll be handled during aggregation
             
             if all_complete:
-                print(f"[{run_id}] AGGREGATION ready: all {len(counties)} counties completed")
+                print(f"[{run_id}] All {len(counties)} counties completed, proceeding with aggregation...")
                 break
             
-            if elapsed_time % 60 == 0:  # Log every minute
-                sample = ", ".join(missing_counties[:3])
-                print(f"[{run_id}] WAITING for {len(missing_counties)} counties... {sample}")
+            if elapsed_time % 30 == 0:  # Log every 30 seconds
+                print(f"[{run_id}] Waiting for {len(missing_counties)} counties to complete: {', '.join(missing_counties[:3])}...")
             
             time.sleep(wait_interval)
             elapsed_time += wait_interval
@@ -1605,11 +1607,6 @@ def login():
 @require_auth
 def run_pipeline():
     """Start the pipeline and return run ID for status polling"""
-    # Debug logging
-    print(f"[DEBUG] /run-pipeline called with method: {request.method}")
-    print(f"[DEBUG] Request path: {request.path}")
-    print(f"[DEBUG] Request headers: {dict(request.headers)}")
-    
     # Flask-CORS handles OPTIONS preflight requests automatically
     # But we need to ensure OPTIONS returns early to avoid hitting POST validation
     if request.method == "OPTIONS":

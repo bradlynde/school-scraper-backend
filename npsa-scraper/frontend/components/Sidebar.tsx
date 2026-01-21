@@ -29,6 +29,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
   const [runs, setRuns] = useState<RunMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchRuns();
@@ -382,45 +383,12 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                         </div>
                         
                         {/* Quick action icon buttons (dashboard-22) */}
-                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
-                          {/* Delete button - permanently delete via backend then remove from list */}
+                        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100 relative">
+                          {/* Delete button - show confirmation modal */}
                           <button
-                            onClick={async (e) => {
+                            onClick={(e) => {
                               e.stopPropagation();
-                              if (confirm(`Delete this run permanently? It will be removed from the backend and this list.`)) {
-                                try {
-                                  // Ensure API URL includes protocol
-                                  let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-                                  apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-                                  if (!apiUrl.match(/^https?:\/\//)) {
-                                    // If no protocol, assume https
-                                    apiUrl = `https://${apiUrl}`;
-                                  }
-                                  const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
-                                    method: 'DELETE',
-                                    headers: {
-                                      "Authorization": `Bearer ${token}`,
-                                    },
-                                  });
-                                  if (response.ok) {
-                                    // Remove locally so it never reappears in the list this session
-                                    setRuns(prev => prev.filter(r => r.run_id !== run.run_id));
-                                  } else if (response.status === 401) {
-                                    logout();
-                                  } else {
-                                    // Try to surface backend error for easier debugging
-                                    try {
-                                      const errorData = await response.json();
-                                      alert(errorData.error || 'Failed to delete run');
-                                    } catch {
-                                      alert('Failed to delete run');
-                                    }
-                                  }
-                                } catch (error) {
-                                  console.error('Error deleting run:', error);
-                                  alert('Failed to delete run');
-                                }
-                              }
+                              setDeleteConfirmRunId(run.run_id);
                             }}
                             className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
                             title="Delete run"
@@ -429,6 +397,75 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                             </svg>
                           </button>
+                          
+                          {/* Delete Confirmation Modal */}
+                          {deleteConfirmRunId === run.run_id && (
+                            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 rounded-lg">
+                              <div className="bg-white rounded-lg shadow-xl p-4 mx-2 max-w-xs w-full">
+                                <p className="text-sm font-semibold text-gray-900 mb-4 text-center">Delete Permanently?</p>
+                                <div className="flex items-center justify-center gap-3">
+                                  {/* Deny button */}
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDeleteConfirmRunId(null);
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                    <span className="text-sm font-medium">Cancel</span>
+                                  </button>
+                                  {/* Confirm button */}
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      setDeleteConfirmRunId(null);
+                                      try {
+                                        // Ensure API URL includes protocol
+                                        let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+                                        apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+                                        if (!apiUrl.match(/^https?:\/\//)) {
+                                          // If no protocol, assume https
+                                          apiUrl = `https://${apiUrl}`;
+                                        }
+                                        const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
+                                          method: 'DELETE',
+                                          headers: {
+                                            "Authorization": `Bearer ${token}`,
+                                          },
+                                        });
+                                        if (response.ok) {
+                                          // Remove locally so it never reappears in the list this session
+                                          setRuns(prev => prev.filter(r => r.run_id !== run.run_id));
+                                        } else if (response.status === 401) {
+                                          logout();
+                                        } else {
+                                          // Try to surface backend error for easier debugging
+                                          try {
+                                            const errorData = await response.json();
+                                            alert(errorData.error || 'Failed to delete run');
+                                          } catch {
+                                            alert('Failed to delete run');
+                                          }
+                                        }
+                                      } catch (error) {
+                                        console.error('Error deleting run:', error);
+                                        alert('Failed to delete run');
+                                      }
+                                    }}
+                                    className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    <span className="text-sm font-medium">Delete</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                           
                           {/* Archive button - only in finished tab */}
                           {activeTab === 'finished' && (
