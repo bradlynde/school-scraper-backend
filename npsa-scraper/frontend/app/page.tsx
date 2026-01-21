@@ -1132,12 +1132,10 @@ export default function Home() {
                 {/* Header */}
                 <div className="mb-10 text-center">
                   <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">Scraping Complete</h1>
-                  <p className="text-lg text-gray-600">Pipeline finished successfully</p>
                 </div>
 
-                {/* 3 Card Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8 mb-10">
-                  
+                {/* 2 Card Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-8 mb-10">
                   {/* Card 1: Total Contacts */}
                   <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
                     <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Contacts Extracted</h3>
@@ -1149,18 +1147,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Card 2: Schools Processed */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
-                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Schools Processed</h3>
-                    <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
-                      {summary.schoolsProcessed || summary.schoolsFound || 0}
-                    </div>
-                    <div className="h-28 -mx-8 -mb-8 mt-4">
-                      {createLineGraph(summary.countySchools || [], 400, 112, "#1e3a5f")}
-                    </div>
-                  </div>
-
-                  {/* Card 3: Processing Time */}
+                  {/* Card 2: Processing Time */}
                   <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-6 md:p-8">
                     <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Processing Time</h3>
                     <div className="text-6xl font-bold text-[#1e3a5f]">
