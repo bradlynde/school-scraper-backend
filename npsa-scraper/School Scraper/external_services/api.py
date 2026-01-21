@@ -66,7 +66,11 @@ app = Flask(__name__)
 
 # CORS configuration - restrict to allowed origin (REQUIRED in production)
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN")
-if not ALLOWED_ORIGIN:
+if ALLOWED_ORIGIN:
+    # Normalize origin - remove trailing slashes to prevent CORS mismatch
+    ALLOWED_ORIGIN = ALLOWED_ORIGIN.rstrip('/')
+    print(f"CORS: Using ALLOWED_ORIGIN = {ALLOWED_ORIGIN}")
+else:
     # Allow wildcard only if explicitly set to "*" for development
     # In production, ALLOWED_ORIGIN must be set to your frontend URL
     import sys
@@ -77,7 +81,7 @@ if not ALLOWED_ORIGIN:
 # Configure CORS to automatically handle OPTIONS preflight requests
 CORS(app, 
      resources={r"/*": {
-         "origins": ALLOWED_ORIGIN if isinstance(ALLOWED_ORIGIN, str) and ALLOWED_ORIGIN != "*" else "*",
+         "origins": ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*",
          "methods": ["GET", "POST", "DELETE", "OPTIONS", "PUT"],
          "allow_headers": ["Content-Type", "Authorization"],
          "expose_headers": ["Content-Type"],
@@ -1508,14 +1512,8 @@ def root():
 @app.route("/health", methods=["GET", "OPTIONS"])
 def health():
     """Health check endpoint - public, no authentication required"""
-    if request.method == "OPTIONS":
-        response = jsonify({})
-        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
-        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
-        return response, 200
-    
+    # Flask-CORS handles CORS headers automatically, but we can add explicit headers if needed
     response = jsonify({"status": "healthy"})
-    response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
     return response, 200
 
 
@@ -1610,14 +1608,8 @@ def run_pipeline():
     print(f"[DEBUG] Request path: {request.path}")
     print(f"[DEBUG] Request headers: {dict(request.headers)}")
     
-    # OPTIONS is handled by require_auth decorator, which calls this function
-    # We need to explicitly handle OPTIONS here to set CORS headers correctly
-    if request.method == "OPTIONS":
-        response = jsonify({})
-        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
-        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
-        return response, 200
+    # Flask-CORS handles OPTIONS preflight requests automatically
+    # No need to manually handle OPTIONS here
     
     # Ensure POST method (should never reach here for OPTIONS since handled above)
     if request.method != "POST":
