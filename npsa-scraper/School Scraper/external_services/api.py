@@ -649,13 +649,12 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
             state=state
         )
         
-        # Run pipeline for this single county - suppress noisy stdout/stderr from inner steps
-        with open(os.devnull, "w") as devnull, contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
-            pipeline.run(
-                counties=[county],  # Process only this county
-                batch_size=0,  # Process all schools in county
-                output_csv=output_csv
-            )
+        # Run pipeline for this single county - allow per-school logging to surface
+        pipeline.run(
+            counties=[county],  # Process only this county
+            batch_size=0,  # Process all schools in county
+            output_csv=output_csv
+        )
         
         # Pipeline.run() already handles all compilation and writes to output_csv
         # Just verify the file was created
