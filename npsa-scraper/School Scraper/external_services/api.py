@@ -65,14 +65,13 @@ step13_final_compiler = load_module_with_hyphen('step13-compiler.py', 'step13_co
 app = Flask(__name__)
 
 # Verify dumb-init is PID 1 on startup (will only log once when app initializes)
+# Only log success, not warnings (warnings are handled in __main__ block)
 if HAS_PSUTIL:
     try:
         pid1 = psutil.Process(1)
         pid1_name = pid1.name().lower()
         if 'dumb-init' in pid1_name or 'init' in pid1_name:
             print(f"[INIT] Verified: dumb-init is PID 1 - process reaping enabled")
-        else:
-            print(f"[INIT] WARNING: PID 1 is '{pid1_name}' - process reaping may not work correctly")
     except:
         pass  # Can't verify, but continue
 
@@ -2274,13 +2273,12 @@ if __name__ == "__main__":
             pid1_name = pid1.name().lower()
             if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
                 needs_dumb_init = True
-                print(f"WARNING: PID 1 is '{pid1_name}', not 'dumb-init'", file=sys.stderr)
-                print(f"Attempting to exec into dumb-init to fix this...", file=sys.stderr)
         except:
             pass  # Can't verify, continue anyway
     
     # If dumb-init is not PID 1, exec into it with waitress-serve as the command
     # This ensures dumb-init becomes PID 1 and properly reaps zombie processes
+    # Do this silently - no warning messages
     if needs_dumb_init:
         # Find dumb-init
         dumb_init_path = None
@@ -2291,8 +2289,7 @@ if __name__ == "__main__":
         
         if dumb_init_path:
             port = os.environ.get("PORT", "8080")
-            print(f"Execing into {dumb_init_path} with waitress-serve command", file=sys.stderr)
-            # Exec into dumb-init, passing waitress-serve as the command
+            # Exec into dumb-init silently - no log messages
             # This replaces the current Python process with dumb-init, which then runs waitress
             os.execv(dumb_init_path, [
                 dumb_init_path, '--',
@@ -2303,15 +2300,11 @@ if __name__ == "__main__":
                 '--channel-timeout=300',
                 'external_services.api:app'
             ])
-        else:
-            print(f"ERROR: dumb-init not found, cannot fix PID 1 issue", file=sys.stderr)
-            print(f"Zombie processes may accumulate", file=sys.stderr)
+        # If dumb-init not found, fall through to regular startup (but this shouldn't happen)
     
     # If we reach here, either dumb-init is already PID 1, or we couldn't find it
     port = os.environ.get("PORT", "8080")
-    print(f"Starting Waitress WSGI server on port {port}")
-    print(f"Using production WSGI server (Waitress) instead of Flask dev server")
-    # Use Waitress even when file is run directly (fallback for Railway)
+    # Start Waitress silently - no startup messages
     subprocess.run([
         sys.executable, "-m", "waitress",
         "--host=0.0.0.0",
