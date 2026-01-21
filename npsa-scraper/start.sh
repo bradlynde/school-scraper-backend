@@ -2,8 +2,9 @@
 # Startup script that ensures dumb-init runs as PID 1
 # This script is executed by the container and ensures proper process reaping
 
-# Force diagnostic output to stderr so it appears in logs
-exec >&2
+# Force diagnostic output to both stdout and stderr so it appears in logs
+# Railway may capture either, so send to both
+exec > >(tee -a /proc/1/fd/1 /proc/1/fd/2) 2>&1
 
 # Diagnostic: Check what PID 1 is
 PID1_NAME=$(ps -p 1 -o comm= 2>/dev/null || echo "unknown")

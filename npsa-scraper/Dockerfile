@@ -53,6 +53,7 @@ EXPOSE 8080
 # dumb-init acts as PID 1 and automatically reaps zombie processes (fixes Chrome zombie accumulation)
 # Use exec form to ensure dumb-init is PID 1 and properly reaps zombie processes
 # The start.sh script provides additional safety checks
+# CRITICAL: Railway must respect this ENTRYPOINT - if it runs python api.py directly, dumb-init won't be PID 1
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["/app/start.sh"]
 
