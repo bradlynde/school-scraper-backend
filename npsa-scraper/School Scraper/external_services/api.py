@@ -2246,20 +2246,23 @@ def not_found(e):
         "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete"]
     }), 404
 
-# Production: Always use Waitress, even if file is run directly
-# This ensures Railway (or any environment) uses Waitress instead of Flask dev server
-if __name__ == "__main__":
-    import subprocess
-    import sys
-    port = os.environ.get("PORT", "8080")
-    print(f"Starting Waitress WSGI server on port {port}")
-    print(f"Using production WSGI server (Waitress) instead of Flask dev server")
-    # Use Waitress even when file is run directly
-    subprocess.run([
-        sys.executable, "-m", "waitress",
-        "--host=0.0.0.0",
-        f"--port={port}",
-        "--threads=4",
-        "--channel-timeout=300",
-        "external_services.api:app"
-    ])
+# CRITICAL: DO NOT run this file directly in production
+# Railway should use the Dockerfile ENTRYPOINT/CMD which runs start.sh
+# start.sh ensures dumb-init is PID 1 and then runs waitress-serve
+# If you run this file directly, dumb-init won't be PID 1 and zombie processes will accumulate
+#
+# For local development only, uncomment the block below:
+# if __name__ == "__main__":
+#     import subprocess
+#     import sys
+#     port = os.environ.get("PORT", "8080")
+#     print(f"WARNING: Running directly - dumb-init is not PID 1!")
+#     print(f"Starting Waitress WSGI server on port {port}")
+#     subprocess.run([
+#         sys.executable, "-m", "waitress",
+#         "--host=0.0.0.0",
+#         f"--port={port}",
+#         "--threads=4",
+#         "--channel-timeout=300",
+#         "external_services.api:app"
+#     ])
