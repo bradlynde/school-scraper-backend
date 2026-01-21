@@ -437,7 +437,13 @@ export default function Home() {
 
   async function checkPipelineStatus(runId: string) {
     try {
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+      // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
       const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
         method: "GET",
         headers: {
@@ -631,7 +637,13 @@ export default function Home() {
     setEstimatedTime(null);
 
     try {
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+      // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
       console.log("Starting pipeline with API URL:", apiUrl);
       console.log("Request payload:", { state: selectedState.toLowerCase().replace(' ', '_'), type: selectedType });
 
@@ -762,7 +774,13 @@ export default function Home() {
         }
         // Check for network errors
         else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed")) {
-          const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+          // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
           errorMessage = `Failed to connect to the backend API at ${apiUrl}. This could mean:\n\n1. The backend server is not running\n2. The API URL is incorrect\n3. There's a network connectivity issue\n\nPlease verify that NEXT_PUBLIC_API_URL is set correctly in your Vercel environment variables and that the Railway backend is running.`;
         }
       }
@@ -851,7 +869,13 @@ export default function Home() {
             setSelectedRunId(runId);
             setSidebarOpen(false); // Close mobile menu on run select
             // Fetch run status to determine if it's running or finished
-            const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+            // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
             try {
               // First, try to get run from /runs endpoint to get metadata
               const runsResponse = await fetch(`${apiUrl}/runs`, {
@@ -1151,7 +1175,13 @@ export default function Home() {
                     <button
                       onClick={async () => {
                         if (selectedRunId) {
-                          const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+                          // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
                           try {
                             const response = await fetch(`${apiUrl}/runs/${selectedRunId}/download`, {
                               headers: {

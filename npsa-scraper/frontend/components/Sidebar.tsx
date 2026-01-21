@@ -41,7 +41,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     if (!token) return;
     
     try {
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+      // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
       const response = await fetch(`${apiUrl}/runs`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -112,7 +118,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     if (!token) return;
     
     try {
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+      // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
       const response = await fetch(`${apiUrl}/runs/${runId}/download`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -380,7 +392,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                               e.stopPropagation();
                               if (confirm(`Are you sure you want to delete this run? This action cannot be undone.`)) {
                                 try {
-                                  const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+                                  // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
                                   const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
                                     method: 'DELETE',
                                     headers: {
@@ -414,7 +432,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                  const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+                                  // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
                                   const response = await fetch(`${apiUrl}/runs/${run.run_id}/archive`, {
                                     method: 'POST',
                                     headers: {
@@ -448,7 +472,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                  const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+                                  // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
                                   const response = await fetch(`${apiUrl}/runs/${run.run_id}/unarchive`, {
                                     method: 'POST',
                                     headers: {

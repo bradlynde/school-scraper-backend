@@ -122,7 +122,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (username: string, password: string): Promise<boolean> => {
     try {
-      const apiUrl = (process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app").replace(/\/+$/, '');
+      // Ensure API URL includes protocol
+      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
+      if (!apiUrl.match(/^https?:\/\//)) {
+        // If no protocol, assume https
+        apiUrl = `https://${apiUrl}`;
+      }
       console.log("Attempting login to:", `${apiUrl}/login`);
       
       // Add timeout to prevent hanging
