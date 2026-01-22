@@ -282,14 +282,15 @@ def kill_chrome_processes_bottom_up(current_pid: int = None):
         try:
             for child in current_process.children(recursive=True):
                 try:
-                    name = child.info.get('name', '').lower()
+                    # child.name() returns the process name directly (no .info attribute)
+                    name = child.name().lower()
                     # Check if it's a Chrome process
                     if ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
                         # Skip protected processes
                         if child.pid not in protected_pids:
                             if name not in protected_names:
                                 chrome_processes.append(child)
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, AttributeError):
                     continue
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
@@ -436,11 +437,12 @@ def check_health():
                             try:
                                 for child in proc.children(recursive=True):
                                     try:
-                                        child_name = child.info.get('name', '').lower()
+                                        # child.name() returns the process name directly (no .info attribute)
+                                        child_name = child.name().lower()
                                         if ('chrome' in child_name or 'chromium' in child_name or 'chromedriver' in child_name):
                                             if child.is_running():
                                                 child.terminate()
-                                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, AttributeError):
                                         continue
                                 time.sleep(0.3)  # Wait for children to die
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
