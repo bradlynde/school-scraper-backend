@@ -440,6 +440,51 @@ class ContentCollector:
             if killed_count > 0:
                 print(f"    {bold('[SELENIUM]')} Killed {killed_count} Chrome processes system-wide (bottom-up)")
             
+            # Reap zombie Chrome processes to prevent accumulation
+            # Zombies can't be killed - they must be reaped by their parent
+            reaped_count = 0
+            try:
+                current_pid = os.getpid()
+                current_process = psutil.Process(current_pid)
+                
+                # Find all zombie Chrome processes
+                zombie_processes = []
+                for proc in psutil.process_iter(['name', 'pid', 'ppid', 'status']):
+                    try:
+                        name = proc.info.get('name', '').lower()
+                        status = proc.info.get('status', '').lower()
+                        pid = proc.info['pid']
+                        ppid = proc.info.get('ppid', -1)
+                        
+                        # Check if it's a zombie Chrome process
+                        if status == 'zombie' and ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
+                            # Only reap zombies that are direct children of our process
+                            # os.waitpid() can only reap our own children, not grandchildren
+                            if ppid == current_pid:
+                                zombie_processes.append(pid)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                        continue
+                
+                # Reap zombie processes using os.waitpid()
+                # WNOHANG flag means don't block - just reap if available
+                for pid in zombie_processes:
+                    try:
+                        # Reap the zombie (non-blocking)
+                        # os.waitpid() can only reap our own direct children
+                        result = os.waitpid(pid, os.WNOHANG)
+                        if result[0] == pid:
+                            reaped_count += 1
+                    except (ChildProcessError, ProcessLookupError, OSError):
+                        # Process already reaped, not our child, or other error - ignore
+                        pass
+                
+                if reaped_count > 0:
+                    print(f"    {bold('[SELENIUM]')} Reaped {reaped_count} zombie Chrome processes")
+            
+            except Exception as e:
+                # Don't fail cleanup if zombie reaping fails
+                print(f"    {bold('[SELENIUM]')} WARNING: Error reaping zombie processes: {e}")
+            
         except Exception as e:
             print(f"    {bold('[SELENIUM]')} WARNING: Error in Chrome process cleanup: {e}")
         
