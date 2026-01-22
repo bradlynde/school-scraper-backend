@@ -265,7 +265,7 @@ class ContentCollector:
                     # Kill children BEFORE quitting driver to prevent orphans
                     self._kill_all_chrome_processes()
                     time.sleep(0.5)
-                    self.driver.quit()
+                self.driver.quit()
                     time.sleep(0.5)
             except:
                 pass  # Don't let cleanup fail
@@ -286,7 +286,7 @@ class ContentCollector:
         
         driver = None
         try:
-            if self.driver:
+        if self.driver:
                 driver = self.driver
                 self.driver = None
                 driver.quit()
@@ -351,14 +351,15 @@ class ContentCollector:
             try:
                 for child in current_process.children(recursive=True):
                     try:
-                        name = child.info.get('name', '').lower()
+                        # child.name() returns the process name directly (no .info attribute)
+                        name = child.name().lower()
                         # Check if it's a Chrome process
                         if ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
                             # Skip protected processes
                             if child.pid not in protected_pids:
                                 if name not in protected_names:
                                     chrome_processes.append(child)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, AttributeError):
                         continue
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
@@ -487,11 +488,12 @@ class ContentCollector:
                         try:
                             for child in proc.children(recursive=True):
                                 try:
-                                    child_name = child.info.get('name', '').lower()
+                                    # child.name() returns the process name directly (no .info attribute)
+                                    child_name = child.name().lower()
                                     if ('chrome' in child_name or 'chromium' in child_name or 'chromedriver' in child_name):
                                         if child.is_running():
                                             child.terminate()
-                                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, AttributeError):
                                     continue
                             time.sleep(0.2)  # Brief wait for children to die
                         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -524,14 +526,14 @@ class ContentCollector:
     def _list_all_chrome_processes(self):
         """
         List ALL Chrome/Chromium/ChromeDriver processes with exact names, PIDs, and PPIDs.
-        Used for debugging to see exactly what processes are created by the tool.
+        Used for monitoring to ensure no process accumulation.
+        Prints the list to stdout for visibility.
         
         Returns:
-            list: List of dicts with process info
+            int: Number of Chrome processes found
         """
         if not HAS_PSUTIL:
-            # Process listing removed - no longer needed
-            return []
+            return 0
         
         processes = []
         try:
@@ -566,13 +568,20 @@ class ContentCollector:
             # Sort by PID for consistent output
             processes.sort(key=lambda p: p['pid'])
             
-            # Process listing removed - no longer needed
+            # Print the process list for monitoring
+            if processes:
+                print(f"    {bold('[SELENIUM]')} Active Chrome processes ({len(processes)}):")
+                for proc_info in processes:
+                    orphaned = " [ORPHANED]" if proc_info['ppid'] == 1 else ""
+                    print(f"      PID {proc_info['pid']:6d} | PPID {proc_info['ppid']:6d} | {proc_info['status']:8s} | {proc_info['name']}{orphaned}")
+            else:
+                print(f"    {bold('[SELENIUM]')} No active Chrome processes")
         
         except Exception as e:
-            # Error listing processes - silently continue
-            pass
+            print(f"    {bold('[SELENIUM]')} WARNING: Error listing Chrome processes: {e}")
+            return 0
         
-        return processes
+        return len(processes)
     
     def safe_get(self, url: str) -> requests.Response:
         """Make HTTP request with retry logic"""
@@ -619,36 +628,46 @@ class ContentCollector:
         thread.start()
         thread.join(timeout=timeout)
         
-        # Check if thread is still alive (timed out)
-        if thread.is_alive():
-            # Timeout occurred - kill children FIRST (bottom-up) before quitting driver
-            print(f"      [TIMEOUT] Page load exceeded {timeout}s, forcefully terminating...")
-            try:
-                # CRITICAL: Kill children BEFORE parent to prevent orphans
-                # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
-                self._kill_all_chrome_processes()
-                time.sleep(1.0)  # Wait longer for children to die
-                
-                # Step 2: Kill orphaned processes (PPID=1) that may have been created
-                self._kill_orphaned_chrome_processes()
-                time.sleep(0.5)
-                
-                # Step 3: Try to quit driver gracefully first
+            # Check if thread is still alive (timed out)
+            if thread.is_alive():
+                # Timeout occurred - kill children FIRST (bottom-up) before quitting driver
+                print(f"      [TIMEOUT] Page load exceeded {timeout}s, forcefully terminating...")
                 try:
-                    driver.quit()
-                except:
-                    pass  # Driver may already be dead
-                
-                time.sleep(0.5)  # Wait after quit
-                
-                # Step 4: Final cleanup - kill any remaining Chrome processes
-                self._kill_all_chrome_processes()
-                self._kill_orphaned_chrome_processes()
-            except Exception as e:
-                print(f"      [TIMEOUT] Error during cleanup: {e}")
-            # Mark driver as dead so it gets recreated
-            self.driver = None
-            return False
+                    # List processes before cleanup
+                    print(f"      {bold('[TIMEOUT]')} Process status before cleanup:")
+                    self._list_all_chrome_processes()
+                    
+                    # CRITICAL: Kill children BEFORE parent to prevent orphans
+                    # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
+                    self._kill_all_chrome_processes()
+                    time.sleep(1.0)  # Wait longer for children to die
+                    
+                    # Step 2: Kill orphaned processes (PPID=1) that may have been created
+                    self._kill_orphaned_chrome_processes()
+                    time.sleep(0.5)
+                    
+                    # Step 3: Try to quit driver gracefully first
+                    try:
+                        driver.quit()
+                    except:
+                        pass  # Driver may already be dead
+                    
+                    time.sleep(0.5)  # Wait after quit
+                    
+                    # Step 4: Final cleanup - kill any remaining Chrome processes
+                    self._kill_all_chrome_processes()
+                    self._kill_orphaned_chrome_processes()
+                    
+                    # List processes after cleanup to verify
+                    print(f"      {bold('[TIMEOUT]')} Process status after cleanup:")
+                    remaining = self._list_all_chrome_processes()
+                    if remaining > 0:
+                        print(f"      {bold('[TIMEOUT]')} WARNING: {remaining} Chrome processes still active after cleanup!")
+                except Exception as e:
+                    print(f"      [TIMEOUT] Error during cleanup: {e}")
+                # Mark driver as dead so it gets recreated
+                self.driver = None
+                return False
         
         # Check if an exception occurred
         if exception[0]:
@@ -726,12 +745,20 @@ class ContentCollector:
             print(f"      Selenium error: {e}")
             return None
         finally:
-            # List all Chrome processes after each Selenium use (for monitoring)
+            # List all Chrome processes after Selenium use (BEFORE cleanup) for monitoring
+            print(f"    {bold('[SELENIUM]')} Process status after Selenium use:")
             self._list_all_chrome_processes()
+            
             # After each Selenium use, kill orphaned Chrome processes (PPID=1) to prevent accumulation
             # This aligns with Giorgio's recommendation: "kill all processes without a parent except PID 1"
             # Prevents orphaned processes from accumulating when parent processes die unexpectedly (crashes/timeouts)
             self._kill_orphaned_chrome_processes()
+            
+            # List all Chrome processes AFTER cleanup to verify no accumulation
+            print(f"    {bold('[SELENIUM]')} Process status after cleanup:")
+            remaining = self._list_all_chrome_processes()
+            if remaining > 0:
+                print(f"    {bold('[SELENIUM]')} WARNING: {remaining} Chrome processes still active after cleanup!")
     
     def collect_page_content(self, school_name: str, url: str) -> Optional[Dict]:
         """
@@ -772,6 +799,10 @@ class ContentCollector:
             # TIMEOUT: Kill everything and cleanup
             print(f"    [TIMEOUT] Page processing exceeded {TIMEOUT}s hard limit, forcefully terminating...")
             try:
+                # List processes before cleanup
+                print(f"    {bold('[TIMEOUT]')} Process status before cleanup:")
+                self._list_all_chrome_processes()
+                
                 # CRITICAL: Kill children BEFORE parent to prevent orphans
                 # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
                 self._kill_all_chrome_processes()
@@ -794,6 +825,12 @@ class ContentCollector:
                 # Step 4: Final cleanup - kill any remaining Chrome processes
                 self._kill_all_chrome_processes()
                 self._kill_orphaned_chrome_processes()
+                
+                # List processes after cleanup to verify
+                print(f"    {bold('[TIMEOUT]')} Process status after cleanup:")
+                remaining = self._list_all_chrome_processes()
+                if remaining > 0:
+                    print(f"    {bold('[TIMEOUT]')} WARNING: {remaining} Chrome processes still active after cleanup!")
             except Exception as e:
                 print(f"    [TIMEOUT] Error during cleanup: {e}")
             
@@ -1033,9 +1070,9 @@ if __name__ == "__main__":
         # Cleanup Selenium driver with nuclear option
         driver = None
         try:
-            if collector.driver:
+        if collector.driver:
                 driver = collector.driver
                 collector.driver = None
                 driver.quit()
-        except:
+            except:
             pass  # Don't let cleanup fail
