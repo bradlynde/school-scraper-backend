@@ -1422,7 +1422,47 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                             def schedule_container_restart():
                                 """Schedule container restart after grace period"""
                                 time.sleep(30)  # Wait 30 seconds for final API calls
-                                print(f"[{run_id}] Container reset: Exiting process to trigger Railway restart...")
+                                print(f"[{run_id}] Container reset: Performing final cleanup before exit...")
+                                
+                                # CRITICAL: Final cleanup before exit to prevent orphaned processes
+                                try:
+                                    # Final system-wide Chrome cleanup
+                                    if HAS_PSUTIL:
+                                        killed = kill_chrome_processes_bottom_up()
+                                        print(f"[{run_id}] Final cleanup: Killed {killed} Chrome processes")
+                                        
+                                        # Attempt to reap any remaining zombies (including orphaned ones)
+                                        reaped_count = 0
+                                        try:
+                                            current_pid = os.getpid()
+                                            # Find ALL zombie Chrome processes, not just direct children
+                                            for proc in psutil.process_iter(['name', 'pid', 'ppid', 'status']):
+                                                try:
+                                                    name = proc.info.get('name', '').lower()
+                                                    status = proc.info.get('status', '').lower()
+                                                    pid = proc.info['pid']
+                                                    
+                                                    if status == 'zombie' and ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
+                                                        # Try to reap even if not direct child (may fail, but worth trying)
+                                                        try:
+                                                            result = os.waitpid(pid, os.WNOHANG)
+                                                            if result[0] == pid:
+                                                                reaped_count += 1
+                                                        except (ChildProcessError, ProcessLookupError, OSError):
+                                                            # Not our child or already reaped - expected for orphaned zombies
+                                                            pass
+                                                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                                                    continue
+                                            
+                                            if reaped_count > 0:
+                                                print(f"[{run_id}] Final cleanup: Reaped {reaped_count} zombie Chrome processes")
+                                        except Exception as e:
+                                            print(f"[{run_id}] WARNING: Error during final zombie reaping: {e}")
+                                    
+                                    print(f"[{run_id}] Final cleanup complete")
+                                except Exception as e:
+                                    print(f"[{run_id}] WARNING: Error during final cleanup: {e}")
+                                
                                 # Update metadata with reset confirmation
                                 try:
                                     reset_metadata = load_run_metadata(run_id) or {}
@@ -1433,6 +1473,10 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                 except Exception as e:
                                     print(f"[{run_id}] Failed to save container reset confirmation: {e}")
                                 
+                                # Small delay to ensure cleanup completes
+                                time.sleep(1)
+                                
+                                print(f"[{run_id}] Container reset: Exiting process to trigger Railway restart...")
                                 # Exit with code 1 to trigger Railway restart (ON_FAILURE policy)
                                 # Railway will automatically restart the container
                                 os._exit(1)
