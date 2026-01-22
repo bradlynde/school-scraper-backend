@@ -310,10 +310,12 @@ class ContentCollector:
     
     def _kill_all_chrome_processes(self):
         """
-        Deep cleanup of all Chrome/Chromium/ChromeDriver child processes.
+        SYSTEM-WIDE cleanup of ALL Chrome/Chromium/ChromeDriver processes.
         Kills processes BOTTOM-UP (children first, then parents) to prevent zombies.
-        Only targets processes in the current worker's process tree (not system-wide).
-        Protects main container processes (waitress-serve, main Python process).
+        Scans ALL processes system-wide, not just children of current process.
+        Protects main container processes (waitress-serve, main Python process, PID 1).
+        
+        This is the comprehensive cleanup that ensures NO Chrome processes accumulate.
         
         Returns:
             int: Number of processes killed
@@ -328,8 +330,8 @@ class ContentCollector:
             
             # Identify main container processes to protect
             # These should never be killed, even if they match patterns
-            protected_names = {'waitress-serve', 'dumb-init', 'python', 'python3'}
-            protected_pids = set()
+            protected_names = {'waitress-serve', 'dumb-init', 'python', 'python3', 'waitress'}
+            protected_pids = {1}  # Always protect PID 1 (init process)
             
             # Get main container PID (parent or grandparent process)
             try:
@@ -341,55 +343,77 @@ class ContentCollector:
                         grandparent = parent.parent()
                         if grandparent:
                             protected_pids.add(grandparent.pid)
+                            # Also protect great-grandparent
+                            try:
+                                great_grandparent = grandparent.parent()
+                                if great_grandparent:
+                                    protected_pids.add(great_grandparent.pid)
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
             
-            # Collect all Chrome processes in worker's process tree
+            # Collect ALL Chrome processes system-wide (not just children)
             chrome_processes = []
-            try:
-                for child in current_process.children(recursive=True):
-                    try:
-                        # child.name() returns the process name directly (no .info attribute)
-                        name = child.name().lower()
-                        # Check if it's a Chrome process
-                        if ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
-                            # Skip protected processes
-                            if child.pid not in protected_pids:
-                                if name not in protected_names:
-                                    chrome_processes.append(child)
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, AttributeError):
-                        continue
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+            chrome_process_map = {}  # pid -> Process object
+            
+            for proc in psutil.process_iter(['name', 'pid', 'ppid']):
+                try:
+                    name = proc.info.get('name', '').lower()
+                    pid = proc.info['pid']
+                    
+                    # Check if it's a Chrome process
+                    if ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
+                        # Skip protected processes
+                        if pid not in protected_pids and name not in protected_names:
+                            # Get the actual Process object (not just info dict)
+                            try:
+                                proc_obj = psutil.Process(pid)
+                                chrome_processes.append(proc_obj)
+                                chrome_process_map[pid] = proc_obj
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                continue
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                    continue
             
             if not chrome_processes:
                 return 0
             
-            # Sort processes by depth (deepest children first) - BOTTOM-UP approach
-            # Build depth map: calculate depth of each process from root
+            # Build process tree to determine depth (children first, parents last)
+            # Depth = number of Chrome descendants (deeper = more children)
             depth_map = {}
-            def get_depth(proc):
+            
+            def calculate_depth(proc):
+                """Calculate depth based on number of Chrome descendants (children + their descendants)"""
                 if proc.pid in depth_map:
                     return depth_map[proc.pid]
+                
                 try:
-                    if proc.pid == current_pid:
-                        depth = 0
-                    else:
-                        parent_depth = get_depth(proc.parent()) if proc.parent() else 0
-                        depth = parent_depth + 1
+                    # Count all Chrome descendants (children + grandchildren, etc.)
+                    depth = 0
+                    for child in proc.children(recursive=False):  # Only direct children
+                        try:
+                            if child.pid in chrome_process_map:
+                                # Count this child + all its Chrome descendants
+                                depth += 1 + calculate_depth(child)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, AttributeError):
+                            continue
                     depth_map[proc.pid] = depth
                     return depth
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    return 999  # Unknown depth, kill last
+                    depth_map[proc.pid] = 0
+                    return 0
             
-            # Calculate depths
+            # Calculate depths for all Chrome processes
             for proc in chrome_processes:
-                get_depth(proc)
+                if proc.pid not in depth_map:
+                    calculate_depth(proc)
             
-            # Sort by depth descending (deepest = children first, shallowest = parents last)
-            chrome_processes.sort(key=lambda p: depth_map.get(p.pid, 999), reverse=True)
+            # Sort by depth DESCENDING (deepest = children first, shallowest = parents last)
+            # This ensures BOTTOM-UP killing (children before parents)
+            chrome_processes.sort(key=lambda p: depth_map.get(p.pid, 0), reverse=True)
             
             # Kill processes BOTTOM-UP (deepest children first)
             for proc in chrome_processes:
@@ -401,11 +425,11 @@ class ContentCollector:
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
             
-            # Wait a moment for processes to die
+            # Wait for processes to die
             if killed_count > 0:
                 time.sleep(0.5)
                 
-                # Force kill any remaining processes
+                # Force kill any remaining processes (still in reverse order)
                 for proc in chrome_processes:
                     try:
                         if proc.is_running():
@@ -414,7 +438,7 @@ class ContentCollector:
                         continue
             
             if killed_count > 0:
-                print(f"    {bold('[SELENIUM]')} Killed {killed_count} Chrome child processes (bottom-up)")
+                print(f"    {bold('[SELENIUM]')} Killed {killed_count} Chrome processes system-wide (bottom-up)")
             
         except Exception as e:
             print(f"    {bold('[SELENIUM]')} WARNING: Error in Chrome process cleanup: {e}")
@@ -423,105 +447,13 @@ class ContentCollector:
     
     def _kill_orphaned_chrome_processes(self):
         """
-        Kill all orphaned Chrome/Chromium/ChromeDriver processes (PPID=1) BOTTOM-UP.
-        Called after each Selenium use to prevent accumulation of orphaned processes.
-        
-        Per Giorgio's recommendation: "kill all the processes that don't have a parent
-        except the first one" (PID 1 - the container init process).
+        Alias for _kill_all_chrome_processes() - now does system-wide cleanup.
+        Kept for backward compatibility with existing code that calls this function.
         
         Returns:
-            int: Number of orphaned processes killed
+            int: Number of processes killed
         """
-        if not HAS_PSUTIL:
-            return 0
-        
-        killed_count = 0
-        try:
-            # ALWAYS protect PID 1 (container init process) - Giorgio's explicit requirement
-            protected_pids = {1}
-            protected_names = {'waitress-serve', 'dumb-init', 'python', 'python3', 'waitress'}
-            
-            # Find orphaned Chrome processes (PPID=1)
-            orphaned_processes = []
-            for proc in psutil.process_iter(['name', 'pid', 'ppid']):
-                try:
-                    name = proc.info.get('name', '').lower()
-                    ppid = proc.info.get('ppid', -1)
-                    pid = proc.info['pid']
-                    
-                    # Check if it's an orphaned Chrome process (PPID=1) and not protected
-                    if ppid == 1 and ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
-                        if pid not in protected_pids and name not in protected_names:
-                            orphaned_processes.append(proc)
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
-                    continue
-            
-            if not orphaned_processes:
-                return 0
-            
-            # Sort orphaned processes by depth (children first) - BOTTOM-UP approach
-            depth_map = {}
-            def get_orphan_depth(proc):
-                if proc.pid in depth_map:
-                    return depth_map[proc.pid]
-                try:
-                    # Count children depth (deeper if has more descendants)
-                    children = proc.children(recursive=True)
-                    depth = len(children)
-                    depth_map[proc.pid] = depth
-                    return depth
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    return 0
-            
-            # Calculate depths
-            for proc in orphaned_processes:
-                get_orphan_depth(proc)
-            
-            # Sort by depth descending (processes with more children = deeper, kill first)
-            orphaned_processes.sort(key=lambda p: depth_map.get(p.pid, 0), reverse=True)
-            
-            # Kill orphaned processes BOTTOM-UP (processes with more children first)
-            for proc in orphaned_processes:
-                try:
-                    if proc.is_running():
-                        # First, try to kill children of this orphan if any (BOTTOM-UP)
-                        try:
-                            for child in proc.children(recursive=True):
-                                try:
-                                    # child.name() returns the process name directly (no .info attribute)
-                                    child_name = child.name().lower()
-                                    if ('chrome' in child_name or 'chromium' in child_name or 'chromedriver' in child_name):
-                                        if child.is_running():
-                                            child.terminate()
-                                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, AttributeError):
-                                    continue
-                            time.sleep(0.2)  # Brief wait for children to die
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
-                        
-                        # Then kill the orphan process itself
-                        proc.terminate()
-                        killed_count += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                    continue
-            
-            # Force kill any remaining
-            if killed_count > 0:
-                time.sleep(0.3)
-                for proc in orphaned_processes:
-                    try:
-                        if proc.is_running():
-                            proc.kill()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                        continue
-            
-            if killed_count > 0:
-                print(f"    {bold('[SELENIUM]')} Killed {killed_count} orphaned Chrome processes (PPID=1, bottom-up)")
-        
-        except Exception as e:
-            print(f"    {bold('[SELENIUM]')} WARNING: Error killing orphaned Chrome processes: {e}")
-        
-        return killed_count
+        return self._kill_all_chrome_processes()
     
     def _list_all_chrome_processes(self):
         """
