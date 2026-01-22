@@ -386,10 +386,11 @@ class ContentCollector:
         if not HAS_PSUTIL:
             return 0
         
-            # DIAGNOSTIC: Log cleanup start with full context
-            cleanup_start_time = time.time()
-            current_pid = os.getpid()
-            self._cleanup_count += 1
+        # DIAGNOSTIC: Log cleanup start with full context
+        cleanup_start_time = time.time()
+        current_pid = os.getpid()
+        self._cleanup_count += 1
+        killed_count = 0  # Initialize early to ensure it's always defined
         
         try:
             current_process = psutil.Process(current_pid)
@@ -432,8 +433,6 @@ class ContentCollector:
             
             # DIAGNOSTIC: Snapshot BEFORE cleanup
             before_snapshot = self._snapshot_chrome_processes("BEFORE_CLEANUP")
-            
-            killed_count = 0
             
             # Identify main container processes to protect
             # These should never be killed, even if they match patterns
