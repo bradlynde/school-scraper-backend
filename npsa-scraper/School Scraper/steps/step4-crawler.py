@@ -60,6 +60,9 @@ class ContentCollector:
         
         # Track if selenium was used for current school (for cleanup message)
         self._selenium_used_for_school = False
+        # Track cleanup status and process counts for reporting
+        self._cleanup_status = None
+        self._process_counts_after_cleanup = None
         
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -250,11 +253,35 @@ class ContentCollector:
                 print(f"    {bold('[SELENIUM]')} ERROR: Could not create Chrome driver even with minimal options: {e2}")
                 raise
     
+    def _wait_for_driver_ready(self, driver, max_wait=5):
+        """Wait for driver to be ready (ChromeDriver fully initialized)"""
+        for attempt in range(max_wait):
+            try:
+                # Try to get window handles - this confirms ChromeDriver is ready
+                driver.window_handles
+                return True
+            except:
+                time.sleep(1)
+        return False
+    
     def _ensure_driver_healthy(self):
         """Check and restart Selenium driver if needed"""
         if not self.driver:
             # Driver doesn't exist, create it
             self.driver = self._setup_selenium()
+            # Wait for driver to be fully ready before use
+            if self.driver:
+                if not self._wait_for_driver_ready(self.driver):
+                    # Driver creation failed, try again
+                    try:
+                        self.driver.quit()
+                    except:
+                        pass
+                    self._kill_all_chrome_processes()
+                    time.sleep(2)
+                    self.driver = self._setup_selenium()
+                    if self.driver:
+                        self._wait_for_driver_ready(self.driver)
             return
         
         try:
@@ -283,6 +310,9 @@ class ContentCollector:
             
             # Restart the driver
             self.driver = self._setup_selenium()
+            # Wait for driver to be fully ready
+            if self.driver:
+                self._wait_for_driver_ready(self.driver)
     
     def cleanup(self):
         """Basic cleanup: quit Selenium driver and kill all Chrome processes (bottom-up)"""
@@ -733,70 +763,118 @@ class ContentCollector:
         to reveal hidden emails (mailto links that appear on interaction)
         """
         driver = None
+        max_retries = 2
         try:
-            self._ensure_driver_healthy()
-            driver = self.driver
-            
-            # Use timeout wrapper for driver.get() - 45 second hard limit
-            if not self._get_url_with_timeout(driver, url, timeout=900):
-                print(f"      [TIMEOUT] Failed to load page within 45s timeout")
-                # Driver was killed, need to recreate it
-                self.driver = None
-                return None
-            
-            # Wait for page to load using explicit wait (with shorter timeout since page should be loaded)
-            try:
-                wait = WebDriverWait(driver, 5)
-                wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            except TimeoutException:
-                # Page might be loaded but body not ready - continue anyway
-                pass
-            time.sleep(2)  # Wait for any dynamic content
-            
-            if interact:
-                # Look for clickable elements that might reveal emails
-                # Common patterns: profile photos, staff cards, staff member containers
-                clickable_selectors = [
-                    "img[alt*='staff']", "img[alt*='team']", "img[alt*='faculty']",
-                    "[class*='staff']", "[class*='team']", "[class*='faculty']",
-                    "[class*='member']", "[class*='profile']", "[class*='card']",
-                    "a[href*='staff']", "a[href*='team']", "a[href*='faculty']",
-                    "[data-email]", "[data-mailto]", "[class*='email']"
-                ]
-                
-                for selector in clickable_selectors:
+            for attempt in range(max_retries):
+                try:
+                    self._ensure_driver_healthy()
+                    driver = self.driver
+                    
+                    if not driver:
+                        return None
+                    
+                    # Use timeout wrapper for driver.get() - 45 second hard limit
+                    if not self._get_url_with_timeout(driver, url, timeout=900):
+                        print(f"      [TIMEOUT] Failed to load page within 45s timeout")
+                        # Driver was killed, need to recreate it
+                        self.driver = None
+                        if attempt < max_retries - 1:
+                            time.sleep(2)  # 2 second grace period before retry
+                            continue
+                        return None
+                    
+                    # Wait for page to load using explicit wait (with shorter timeout since page should be loaded)
                     try:
-                        elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                        # Increased to 75 clicks per selector type to handle large staff directories
-                        for element in elements[:75]:
+                        wait = WebDriverWait(driver, 5)
+                        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                    except TimeoutException:
+                        # Page might be loaded but body not ready - continue anyway
+                        pass
+                    time.sleep(2)  # Wait for any dynamic content
+                    
+                    if interact:
+                        # Look for clickable elements that might reveal emails
+                        # Common patterns: profile photos, staff cards, staff member containers
+                        clickable_selectors = [
+                            "img[alt*='staff']", "img[alt*='team']", "img[alt*='faculty']",
+                            "[class*='staff']", "[class*='team']", "[class*='faculty']",
+                            "[class*='member']", "[class*='profile']", "[class*='card']",
+                            "a[href*='staff']", "a[href*='team']", "a[href*='faculty']",
+                            "[data-email]", "[data-mailto]", "[class*='email']"
+                        ]
+                        
+                        for selector in clickable_selectors:
                             try:
-                                # Scroll element into view
-                                driver.execute_script("arguments[0].scrollIntoView(true);", element)
-                                time.sleep(0.5)
-                                
-                                # Try clicking
-                                element.click()
-                                time.sleep(0.5)
-                                
-                                # Try hovering
-                                ActionChains(driver).move_to_element(element).perform()
-                                time.sleep(0.3)
+                                elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                                # Increased to 75 clicks per selector type to handle large staff directories
+                                for element in elements[:75]:
+                                    try:
+                                        # Scroll element into view
+                                        driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                                        time.sleep(0.5)
+                                        
+                                        # Try clicking
+                                        element.click()
+                                        time.sleep(0.5)
+                                        
+                                        # Try hovering
+                                        ActionChains(driver).move_to_element(element).perform()
+                                        time.sleep(0.3)
+                                    except:
+                                        continue
                             except:
                                 continue
-                    except:
-                        continue
-                
-                # Additional wait for any JavaScript-revealed emails
-                time.sleep(2)
+                        
+                        # Additional wait for any JavaScript-revealed emails
+                        time.sleep(2)
+                    
+                    # Success - break out of retry loop
+                    return driver.page_source
+                    
+                except Exception as e:
+                    error_str = str(e).lower()
+                    # Check if it's a connection refused error (driver not ready)
+                    if 'connection refused' in error_str or 'errno 111' in error_str:
+                        if attempt < max_retries - 1:
+                            print(f"    {bold('[SELENIUM]')} Driver not ready, retrying in 2s...")
+                            self.driver = None
+                            time.sleep(2)  # 2 second grace period before retry
+                            continue
+                        else:
+                            return None
+                    else:
+                        # Other error - don't retry
+                        return None
             
-            return driver.page_source
+            return None
             
         except Exception as e:
             print(f"      Selenium error: {e}")
             return None
         finally:
+            # Get process counts before cleanup
+            before_zombies, before_orphaned, before_active = self._get_process_counts()
+            
             # After each Selenium use, kill orphaned Chrome processes (PPID=1) to prevent accumulation
             self._kill_orphaned_chrome_processes()
+            
+            # Get process counts after cleanup
+            after_zombies, after_orphaned, after_active = self._get_process_counts()
+            
+            # Determine cleanup status
+            total_before = before_zombies + before_orphaned + before_active
+            total_after = after_zombies + after_orphaned + after_active
+            
+            if total_after == 0:
+                self._cleanup_status = "successful"
+            elif total_after < total_before:
+                self._cleanup_status = "successful"  # Some processes removed
+            else:
+                self._cleanup_status = "unsuccessful"  # No improvement or worse
+            
+            # Store process counts for reporting
+            self._process_counts_after_cleanup = (after_zombies, after_orphaned, after_active)
+            
             # Mark that selenium was used for this school
             self._selenium_used_for_school = True
     
@@ -991,9 +1069,28 @@ class ContentCollector:
             
             # Show cleanup message after school processing if selenium was used
             if self._selenium_used_for_school:
-                zombies, orphaned, active = self._get_process_counts()
-                print(f"    [CLEANUP] Active processes: Z {zombies} | O {orphaned} | C {active}")
-                self._selenium_used_for_school = False  # Reset for next school
+                # Print cleanup status
+                status = self._cleanup_status if self._cleanup_status else "unknown"
+                print(f"    [CLEANUP] Process cleanup {status}")
+                
+                # Print active processes list only if there are any
+                if self._process_counts_after_cleanup:
+                    zombies, orphaned, active = self._process_counts_after_cleanup
+                    if zombies > 0 or orphaned > 0 or active > 0:
+                        process_list = []
+                        if zombies > 0:
+                            process_list.append(f"Z {zombies}")
+                        if orphaned > 0:
+                            process_list.append(f"O {orphaned}")
+                        if active > 0:
+                            process_list.append(f"C {active}")
+                        if process_list:
+                            print(f"    [CLEANUP] Active processes: {' | '.join(process_list)}")
+                
+                # Reset for next school
+                self._selenium_used_for_school = False
+                self._cleanup_status = None
+                self._process_counts_after_cleanup = None
             
             return {
                 'school_name': school_name,
