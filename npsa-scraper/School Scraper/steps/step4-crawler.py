@@ -42,6 +42,11 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
+# Suppress urllib3 connection pool warnings (redundant - we handle driver crashes explicitly)
+import logging
+urllib3_logger = logging.getLogger('urllib3.connectionpool')
+urllib3_logger.setLevel(logging.ERROR)  # Only show ERROR level, suppress WARNING
+
 # ANSI escape codes for bold text
 BOLD = '\033[1m'
 RESET = '\033[0m'
