@@ -58,23 +58,8 @@ class ContentCollector:
         self.use_selenium = use_selenium
         self.driver = None
         
-        # DIAGNOSTIC: Track parent process changes
-        self._last_parent_pid = None
-        self._parent_change_count = 0
-        self._selenium_use_count = 0
-        self._cleanup_count = 0
-        
-        # DIAGNOSTIC: Initialize parent PID tracking
-        if HAS_PSUTIL:
-            try:
-                current_pid = os.getpid()
-                current_process = psutil.Process(current_pid)
-                parent = current_process.parent()
-                if parent:
-                    self._last_parent_pid = parent.pid
-                    print(f"    {bold('[SELENIUM-DIAG]')} INIT: PID={current_pid}, Initial Parent PID={self._last_parent_pid}")
-            except:
-                pass
+        # Track if selenium was used for current school (for cleanup message)
+        self._selenium_used_for_school = False
         
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -238,11 +223,10 @@ class ContentCollector:
                 # Cleanup any leftover Chrome processes before retry (bottom-up)
                 self._kill_all_chrome_processes()
                 
-                # Retry with exponential backoff
-                wait_time = 2 ** retry_count  # 1s, 2s, 4s
+                # 2 second grace period between retries
                 print(f"    {bold('[SELENIUM]')} Failed to create Chrome driver (attempt {retry_count + 1}/{max_retries + 1}): {e}")
-                print(f"    {bold('[SELENIUM]')} Retrying in {wait_time}s...")
-                time.sleep(wait_time)
+                print(f"    {bold('[SELENIUM]')} Retrying in 2s...")
+                time.sleep(2)
                 return self._setup_selenium(retry_count=retry_count + 1, max_retries=max_retries)
             else:
                 # Final attempt with minimal options
@@ -270,20 +254,13 @@ class ContentCollector:
         """Check and restart Selenium driver if needed"""
         if not self.driver:
             # Driver doesn't exist, create it
-            print(f"    {bold('[SELENIUM-DIAG]')} No driver exists, creating new driver...")
             self.driver = self._setup_selenium()
-            # DIAGNOSTIC: Snapshot after driver creation
-            self._snapshot_chrome_processes("AFTER_DRIVER_CREATION")
             return
         
         try:
             self.driver.execute_script("return document.readyState")
         except:
             print(f"    {bold('[SELENIUM]')} Driver crashed, restarting...")
-            print(f"    {bold('[SELENIUM-DIAG]')} DRIVER CRASH DETECTED - Starting recovery...")
-            
-            # DIAGNOSTIC: Snapshot before crash recovery
-            crash_snapshot = self._snapshot_chrome_processes("BEFORE_CRASH_RECOVERY")
             
             driver = None
             try:
@@ -294,32 +271,21 @@ class ContentCollector:
                     self.driver.quit()
                     time.sleep(0.5)
             except Exception as e:
-                print(f"    {bold('[SELENIUM-DIAG]')} Error during driver.quit() in crash recovery: {e}")
+                pass
             
             # Cleanup any leftover Chrome processes before restart (bottom-up)
             self._kill_all_chrome_processes()
             self._kill_orphaned_chrome_processes()
             self.driver = None
             
-            # DIAGNOSTIC: Snapshot after cleanup, before restart
-            self._snapshot_chrome_processes("AFTER_CRASH_CLEANUP_BEFORE_RESTART")
+            # 2 second grace period before restart
+            time.sleep(2)
             
             # Restart the driver
-            print(f"    {bold('[SELENIUM-DIAG]')} Restarting driver after crash...")
             self.driver = self._setup_selenium()
-            
-            # DIAGNOSTIC: Snapshot after restart
-            self._snapshot_chrome_processes("AFTER_DRIVER_RESTART")
     
     def cleanup(self):
         """Basic cleanup: quit Selenium driver and kill all Chrome processes (bottom-up)"""
-        cleanup_start = time.time()
-        current_pid = os.getpid()
-        print(f"    {bold('[SELENIUM-DIAG]')} CLEANUP METHOD CALLED: PID={current_pid}, Time={time.time()}")
-        
-        # DIAGNOSTIC: Snapshot before cleanup starts
-        before_cleanup_snapshot = self._snapshot_chrome_processes("BEFORE_CLEANUP_METHOD")
-        
         # Cleanup Chrome processes first (bottom-up) before quitting driver
         self._kill_all_chrome_processes()
         time.sleep(0.5)  # Wait for children to die
@@ -329,43 +295,51 @@ class ContentCollector:
             if self.driver:
                 driver = self.driver
                 self.driver = None
-                print(f"    {bold('[SELENIUM-DIAG]')} Calling driver.quit()...")
                 driver.quit()
-                print(f"    {bold('[SELENIUM]')} Driver quit")
                 # Wait for driver.quit() to complete and children to die
                 time.sleep(1.0)
-                
-                # DIAGNOSTIC: Snapshot after driver.quit()
-                after_quit_snapshot = self._snapshot_chrome_processes("AFTER_DRIVER_QUIT")
                 
                 # Final cleanup pass to catch any stragglers
                 self._kill_all_chrome_processes()
                 self._kill_orphaned_chrome_processes()
-                
-                # DIAGNOSTIC: Final snapshot
-                final_snapshot = self._snapshot_chrome_processes("AFTER_FINAL_CLEANUP")
-                
-                # DIAGNOSTIC: Overall cleanup effectiveness
-                cleanup_duration = time.time() - cleanup_start
-                total_before = before_cleanup_snapshot.get('total', 0)
-                total_final = final_snapshot.get('total', 0)
-                zombies_before = before_cleanup_snapshot.get('zombies', 0)
-                zombies_final = final_snapshot.get('zombies', 0)
-                
-                print(f"    {bold('[SELENIUM-DIAG]')} CLEANUP METHOD SUMMARY:")
-                print(f"    {bold('[SELENIUM-DIAG]')}   Total Duration: {cleanup_duration:.3f}s")
-                print(f"    {bold('[SELENIUM-DIAG]')}   Processes: {total_before} -> {total_final} (removed: {total_before - total_final})")
-                print(f"    {bold('[SELENIUM-DIAG]')}   Zombies: {zombies_before} -> {zombies_final} (change: {zombies_final - zombies_before})")
-                print(f"    {bold('[SELENIUM-DIAG]')}   Lifetime Stats: Selenium uses={self._selenium_use_count}, Cleanups={self._cleanup_count}, Parent changes={self._parent_change_count}")
-            else:
-                print(f"    {bold('[SELENIUM-DIAG]')} No driver to cleanup")
         except Exception as e:
-            print(f"    {bold('[SELENIUM]')} WARNING: Error quitting driver: {e}")
             # Even if quit() fails, try to kill processes
             self._kill_all_chrome_processes()
             self._kill_orphaned_chrome_processes()
         finally:
             self.driver = None
+    
+    def _get_process_counts(self):
+        """Get current Chrome process counts: (zombies, orphaned_zombies, active)"""
+        if not HAS_PSUTIL:
+            return (0, 0, 0)
+        
+        zombies = 0
+        orphaned_zombies = 0
+        active = 0
+        
+        try:
+            current_pid = os.getpid()
+            for proc in psutil.process_iter(['name', 'pid', 'ppid', 'status']):
+                try:
+                    name = proc.info.get('name', '').lower()
+                    status = proc.info.get('status', '').lower()
+                    ppid = proc.info.get('ppid', -1)
+                    
+                    if ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
+                        if status == 'zombie':
+                            if ppid == 1:
+                                orphaned_zombies += 1
+                            else:
+                                zombies += 1
+                        else:
+                            active += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                    continue
+        except:
+            pass
+        
+        return (zombies, orphaned_zombies, active)
     
     def __del__(self):
         """Destructor - safety net to ensure driver is cleaned up"""
@@ -386,53 +360,11 @@ class ContentCollector:
         if not HAS_PSUTIL:
             return 0
         
-        # DIAGNOSTIC: Log cleanup start with full context
-        cleanup_start_time = time.time()
-        current_pid = os.getpid()
-        self._cleanup_count += 1
         killed_count = 0  # Initialize early to ensure it's always defined
         
         try:
+            current_pid = os.getpid()
             current_process = psutil.Process(current_pid)
-            
-            # DIAGNOSTIC: Track parent process chain and detect changes
-            parent_chain = []
-            current_parent_pid = None
-            try:
-                parent = current_process.parent()
-                if parent:
-                    current_parent_pid = parent.pid
-                    parent_chain.append(f"PID{parent.pid}({parent.name()})")
-                    try:
-                        grandparent = parent.parent()
-                        if grandparent:
-                            parent_chain.append(f"PID{grandparent.pid}({grandparent.name()})")
-                            try:
-                                ggp = grandparent.parent()
-                                if ggp:
-                                    parent_chain.append(f"PID{ggp.pid}({ggp.name()})")
-                            except:
-                                pass
-                    except:
-                        pass
-            except:
-                pass
-            
-            # DIAGNOSTIC: Detect parent process changes
-            if self._last_parent_pid is not None and current_parent_pid is not None:
-                if current_parent_pid != self._last_parent_pid:
-                    self._parent_change_count += 1
-                    print(f"    {bold('[SELENIUM-DIAG]')} ⚠️  PARENT PROCESS CHANGED! {self._last_parent_pid} -> {current_parent_pid} (Change #{self._parent_change_count})")
-                    print(f"    {bold('[SELENIUM-DIAG]')} This may cause orphaned zombies from previous parent!")
-                    self._last_parent_pid = current_parent_pid
-            elif current_parent_pid is not None:
-                self._last_parent_pid = current_parent_pid
-            
-            parent_chain_str = " -> ".join(parent_chain) if parent_chain else "unknown"
-            print(f"    {bold('[SELENIUM-DIAG]')} CLEANUP #{self._cleanup_count} START: PID={current_pid}, Parent={current_parent_pid}, ParentChain={parent_chain_str}")
-            
-            # DIAGNOSTIC: Snapshot BEFORE cleanup
-            before_snapshot = self._snapshot_chrome_processes("BEFORE_CLEANUP")
             
             # Identify main container processes to protect
             # These should never be killed, even if they match patterns
@@ -543,12 +475,6 @@ class ContentCollector:
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         continue
             
-            if killed_count > 0:
-                print(f"    {bold('[SELENIUM]')} Killed {killed_count} Chrome processes system-wide (bottom-up)")
-            
-            # DIAGNOSTIC: Snapshot AFTER killing but BEFORE reaping
-            after_kill_snapshot = self._snapshot_chrome_processes("AFTER_KILL_BEFORE_REAP")
-            
             # Reap zombie Chrome processes to prevent accumulation
             # Zombies can't be killed - they must be reaped by their parent
             reaped_count = 0
@@ -591,50 +517,12 @@ class ContentCollector:
                         # Process already reaped, not our child, or other error - ignore
                         pass
                 
-                if reaped_count > 0:
-                    print(f"    {bold('[SELENIUM]')} Reaped {reaped_count} zombie Chrome processes")
-                
-                # Warn if orphaned zombies are accumulating (parent is PID 1, can't be reaped by us)
-                if orphaned_zombies > 0:
-                    print(f"    {bold('[SELENIUM]')} WARNING: {orphaned_zombies} orphaned zombie Chrome processes detected (PPID=1, cannot be reaped by this process)")
-                    print(f"    {bold('[SELENIUM]')} These will be reaped by dumb-init (PID 1), but accumulation may indicate parent process instability")
-            
             except Exception as e:
                 # Don't fail cleanup if zombie reaping fails
-                print(f"    {bold('[SELENIUM]')} WARNING: Error reaping zombie processes: {e}")
-            
-            # DIAGNOSTIC: Snapshot AFTER cleanup complete
-            after_cleanup_snapshot = self._snapshot_chrome_processes("AFTER_CLEANUP")
-            
-            # DIAGNOSTIC: Calculate cleanup effectiveness
-            cleanup_duration = time.time() - cleanup_start_time
-            active_before = before_snapshot.get('active', 0)
-            active_after = after_cleanup_snapshot.get('active', 0)
-            zombies_before = before_snapshot.get('zombies', 0)
-            zombies_after = after_cleanup_snapshot.get('zombies', 0)
-            orphaned_before = before_snapshot.get('orphaned_zombies', 0)
-            orphaned_after = after_cleanup_snapshot.get('orphaned_zombies', 0)
-            
-            print(f"    {bold('[SELENIUM-DIAG]')} CLEANUP SUMMARY:")
-            print(f"    {bold('[SELENIUM-DIAG]')}   Duration: {cleanup_duration:.3f}s")
-            print(f"    {bold('[SELENIUM-DIAG]')}   Active: {active_before} -> {active_after} (killed: {active_before - active_after})")
-            print(f"    {bold('[SELENIUM-DIAG]')}   Zombies: {zombies_before} -> {zombies_after} (reaped: {zombies_before - zombies_after})")
-            print(f"    {bold('[SELENIUM-DIAG]')}   Orphaned Zombies: {orphaned_before} -> {orphaned_after} (change: {orphaned_after - orphaned_before})")
-            print(f"    {bold('[SELENIUM-DIAG]')}   Effectiveness: {((active_before - active_after) / max(active_before, 1) * 100):.1f}% active removed")
-            
-            # DIAGNOSTIC: Alert if zombies increased (should never happen)
-            if zombies_after > zombies_before:
-                print(f"    {bold('[SELENIUM-DIAG]')} ⚠️  ALERT: Zombie count INCREASED during cleanup! ({zombies_before} -> {zombies_after})")
-            
-            # DIAGNOSTIC: Alert if orphaned zombies increased significantly
-            if orphaned_after > orphaned_before + 2:
-                print(f"    {bold('[SELENIUM-DIAG]')} ⚠️  ALERT: Orphaned zombie count increased significantly! ({orphaned_before} -> {orphaned_after})")
-                print(f"    {bold('[SELENIUM-DIAG]')} This indicates parent process instability or process tree fragmentation")
+                pass
             
         except Exception as e:
-            print(f"    {bold('[SELENIUM]')} WARNING: Error in Chrome process cleanup: {e}")
-            import traceback
-            print(f"    {bold('[SELENIUM-DIAG]')} Traceback: {traceback.format_exc()}")
+            pass
         
         return killed_count
     
@@ -728,35 +616,15 @@ class ContentCollector:
                 'processes': processes
             }
             
-            # Print summary
-            print(f"    {bold('[SELENIUM-DIAG]')} {label}: Active={active_count}, Zombies={zombie_count} (Orphaned={orphaned_zombie_count}), Total={len(processes)}")
-            
-            # Print detailed process list if there are any
-            if processes:
-                print(f"    {bold('[SELENIUM-DIAG]')} {label} Process Details:")
-                for p in processes:
-                    flags = []
-                    if p['is_zombie']:
-                        flags.append("ZOMBIE")
-                    if p['is_orphaned']:
-                        flags.append("ORPHANED")
-                    if p['is_direct_child']:
-                        flags.append("DIRECT_CHILD")
-                    flags_str = f" [{', '.join(flags)}]" if flags else ""
-                    age_str = f" (age: {p['age_seconds']:.1f}s)" if p['age_seconds'] > 0 else ""
-                    print(f"    {bold('[SELENIUM-DIAG]')}   PID {p['pid']:5d} | PPID {p['ppid']:5d} | {p['status']:10s} | {p['name']}{flags_str}{age_str}")
-            
             return snapshot
             
         except Exception as e:
-            print(f"    {bold('[SELENIUM-DIAG]')} ERROR creating snapshot: {e}")
             return {'active': 0, 'zombies': 0, 'orphaned_zombies': 0, 'total': 0, 'processes': [], 'error': str(e)}
     
     def _list_all_chrome_processes(self):
         """
         List ALL Chrome/Chromium/ChromeDriver processes with exact names, PIDs, and PPIDs.
         Used for monitoring to ensure no process accumulation.
-        Prints the list to stdout for visibility.
         
         Returns:
             int: Number of Chrome processes found
@@ -767,55 +635,6 @@ class ContentCollector:
         # Use snapshot function for consistency
         snapshot = self._snapshot_chrome_processes("PROCESS_LIST")
         return snapshot.get('total', 0)
-        
-        # Legacy code below (replaced by snapshot function)
-        processes = []
-        try:
-            for proc in psutil.process_iter(['name', 'pid', 'ppid', 'status', 'cmdline']):
-                try:
-                    name = proc.info.get('name', '')
-                    name_lower = name.lower()
-                    pid = proc.info['pid']
-                    ppid = proc.info.get('ppid', -1)
-                    status = proc.info.get('status', 'unknown')
-                    
-                    # Check if it's a Chrome-related process
-                    if ('chrome' in name_lower or 'chromium' in name_lower or 'chromedriver' in name_lower):
-                        cmdline = proc.info.get('cmdline', [])
-                        # Handle None cmdline (some processes may not have cmdline available)
-                        if cmdline is None:
-                            cmdline = []
-                        cmdline_str = ' '.join(cmdline[:3]) if cmdline else ''  # First 3 args only
-                        if len(cmdline) > 3:
-                            cmdline_str += '...'
-                        
-                        processes.append({
-                            'name': name,
-                            'pid': pid,
-                            'ppid': ppid,
-                            'status': status,
-                            'cmdline': cmdline_str
-                        })
-                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
-                    continue
-            
-            # Sort by PID for consistent output
-            processes.sort(key=lambda p: p['pid'])
-            
-            # Print the process list for monitoring
-            if processes:
-                print(f"    {bold('[SELENIUM]')} Active Chrome processes ({len(processes)}):")
-                for proc_info in processes:
-                    orphaned = " [ORPHANED]" if proc_info['ppid'] == 1 else ""
-                    print(f"      PID {proc_info['pid']:6d} | PPID {proc_info['ppid']:6d} | {proc_info['status']:8s} | {proc_info['name']}{orphaned}")
-            else:
-                print(f"    {bold('[SELENIUM]')} No active Chrome processes")
-        
-        except Exception as e:
-            print(f"    {bold('[SELENIUM]')} WARNING: Error listing Chrome processes: {e}")
-            return 0
-        
-        return len(processes)
     
     def safe_get(self, url: str) -> requests.Response:
         """Make HTTP request with retry logic"""
@@ -868,8 +687,6 @@ class ContentCollector:
             print(f"      [TIMEOUT] Page load exceeded {timeout}s, forcefully terminating...")
             try:
                 # List processes before cleanup
-                print(f"      {bold('[TIMEOUT]')} Process status before cleanup:")
-                self._list_all_chrome_processes()
                 
                 # CRITICAL: Kill children BEFORE parent to prevent orphans
                 # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
@@ -893,7 +710,6 @@ class ContentCollector:
                 self._kill_orphaned_chrome_processes()
                 
                 # List processes after cleanup to verify
-                print(f"      {bold('[TIMEOUT]')} Process status after cleanup:")
                 remaining = self._list_all_chrome_processes()
                 if remaining > 0:
                     print(f"      {bold('[TIMEOUT]')} WARNING: {remaining} Chrome processes still active after cleanup!")
@@ -979,32 +795,10 @@ class ContentCollector:
             print(f"      Selenium error: {e}")
             return None
         finally:
-            # DIAGNOSTIC: Snapshot BEFORE cleanup (after Selenium use)
-            print(f"    {bold('[SELENIUM]')} Process status after Selenium use:")
-            before_cleanup_snapshot = self._snapshot_chrome_processes("AFTER_SELENIUM_USE")
-            
             # After each Selenium use, kill orphaned Chrome processes (PPID=1) to prevent accumulation
-            # This aligns with Giorgio's recommendation: "kill all processes without a parent except PID 1"
-            # Prevents orphaned processes from accumulating when parent processes die unexpectedly (crashes/timeouts)
             self._kill_orphaned_chrome_processes()
-            
-            # DIAGNOSTIC: Snapshot AFTER cleanup to verify no accumulation
-            print(f"    {bold('[SELENIUM]')} Process status after cleanup:")
-            after_cleanup_snapshot = self._snapshot_chrome_processes("AFTER_SELENIUM_CLEANUP")
-            
-            # DIAGNOSTIC: Compare before/after
-            remaining = after_cleanup_snapshot.get('total', 0)
-            if remaining > 0:
-                print(f"    {bold('[SELENIUM]')} WARNING: {remaining} Chrome processes still active after cleanup!")
-                active_remaining = after_cleanup_snapshot.get('active', 0)
-                zombies_remaining = after_cleanup_snapshot.get('zombies', 0)
-                print(f"    {bold('[SELENIUM-DIAG]')} Breakdown: {active_remaining} active, {zombies_remaining} zombies")
-            
-            # DIAGNOSTIC: Track zombie accumulation
-            zombies_before = before_cleanup_snapshot.get('zombies', 0)
-            zombies_after = after_cleanup_snapshot.get('zombies', 0)
-            if zombies_after > zombies_before:
-                print(f"    {bold('[SELENIUM-DIAG]')} ⚠️  ALERT: Zombie count increased during cleanup! ({zombies_before} -> {zombies_after})")
+            # Mark that selenium was used for this school
+            self._selenium_used_for_school = True
     
     def collect_page_content(self, school_name: str, url: str) -> Optional[Dict]:
         """
@@ -1046,8 +840,6 @@ class ContentCollector:
             print(f"    [TIMEOUT] Page processing exceeded {TIMEOUT}s hard limit, forcefully terminating...")
             try:
                 # List processes before cleanup
-                print(f"    {bold('[TIMEOUT]')} Process status before cleanup:")
-                self._list_all_chrome_processes()
                 
                 # CRITICAL: Kill children BEFORE parent to prevent orphans
                 # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
@@ -1073,7 +865,6 @@ class ContentCollector:
                 self._kill_orphaned_chrome_processes()
                 
                 # List processes after cleanup to verify
-                print(f"    {bold('[TIMEOUT]')} Process status after cleanup:")
                 remaining = self._list_all_chrome_processes()
                 if remaining > 0:
                     print(f"    {bold('[TIMEOUT]')} WARNING: {remaining} Chrome processes still active after cleanup!")
@@ -1179,37 +970,8 @@ class ContentCollector:
                     else:
                         print(f"    Found {len(emails)} emails + high-value titles detected, using Selenium for comprehensive extraction...")
                     
-                    # DIAGNOSTIC: Snapshot before Selenium use
-                    self._selenium_use_count += 1
-                    current_pid = os.getpid()
-                    
-                    # DIAGNOSTIC: Check parent PID before Selenium use
-                    current_parent_pid = None
-                    if HAS_PSUTIL:
-                        try:
-                            current_process = psutil.Process(current_pid)
-                            parent = current_process.parent()
-                            if parent:
-                                current_parent_pid = parent.pid
-                                if self._last_parent_pid is not None and current_parent_pid != self._last_parent_pid:
-                                    self._parent_change_count += 1
-                                    print(f"    {bold('[SELENIUM-DIAG]')} ⚠️  PARENT CHANGED BEFORE SELENIUM! {self._last_parent_pid} -> {current_parent_pid}")
-                                    self._last_parent_pid = current_parent_pid
-                                elif self._last_parent_pid is None:
-                                    self._last_parent_pid = current_parent_pid
-                        except:
-                            pass
-                    
-                    print(f"    {bold('[SELENIUM-DIAG]')} SELENIUM USE #{self._selenium_use_count}: PID={current_pid}, Parent={current_parent_pid}, URL={url}")
-                    before_selenium_snapshot = self._snapshot_chrome_processes("BEFORE_SELENIUM_USE")
-                    
                     # TIER 2: Use Selenium for better extraction
-                    selenium_start_time = time.time()
                     html_selenium = self.fetch_with_selenium(url, interact=True)
-                    selenium_duration = time.time() - selenium_start_time
-                    
-                    # DIAGNOSTIC: Log Selenium usage duration
-                    print(f"    {bold('[SELENIUM-DIAG]')} SELENIUM USAGE: Duration={selenium_duration:.2f}s")
                     if html_selenium:
                         html = html_selenium
                         fetch_method = 'selenium'
@@ -1226,6 +988,12 @@ class ContentCollector:
             
             # Count emails found
             email_count = len(emails) if emails else 0
+            
+            # Show cleanup message after school processing if selenium was used
+            if self._selenium_used_for_school:
+                zombies, orphaned, active = self._get_process_counts()
+                print(f"    [CLEANUP] Active processes: Z {zombies} | O {orphaned} | C {active}")
+                self._selenium_used_for_school = False  # Reset for next school
             
             return {
                 'school_name': school_name,
