@@ -113,9 +113,7 @@ running_threads = {}
 # Format: {run_id: (first_404_time, count)}
 not_found_runs = {}
 
-# Global flag to prevent multiple container restart attempts
-_container_restart_scheduled = False
-_container_restart_lock = threading.Lock()
+# Container restart logic removed - container stays running after completion (matches backup branch)
 
 # Persistent storage configuration
 # Use /data for Railway volume, fallback to /tmp for local development
@@ -1400,91 +1398,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                     finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
                     finalize_thread.start()
                     
-                    # Only schedule container restart on successful completion (not errors)
-                    # Update metadata with container reset status
-                    final_metadata = load_run_metadata(run_id) or {}
-                    final_metadata["container_reset_requested"] = True
-                    final_metadata["container_reset_requested_at"] = datetime.now().isoformat()
-                    save_run_metadata(run_id, final_metadata)
-                    
+                    # Pipeline completed successfully - no container reset needed
+                    # The backup branch doesn't force container restarts, allowing the container to stay running
+                    # This prevents Railway from logging crashes and allows the container to handle multiple runs
                     print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
-                    print(f"[{run_id}] Container reset requested - will restart after 30 second grace period")
-                    
-                    # Schedule container restart after completion (30 second delay to allow final API calls)
-                    # Use global flag to prevent multiple restart attempts
-                    global _container_restart_scheduled
-                    with _container_restart_lock:
-                        if _container_restart_scheduled:
-                            print(f"[{run_id}] Container restart already scheduled, skipping...")
-                        else:
-                            _container_restart_scheduled = True
-                            
-                            def schedule_container_restart():
-                                """Schedule container restart after grace period"""
-                                time.sleep(30)  # Wait 30 seconds for final API calls
-                                print(f"[{run_id}] Container reset: Performing final cleanup before exit...")
-                                
-                                # CRITICAL: Final cleanup before exit to prevent orphaned processes
-                                try:
-                                    # Final system-wide Chrome cleanup
-                                    if HAS_PSUTIL:
-                                        killed = kill_chrome_processes_bottom_up()
-                                        print(f"[{run_id}] Final cleanup: Killed {killed} Chrome processes")
-                                        
-                                        # Attempt to reap any remaining zombies (including orphaned ones)
-                                        reaped_count = 0
-                                        try:
-                                            current_pid = os.getpid()
-                                            # Find ALL zombie Chrome processes, not just direct children
-                                            for proc in psutil.process_iter(['name', 'pid', 'ppid', 'status']):
-                                                try:
-                                                    name = proc.info.get('name', '').lower()
-                                                    status = proc.info.get('status', '').lower()
-                                                    pid = proc.info['pid']
-                                                    
-                                                    if status == 'zombie' and ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
-                                                        # Try to reap even if not direct child (may fail, but worth trying)
-                                                        try:
-                                                            result = os.waitpid(pid, os.WNOHANG)
-                                                            if result[0] == pid:
-                                                                reaped_count += 1
-                                                        except (ChildProcessError, ProcessLookupError, OSError):
-                                                            # Not our child or already reaped - expected for orphaned zombies
-                                                            pass
-                                                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
-                                                    continue
-                                            
-                                            if reaped_count > 0:
-                                                print(f"[{run_id}] Final cleanup: Reaped {reaped_count} zombie Chrome processes")
-                                        except Exception as e:
-                                            print(f"[{run_id}] WARNING: Error during final zombie reaping: {e}")
-                                    
-                                    print(f"[{run_id}] Final cleanup complete")
-                                except Exception as e:
-                                    print(f"[{run_id}] WARNING: Error during final cleanup: {e}")
-                                
-                                # Update metadata with reset confirmation
-                                try:
-                                    reset_metadata = load_run_metadata(run_id) or {}
-                                    reset_metadata["container_reset_confirmed"] = True
-                                    reset_metadata["container_reset_confirmed_at"] = datetime.now().isoformat()
-                                    save_run_metadata(run_id, reset_metadata)
-                                    print(f"[{run_id}] Container Reset: Confirmed at {reset_metadata['container_reset_confirmed_at']}")
-                                except Exception as e:
-                                    print(f"[{run_id}] Failed to save container reset confirmation: {e}")
-                                
-                                # Small delay to ensure cleanup completes
-                                time.sleep(1)
-                                
-                                print(f"[{run_id}] Container reset: Exiting process to trigger Railway restart...")
-                                # Exit with code 1 to trigger Railway restart (ON_FAILURE policy)
-                                # Railway will automatically restart the container
-                                os._exit(1)
-                            
-                            # Start restart thread in background (non-daemon so it completes)
-                            restart_thread = threading.Thread(target=schedule_container_restart)
-                            restart_thread.daemon = False
-                            restart_thread.start()
+                    print(f"[{run_id}] Container will remain running and ready for next run")
                     pipeline_runs[run_id]["progress"] = 100
             else:
                 print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
