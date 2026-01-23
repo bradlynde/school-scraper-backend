@@ -693,10 +693,17 @@ class ContentCollector:
         If the page load exceeds the timeout, forcefully quits the driver.
         
         Returns:
-            True if page loaded successfully, False if timeout occurred
+            True if page loaded successfully, False if timeout occurred or connection error
         """
         result = [None]  # Use list to allow modification from nested function
         exception = [None]
+        
+        # Check driver readiness right before use (catches race conditions)
+        try:
+            driver.window_handles
+        except:
+            # Driver not ready - return False so caller can retry
+            return False
         
         def get_url():
             try:
@@ -716,8 +723,6 @@ class ContentCollector:
             # Timeout occurred - kill children FIRST (bottom-up) before quitting driver
             print(f"      [TIMEOUT] Page load exceeded {timeout}s, forcefully terminating...")
             try:
-                # List processes before cleanup
-                
                 # CRITICAL: Kill children BEFORE parent to prevent orphans
                 # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
                 self._kill_all_chrome_processes()
@@ -738,19 +743,19 @@ class ContentCollector:
                 # Step 4: Final cleanup - kill any remaining Chrome processes
                 self._kill_all_chrome_processes()
                 self._kill_orphaned_chrome_processes()
-                
-                # List processes after cleanup to verify
-                remaining = self._list_all_chrome_processes()
-                if remaining > 0:
-                    print(f"      {bold('[TIMEOUT]')} WARNING: {remaining} Chrome processes still active after cleanup!")
             except Exception as e:
-                print(f"      [TIMEOUT] Error during cleanup: {e}")
+                pass
             # Mark driver as dead so it gets recreated
             self.driver = None
             return False
         
         # Check if an exception occurred
         if exception[0]:
+            error_str = str(exception[0]).lower()
+            # Check if it's a connection error (driver not ready) - don't raise, return False for retry
+            if 'connection refused' in error_str or 'errno 111' in error_str:
+                return False
+            # For other errors, raise them
             raise exception[0]
         
         return result[0] if result[0] is not None else False
@@ -771,12 +776,14 @@ class ContentCollector:
                     driver = self.driver
                     
                     if not driver:
+                        if attempt < max_retries - 1:
+                            time.sleep(2)  # 2 second grace period before retry
+                            continue
                         return None
                     
                     # Use timeout wrapper for driver.get() - 45 second hard limit
                     if not self._get_url_with_timeout(driver, url, timeout=900):
-                        print(f"      [TIMEOUT] Failed to load page within 45s timeout")
-                        # Driver was killed, need to recreate it
+                        # Driver failed (timeout or connection error) - need to recreate it
                         self.driver = None
                         if attempt < max_retries - 1:
                             time.sleep(2)  # 2 second grace period before retry
