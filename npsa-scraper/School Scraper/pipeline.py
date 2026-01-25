@@ -202,7 +202,7 @@ class StreamingPipeline:
         Process one school through all steps.
         Returns list of Contact objects extracted from this school.
         """
-        print(f"\nProcessing: {school.name} ({school.county})")
+        print(f"Processing: {school.name} ({school.county})")
         
         # Step 2: Filter school
         filter_result = filter_school(school, target_state=self._state, llm_filter=self.llm_school_filter)
@@ -213,8 +213,17 @@ class StreamingPipeline:
             filtered_school, filter_reason = filter_result, None
         
         if not filtered_school:
-            reason_msg = f" - {filter_reason}" if filter_reason else ""
-            print(f"  [FILTER] Filtered out{reason_msg}")
+            # Format filter reason as key/value
+            if filter_reason:
+                if "LLM rejected" in filter_reason:
+                    print(f"  [FILTER] reason=\"LLM rejected\" detail=\"{filter_reason.replace('LLM rejected (', '').replace(')', '')}\"")
+                elif "failed pre-filters" in filter_reason:
+                    detail = filter_reason.replace("failed pre-filters (", "").replace(")", "")
+                    print(f"  [FILTER] reason=\"pre-filter failed\" detail=\"{detail}\"")
+                else:
+                    print(f"  [FILTER] reason=\"{filter_reason}\"")
+            else:
+                print(f"  [FILTER] reason=\"unknown\"")
             self.stats['schools_filtered_out'] += 1
             return []
         
@@ -260,7 +269,7 @@ class StreamingPipeline:
                 continue
         
         if all_contacts:
-            print(f"  [SUCCESS] {len(all_contacts)} contacts extracted")
+            print(f"  [SUCCESS] Contacts extracted: {len(all_contacts)}")
         else:
             print("  [SKIP] No contacts")
         
@@ -439,9 +448,15 @@ class StreamingPipeline:
             max_search_terms=max_search_terms_per_county
         )
         
+        first_school = True
         for school in school_generator:
             schools_discovered += 1
             self.stats['schools_discovered'] = schools_discovered
+            
+            # Add blank line between schools (except before first)
+            if not first_school:
+                print()
+            first_school = False
             
             # Process this school through all steps
             contacts = self.process_single_lead(school)
@@ -458,17 +473,19 @@ class StreamingPipeline:
             # Accumulate contacts (keep full list for final deduplication)
             self.all_contacts.extend(contacts)
             
-            # Print progress with unique count
+            # Print progress with unique count (standardized format)
             total_contacts = len(self.all_contacts)
             unique_contacts = len(self.unique_contacts_set)
-            if new_unique_count > 0:
-                print(f"Progress: {schools_discovered} schools | {self.stats['schools_processed']} processed | {unique_contacts} contacts (+{new_unique_count})")
-            else:
-                print(f"Progress: {schools_discovered} schools | {self.stats['schools_processed']} processed | {unique_contacts} contacts")
+            processed = self.stats['schools_processed']
+            delta_str = f" (+{new_unique_count})" if new_unique_count > 0 else ""
+            print(f"Progress: {schools_discovered} schools | {processed}/{schools_discovered} processed | {unique_contacts} contacts{delta_str}")
         
         # Flush any pending LLM filter batches
         if self.llm_school_filter:
             self.llm_school_filter.flush()
+        
+        # Blank line before final summary
+        print()
         
         # Generate filename for county-level output (will be aggregated later)
         if not output_csv or output_csv == "final_contacts.csv":
@@ -529,7 +546,9 @@ class StreamingPipeline:
             for contact in contacts:
                 writer.writerow(contact.to_dict())
         
-        print(f"[SAVE] Saved {len(contacts)} contacts to {filename}")
+        from pathlib import Path
+        filename_only = Path(filename).name
+        print(f"[SAVE] Wrote {len(contacts)} contacts -> \"{filename_only}\"")
     
     
     def _print_summary(self):

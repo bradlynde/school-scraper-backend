@@ -340,13 +340,19 @@ class FinalCompiler:
             df_no_email = df.copy()
 
         # For no-email: dedupe by name + domain (or name + school_name if no domain)
-        def _dedupe_key(r):
-            d = r['domain']
-            s = r['school_name_n']
-            use_d = not (d is None or (isinstance(d, float) and pd.isna(d))) and str(d).strip()
-            return r['name_n'] + '|' + (d if use_d else s)
-        df_no_email['dedupe_key'] = df_no_email.apply(_dedupe_key, axis=1)
-        df_no_email = df_no_email.sort_values(by=['dedupe_key']).drop_duplicates(subset=['dedupe_key'], keep='first')
+        if len(df_no_email) > 0:
+            def _dedupe_key(r):
+                d = r['domain']
+                s = r['school_name_n']
+                use_d = not (d is None or (isinstance(d, float) and pd.isna(d))) and str(d).strip()
+                return r['name_n'] + '|' + (d if use_d else s)
+            dedupe_keys = df_no_email.apply(_dedupe_key, axis=1)
+            # Ensure we have a Series, not DataFrame
+            if isinstance(dedupe_keys, pd.DataFrame):
+                dedupe_keys = dedupe_keys.iloc[:, 0]
+            df_no_email = df_no_email.copy()
+            df_no_email.loc[:, 'dedupe_key'] = dedupe_keys.values if hasattr(dedupe_keys, 'values') else dedupe_keys
+            df_no_email = df_no_email.sort_values(by=['dedupe_key']).drop_duplicates(subset=['dedupe_key'], keep='first')
 
         drop_cols = ['first_name_n', 'last_name_n', 'name_n', 'school_name_n', 'source_url_n', 'domain', 'dedupe_key']
         df_no_email = df_no_email.drop(columns=[c for c in drop_cols if c in df_no_email.columns], errors='ignore')
