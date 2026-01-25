@@ -292,7 +292,7 @@ class ContentCollector:
         try:
             self.driver.execute_script("return document.readyState")
         except:
-            print(f"    {bold('[SELENIUM]')} Driver crashed, restarting...")
+            print(f"    {bold('[SELENIUM]')} Starting Selenium")
             
             driver = None
             try:
