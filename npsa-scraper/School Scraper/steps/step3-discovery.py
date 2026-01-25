@@ -306,7 +306,7 @@ class PageDiscoverer:
         Returns:
             List of page dictionaries with URL, title, and priority score
         """
-        print(f"\n  Discovering pages for: {school_name}")
+        print(f"  Discovering pages for: {school_name}")
         print(f"  Base URL: {base_url}")
         
         if not base_url or base_url == '':
@@ -589,7 +589,10 @@ class PageDiscoverer:
         if discovered_pages:
             print(f"    {bold('[STEP 3]')} Found {len(discovered_pages)} page(s)")
             for page in discovered_pages:
-                print(f"      - {page['title'][:60]}")
+                title = page['title']
+                if len(title) > 80:
+                    title = title[:77] + "..."
+                print(f"      Page: \"{title}\"")
         else:
             print(f"    ⚠ No pages found")
         

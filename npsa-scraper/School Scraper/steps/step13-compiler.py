@@ -12,10 +12,11 @@ Output: Final cleaned CSV with all contacts
 
 import pandas as pd
 import re
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 from datetime import datetime
 from pathlib import Path
 import shutil
+from urllib.parse import urlparse
 from assets.shared.models import Contact
 
 # ANSI escape codes for bold text
@@ -25,6 +26,22 @@ RESET = '\033[0m'
 def bold(text: str) -> str:
     """Make text bold in terminal output"""
     return f"{BOLD}{text}{RESET}"
+
+
+def _extract_domain_from_url(url: str) -> Optional[str]:
+    """Extract domain from source_url. e.g. https://www.example.com/page -> example.com"""
+    if not url:
+        return None
+    try:
+        parsed = urlparse(str(url))
+        domain = parsed.netloc or parsed.path.split('/')[0]
+        if domain.startswith('www.'):
+            domain = domain[4:]
+        if '.' in domain and len(domain) > 3:
+            return domain.lower()
+        return None
+    except Exception:
+        return None
 
 
 class FinalCompiler:
@@ -294,48 +311,109 @@ class FinalCompiler:
         Remove duplicate contacts without using confidence scores.
         Deduplicate by:
         1) Email (exact match) when present
-        2) First name + last name + school_name
+        2) Name + domain (from source_url) when no email, else name + school_name
         """
         if len(df) == 0:
             return df
         
-        # Normalize names and school names for comparison (lowercase, strip whitespace)
-        df['first_name_normalized'] = df['first_name'].fillna('').astype(str).str.lower().str.strip()
-        df['last_name_normalized'] = df['last_name'].fillna('').astype(str).str.lower().str.strip()
-        df['school_name_normalized'] = df['school_name'].fillna('').astype(str).str.lower().str.strip()
-        
-        # Deduplicate by email if email exists
+        df = df.copy()
+        if 'source_url' not in df.columns and 'Source URL' in df.columns:
+            df['source_url'] = df['Source URL'].fillna('').astype(str)
+        if 'source_url' not in df.columns:
+            df['source_url'] = ''
+        df['first_name_n'] = df['first_name'].fillna('').astype(str).str.lower().str.strip()
+        df['last_name_n'] = df['last_name'].fillna('').astype(str).str.lower().str.strip()
+        df['name_n'] = (df['first_name_n'] + ' ' + df['last_name_n']).str.strip()
+        df['school_name_n'] = df['school_name'].fillna('').astype(str).str.lower().str.strip()
+        df['source_url_n'] = df['source_url'].fillna('').astype(str)
+        df['domain'] = df['source_url_n'].apply(_extract_domain_from_url)
+
+        # Deduplicate by email when present (normalize email first: lowercase, strip)
         if 'email' in df.columns:
-            df = df.sort_values(by=['email']).drop_duplicates(subset=['email'], keep='first')
-        
-        # Deduplicate by name + school
-        df = df.sort_values(by=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'])
-        df = df.drop_duplicates(
-            subset=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'],
-            keep='first'
-        )
-        
-        # Remove temporary normalization columns
-        df = df.drop(columns=['first_name_normalized', 'last_name_normalized', 'school_name_normalized'], errors='ignore')
-        
-        return df.reset_index(drop=True)
-    
+            df['email_normalized'] = df['email'].fillna('').astype(str).str.strip().str.lower()
+            has_email = df['email_normalized'] != ''
+            df_email = df[has_email].copy().sort_values(by=['email_normalized']).drop_duplicates(subset=['email_normalized'], keep='first')
+            df_email = df_email.drop(columns=['email_normalized'], errors='ignore')
+            df_no_email = df[~has_email].copy().drop(columns=['email_normalized'], errors='ignore')
+        else:
+            df_email = pd.DataFrame()
+            df_no_email = df.copy()
+
+        # For no-email: dedupe by name + domain (or name + school_name if no domain)
+        if len(df_no_email) > 0:
+            def _dedupe_key(r):
+                d = r['domain']
+                s = r['school_name_n']
+                use_d = not (d is None or (isinstance(d, float) and pd.isna(d))) and str(d).strip()
+                return r['name_n'] + '|' + (d if use_d else s)
+            dedupe_keys = df_no_email.apply(_dedupe_key, axis=1)
+            # Ensure we have a Series, not DataFrame
+            if isinstance(dedupe_keys, pd.DataFrame):
+                dedupe_keys = dedupe_keys.iloc[:, 0]
+            df_no_email = df_no_email.copy()
+            df_no_email.loc[:, 'dedupe_key'] = dedupe_keys.values if hasattr(dedupe_keys, 'values') else dedupe_keys
+            df_no_email = df_no_email.sort_values(by=['dedupe_key']).drop_duplicates(subset=['dedupe_key'], keep='first')
+
+        drop_cols = ['first_name_n', 'last_name_n', 'name_n', 'school_name_n', 'source_url_n', 'domain', 'dedupe_key']
+        df_no_email = df_no_email.drop(columns=[c for c in drop_cols if c in df_no_email.columns], errors='ignore')
+
+        if len(df_email) > 0:
+            df_email = df_email.drop(columns=[c for c in drop_cols if c in df_email.columns], errors='ignore')
+            out = pd.concat([df_email, df_no_email], ignore_index=True)
+        else:
+            out = df_no_email
+
+        return out.reset_index(drop=True)
+
+    def deduplicate_contacts_only(
+        self,
+        contacts_with_emails: List[Contact],
+        contacts_without_emails: List[Contact]
+    ) -> List[Contact]:
+        """
+        Deduplicate combined contacts (email, then name+domain / name+school) and return
+        the deduplicated Contact list. Used before Hunter enrichment to save credits.
+        """
+        combined = list(contacts_with_emails) + list(contacts_without_emails)
+        if not combined:
+            return []
+        contact_dicts = [c.to_dict() for c in combined]
+        df = pd.DataFrame(contact_dicts)
+        df = self.deduplicate_contacts(df)
+        out = []
+        for _, row in df.iterrows():
+            def s(v):
+                x = row.get(v, '') or row.get(v.replace('_', ' ').title(), '')
+                return str(x).strip() if x is not None and not (isinstance(x, float) and pd.isna(x)) else ''
+            out.append(Contact(
+                first_name=s('first_name'),
+                last_name=s('last_name'),
+                title=s('title'),
+                email=row.get('email') if row.get('email') and str(row.get('email')).strip() else None,
+                phone=s('phone'),
+                school_name=s('school_name'),
+                source_url=s('source_url')
+            ))
+        return out
+
     def compile_contacts_to_csv(
         self,
         contacts_with_emails: List[Contact],
         contacts_enriched: List[Contact],
         output_csv: str = None,
-        state: str = None
+        state: str = None,
+        already_deduplicated: bool = False
     ):
         """
         Compile Contact objects into final CSV.
-        Combines contacts with emails and enriched contacts, deduplicates, and writes to CSV.
-        
+        Combines contacts with emails and enriched contacts, deduplicates (unless already_deduplicated), and writes to CSV.
+
         Args:
             contacts_with_emails: List of Contact objects that already have emails (from Step 11)
             contacts_enriched: List of Contact objects enriched by Hunter.io (from Step 12)
             output_csv: Optional output CSV filename
             state: State name for filename generation
+            already_deduplicated: If True, skip deduplication (e.g. after deduplicate_contacts_only + enrich)
         """
         # Generate output filename with state name if not provided
         if not output_csv:
@@ -382,12 +460,21 @@ class FinalCompiler:
         # Format phones
         if 'phone' in df.columns:
             df['phone'] = df['phone'].apply(self.format_phone)
-        
-        # Deduplicate
-        print(f"\nBefore deduplication: {len(df)}")
-        df = self.deduplicate_contacts(df)
-        print(f"After deduplication: {len(df)}")
-        
+
+        if not already_deduplicated:
+            print(f"\nBefore deduplication: {len(df)}")
+            df = self.deduplicate_contacts(df)
+            print(f"After deduplication: {len(df)}")
+        else:
+            # Safety check: do a lightweight deduplication pass even if already deduplicated
+            # This catches any edge cases (e.g., email normalization issues)
+            before = len(df)
+            df = self.deduplicate_contacts(df)
+            if len(df) < before:
+                print(f"\nSafety deduplication removed {before - len(df)} additional duplicates: {len(df)}")
+            else:
+                print(f"\nSafety deduplication check: {len(df)} (no additional duplicates found)")
+
         # Create final structure
         final_df = pd.DataFrame({
             'first_name': df['first_name'],

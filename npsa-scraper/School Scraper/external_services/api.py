@@ -950,12 +950,19 @@ def aggregate_final_results(run_id: str, state: str):
         
         print(f"[{run_id}] Step 11 complete: {len(contacts_with_emails)} with emails, {len(contacts_without_emails)} without emails")
         
-        # STEP 12: Email Enrichment with Hunter.io (optional)
+        # Deduplicate BEFORE enrichment (saves Hunter credits)
+        compiler = step13_final_compiler.FinalCompiler()
+        deduplicated = compiler.deduplicate_contacts_only(contacts_with_emails, contacts_without_emails)
+        contacts_with_emails_deduped = [c for c in deduplicated if c.has_email()]
+        contacts_without_emails_deduped = [c for c in deduplicated if not c.has_email()]
+        print(f"[{run_id}] Deduplication: {len(contacts_with_emails) + len(contacts_without_emails)} -> {len(deduplicated)} (before Hunter)")
+        
+        # STEP 12: Email Enrichment with Hunter.io (optional, on deduplicated contacts only)
         contacts_enriched = []
         hunter_io_enabled = os.getenv('HUNTER_IO_API_KEY') is not None
         
-        if hunter_io_enabled and contacts_without_emails:
-            pipeline_runs[run_id]["statusMessage"] = f"Step 12: Enriching {len(contacts_without_emails)} contacts with Hunter.io..."
+        if hunter_io_enabled and contacts_without_emails_deduped:
+            pipeline_runs[run_id]["statusMessage"] = f"Step 12: Enriching {len(contacts_without_emails_deduped)} contacts with Hunter.io..."
             try:
                 enricher = step12_hunter_io.HunterIOEnricher(
                     api_key=os.getenv('HUNTER_IO_API_KEY'),
@@ -963,7 +970,7 @@ def aggregate_final_results(run_id: str, state: str):
                     score_threshold=70
                 )
                 contacts_enriched = enricher.enrich_contact_objects(
-                    contacts=contacts_without_emails,
+                    contacts=contacts_without_emails_deduped,
                     batch_size=10,
                     delay_between_batches=1.0
                 )
@@ -975,19 +982,19 @@ def aggregate_final_results(run_id: str, state: str):
                 traceback.print_exc()
         elif not hunter_io_enabled:
             print(f"[{run_id}] Step 12 skipped: HUNTER_IO_API_KEY not set")
-        elif not contacts_without_emails:
+        elif not contacts_without_emails_deduped:
             print(f"[{run_id}] Step 12 skipped: No contacts without emails to enrich")
         
-        # STEP 13: Compile final CSV
+        # STEP 13: Compile final CSV (already deduplicated)
         pipeline_runs[run_id]["statusMessage"] = "Step 13: Compiling final CSV..."
         final_output_csv = str(run_dir / f"{state.title()}_leads_final.csv")
         
-        compiler = step13_final_compiler.FinalCompiler()
         final_csv_path = compiler.compile_contacts_to_csv(
-            contacts_with_emails=contacts_with_emails,
+            contacts_with_emails=contacts_with_emails_deduped,
             contacts_enriched=contacts_enriched,
             output_csv=final_output_csv,
-            state=state
+            state=state,
+            already_deduplicated=True
         )
         
         print(f"[{run_id}] Step 13 complete: Final CSV saved to {final_csv_path}")
@@ -1026,9 +1033,9 @@ def aggregate_final_results(run_id: str, state: str):
             save_run_metadata(run_id, metadata)
         else:
             print(f"[{run_id}] ERROR: Final CSV not created at {final_csv_path}")
-            pipeline_runs[run_id]["totalContacts"] = len(all_contacts)
-            pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails)
-            pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails) - len(contacts_enriched)
+            pipeline_runs[run_id]["totalContacts"] = len(deduplicated)
+            pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails_deduped) + len(contacts_enriched)
+            pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails_deduped) - len(contacts_enriched)
         
         # Update final stats - set to finalizing for 2-minute cooldown
         pipeline_runs[run_id]["status"] = "finalizing"
@@ -1494,6 +1501,146 @@ def health():
     # Flask-CORS handles CORS headers automatically, but we can add explicit headers if needed
     response = jsonify({"status": "healthy"})
     return response, 200
+
+
+@app.route("/debug/volume", methods=["GET", "OPTIONS"])
+@require_auth
+def debug_volume():
+    """List files in the mounted volume (/data). Runs inside the deployed container."""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return response, 200
+
+    def _list_dir(p: Path, max_depth: int = 3, depth: int = 0) -> dict:
+        if depth > max_depth:
+            return {"_truncated": f"max depth {max_depth}"}
+        out = {"path": str(p), "exists": p.exists()}
+        if not p.exists():
+            return out
+        if not p.is_dir():
+            try:
+                out["size"] = p.stat().st_size
+            except OSError:
+                out["size"] = None
+            return out
+        try:
+            entries = []
+            for c in sorted(p.iterdir()):
+                e = {"name": c.name}
+                if c.is_file():
+                    try:
+                        e["size"] = c.stat().st_size
+                    except OSError:
+                        e["size"] = None
+                else:
+                    e["contents"] = _list_dir(c, max_depth, depth + 1)
+                entries.append(e)
+            out["entries"] = entries
+            return out
+        except OSError as err:
+            out["error"] = str(err)
+            return out
+
+    try:
+        data_dir = PERSISTENT_DATA_DIR
+        total_size = 0
+        file_count = 0
+        if data_dir.exists():
+            for f in data_dir.rglob("*"):
+                if f.is_file():
+                    try:
+                        total_size += f.stat().st_size
+                        file_count += 1
+                    except OSError:
+                        pass
+        listing = _list_dir(data_dir)
+        listing["total_size_bytes"] = total_size
+        listing["total_size_mb"] = round(total_size / (1024 * 1024), 2)
+        listing["file_count"] = file_count
+        response = jsonify(listing)
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+    except Exception as e:
+        response = jsonify({"error": str(e)})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 500
+
+
+@app.route("/runs/<run_id>/verify", methods=["GET", "OPTIONS"])
+@require_auth
+def verify_run_data(run_id: str):
+    """
+    Verify that a run's data was saved to the volume (metadata, checkpoint, county CSVs).
+    Uses the same paths as the pipeline. Call this to confirm data exists before deploying.
+    """
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return response, 200
+
+    if not validate_run_id(run_id):
+        return jsonify({"status": "error", "error": "Invalid run ID"}), 400
+
+    try:
+        # 1. Metadata (same as stop/resume/download)
+        meta = load_run_metadata(run_id)
+        metadata_ok = meta is not None
+        if not metadata_ok:
+            response = jsonify({
+                "status": "error",
+                "error": "Run not found",
+                "metadata_ok": False,
+                "checkpoint_ok": False,
+                "data_saved": False,
+            })
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            return response, 404
+
+        # 2. Checkpoint
+        cp = load_checkpoint(run_id)
+        checkpoint_ok = cp is not None
+        completed = list(cp.get("completed_counties", [])) if cp else []
+
+        # 3. County CSVs (same paths as aggregate_final_results)
+        run_dir = RUNS_DIR / run_id
+        csvs = []
+        total_bytes = 0
+        for county in completed:
+            county_dir = run_dir / county.replace(" ", "_")
+            csv_path = county_dir / "final_contacts.csv"
+            exists = csv_path.exists()
+            size = csv_path.stat().st_size if exists else 0
+            if exists:
+                total_bytes += size
+            csvs.append({"county": county, "exists": exists, "size_bytes": size})
+
+        data_saved = metadata_ok and checkpoint_ok and all(c["exists"] for c in csvs)
+        response = jsonify({
+            "status": "ok",
+            "run_id": run_id,
+            "metadata_ok": metadata_ok,
+            "checkpoint_ok": checkpoint_ok,
+            "completed_counties": len(completed),
+            "csvs": csvs,
+            "total_csv_bytes": total_bytes,
+            "total_csv_mb": round(total_bytes / (1024 * 1024), 2),
+            "data_saved": data_saved,
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+    except Exception as e:
+        response = jsonify({
+            "status": "error",
+            "error": str(e),
+            "data_saved": False,
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 500
 
 
 # Rate limiting for login endpoint (simple in-memory implementation)

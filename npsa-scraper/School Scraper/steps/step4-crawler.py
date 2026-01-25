@@ -292,7 +292,6 @@ class ContentCollector:
         try:
             self.driver.execute_script("return document.readyState")
         except:
-            print(f"    {bold('[SELENIUM]')} Driver crashed, restarting...")
             
             driver = None
             try:
@@ -1069,10 +1068,11 @@ class ContentCollector:
                         # Re-check emails after Selenium
                         emails_after = self.extract_emails(html)
                         if emails_after:
-                            print(f"    Found {len(emails_after)} emails via Selenium (was {len(emails) if emails else 0})")
+                            was_count = len(emails) if emails else 0
+                            print(f"      Emails found: {len(emails_after)} (method=\"selenium\", was={was_count})")
                             emails = emails_after
             else:
-                print(f"    Found {len(emails)} emails via simple HTML")
+                print(f"      Emails found: {len(emails)} (method=\"simple_html\")")
             
             # Timeout is handled by thread timeout (900s) - no need to check here
             
