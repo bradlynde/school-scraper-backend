@@ -328,11 +328,13 @@ class FinalCompiler:
         df['source_url_n'] = df['source_url'].fillna('').astype(str)
         df['domain'] = df['source_url_n'].apply(_extract_domain_from_url)
 
-        # Deduplicate by email when present
+        # Deduplicate by email when present (normalize email first: lowercase, strip)
         if 'email' in df.columns:
-            has_email = df['email'].notna() & (df['email'].astype(str).str.strip() != '')
-            df_email = df[has_email].copy().sort_values(by=['email']).drop_duplicates(subset=['email'], keep='first')
-            df_no_email = df[~has_email].copy()
+            df['email_normalized'] = df['email'].fillna('').astype(str).str.strip().str.lower()
+            has_email = df['email_normalized'] != ''
+            df_email = df[has_email].copy().sort_values(by=['email_normalized']).drop_duplicates(subset=['email_normalized'], keep='first')
+            df_email = df_email.drop(columns=['email_normalized'], errors='ignore')
+            df_no_email = df[~has_email].copy().drop(columns=['email_normalized'], errors='ignore')
         else:
             df_email = pd.DataFrame()
             df_no_email = df.copy()
@@ -458,7 +460,14 @@ class FinalCompiler:
             df = self.deduplicate_contacts(df)
             print(f"After deduplication: {len(df)}")
         else:
-            print(f"\nSkipping deduplication (already_deduplicated=True): {len(df)}")
+            # Safety check: do a lightweight deduplication pass even if already deduplicated
+            # This catches any edge cases (e.g., email normalization issues)
+            before = len(df)
+            df = self.deduplicate_contacts(df)
+            if len(df) < before:
+                print(f"\nSafety deduplication removed {before - len(df)} additional duplicates: {len(df)}")
+            else:
+                print(f"\nSafety deduplication check: {len(df)} (no additional duplicates found)")
 
         # Create final structure
         final_df = pd.DataFrame({
