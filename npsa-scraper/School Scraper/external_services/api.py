@@ -855,27 +855,27 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             elapsed_time = 0
             
             while elapsed_time < max_wait_time:
-            all_complete = True
-            missing_counties = []
-            
-            for county in counties:
-                county_dir = run_dir / county.replace(' ', '_')
-                county_csv = county_dir / "final_contacts.csv"
-                if not county_csv.exists():
-                    all_complete = False
-                    missing_counties.append(county)
-                else:
-                    # File exists, check if empty
-                    file_size = county_csv.stat().st_size if county_csv.exists() else 0
-                    # Skip empty files - they'll be handled during aggregation
-            
-            if all_complete:
-                print(f"[{run_id}] All {len(counties)} counties completed, proceeding with aggregation...")
-                break
-            
-            if elapsed_time % 30 == 0:  # Log every 30 seconds
-                print(f"[{run_id}] Waiting for {len(missing_counties)} counties to complete: {', '.join(missing_counties[:3])}...")
-            
+                all_complete = True
+                missing_counties = []
+                
+                for county in counties:
+                    county_dir = run_dir / county.replace(' ', '_')
+                    county_csv = county_dir / "final_contacts.csv"
+                    if not county_csv.exists():
+                        all_complete = False
+                        missing_counties.append(county)
+                    else:
+                        # File exists, check if empty
+                        file_size = county_csv.stat().st_size if county_csv.exists() else 0
+                        # Skip empty files - they'll be handled during aggregation
+                
+                if all_complete:
+                    print(f"[{run_id}] All {len(counties)} counties completed, proceeding with aggregation...")
+                    break
+                
+                if elapsed_time % 30 == 0:  # Log every 30 seconds
+                    print(f"[{run_id}] Waiting for {len(missing_counties)} counties to complete: {', '.join(missing_counties[:3])}...")
+                
                 time.sleep(wait_interval)
                 elapsed_time += wait_interval
             
