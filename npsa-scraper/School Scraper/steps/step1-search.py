@@ -86,8 +86,6 @@ class SchoolSearcher:
             "places.nationalPhoneNumber",
             "places.internationalPhoneNumber",
             "places.businessStatus",
-            "places.rating",
-            "places.userRatingCount",
             "places.types",
             "places.primaryType"
         ]
@@ -216,8 +214,6 @@ class SchoolSearcher:
             address=formatted_address,
             website=website,
             phone=phone,
-            rating=result.get('rating'),
-            user_ratings_total=result.get('userRatingCount'),
             types=types_str,
             business_status=result.get('businessStatus'),
             county=(detected_county or location).replace('County', '').strip(),

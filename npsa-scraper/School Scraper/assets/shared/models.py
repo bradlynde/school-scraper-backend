@@ -16,8 +16,6 @@ class School:
     address: str
     website: Optional[str] = None
     phone: Optional[str] = None
-    rating: Optional[float] = None
-    user_ratings_total: Optional[int] = None
     types: Optional[str] = None
     business_status: Optional[str] = None
     county: str = ""
@@ -34,8 +32,6 @@ class School:
             'address': self.address,
             'website': self.website or '',
             'phone': self.phone or '',
-            'rating': self.rating or '',
-            'user_ratings_total': self.user_ratings_total or '',
             'types': self.types or '',
             'business_status': self.business_status or '',
             'county': self.county,
@@ -54,8 +50,6 @@ class School:
             address=data.get('address', ''),
             website=data.get('website'),
             phone=data.get('phone'),
-            rating=float(data['rating']) if data.get('rating') else None,
-            user_ratings_total=int(data['user_ratings_total']) if data.get('user_ratings_total') else None,
             types=data.get('types'),
             business_status=data.get('business_status'),
             county=data.get('county', ''),
