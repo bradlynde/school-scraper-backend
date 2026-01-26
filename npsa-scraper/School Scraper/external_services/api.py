@@ -832,8 +832,14 @@ def process_county_worker_multiprocessing(args):
         return (idx, county, {'success': False, 'error': str(e)}, processing_time)
 
 
-def aggregate_final_results(run_id: str, state: str):
-    """Aggregate all county results, run global Steps 11-13, and generate final CSV"""
+def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
+    """Aggregate all county results, run global Steps 11-13, and generate final CSV
+    
+    Args:
+        run_id: Run ID
+        state: State name
+        skip_wait: If True, skip waiting for counties and proceed immediately with available data
+    """
     try:
         counties = load_counties_from_state(state)
         run_dir = RUNS_DIR / run_id
@@ -842,11 +848,13 @@ def aggregate_final_results(run_id: str, state: str):
         
         # Wait for all counties to complete (check that all CSV files exist)
         # With multiprocessing pool, counties should complete more reliably, but add timeout as safety
-        max_wait_time = 7200  # 2 hours max wait (increased for large states)
-        wait_interval = 5  # Check every 5 seconds
-        elapsed_time = 0
-        
-        while elapsed_time < max_wait_time:
+        # Skip wait if manually triggered (skip_wait=True)
+        if not skip_wait:
+            max_wait_time = 7200  # 2 hours max wait (increased for large states)
+            wait_interval = 5  # Check every 5 seconds
+            elapsed_time = 0
+            
+            while elapsed_time < max_wait_time:
             all_complete = True
             missing_counties = []
             
@@ -868,11 +876,14 @@ def aggregate_final_results(run_id: str, state: str):
             if elapsed_time % 30 == 0:  # Log every 30 seconds
                 print(f"[{run_id}] Waiting for {len(missing_counties)} counties to complete: {', '.join(missing_counties[:3])}...")
             
-            time.sleep(wait_interval)
-            elapsed_time += wait_interval
-        
-        if not all_complete:
-            print(f"[{run_id}] WARNING: Some counties did not complete within timeout. Proceeding with available data...")
+                time.sleep(wait_interval)
+                elapsed_time += wait_interval
+            
+            if not all_complete:
+                print(f"[{run_id}] WARNING: Some counties did not complete within timeout. Proceeding with available data...")
+        else:
+            # Skip wait - proceed immediately with available data
+            print(f"[{run_id}] Skipping wait - proceeding with available county data...")
         
         pipeline_runs[run_id]["statusMessage"] = "Aggregating results from all counties..."
         
@@ -2364,12 +2375,203 @@ def download_run_csv(run_id: str):
         return error_response, 500
 
 
+@app.route("/runs/<run_id>/process-county", methods=["POST", "OPTIONS"])
+@require_auth
+def process_single_county(run_id: str):
+    """Process a single county for an existing run"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
+    try:
+        # Check metadata first (persistent storage)
+        metadata = load_run_metadata(run_id)
+        if not metadata:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        state = metadata.get("state")
+        if not state:
+            return jsonify({
+                "status": "error",
+                "error": "State not found in run metadata"
+            }), 400
+        
+        # Get county from request body
+        data = request.get_json() or {}
+        county = data.get("county", "").strip()
+        
+        if not county:
+            return jsonify({
+                "status": "error",
+                "error": "County parameter is required"
+            }), 400
+        
+        # Validate county exists in state
+        counties = load_counties_from_state(state)
+        if county not in counties:
+            return jsonify({
+                "status": "error",
+                "error": f"County '{county}' not found in {state}"
+            }), 400
+        
+        def run_county_worker():
+            """Worker function to process single county"""
+            try:
+                # Create output directory
+                run_dir = RUNS_DIR / run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+                county_dir = run_dir / county.replace(' ', '_')
+                county_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Create output CSV path
+                output_csv = str(county_dir / "final_contacts.csv")
+                
+                # Initialize pipeline for this county
+                pipeline = StreamingPipeline(
+                    google_api_key=os.getenv("GOOGLE_PLACES_API_KEY", ""),
+                    openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+                    global_max_api_calls=None,
+                    max_pages_per_school=2,
+                    state=state
+                )
+                
+                # Run pipeline for this single county
+                pipeline.run(
+                    counties=[county],
+                    batch_size=0,
+                    output_csv=output_csv
+                )
+                
+                all_contacts = pipeline.all_contacts
+                print(f"[{run_id}] SUCCESS {county}: {len(all_contacts)} contacts")
+                
+            except Exception as e:
+                print(f"[{run_id}] ERROR processing {county}: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Run in background thread
+        thread = threading.Thread(target=run_county_worker)
+        thread.daemon = True
+        thread.start()
+        
+        response = jsonify({
+            "status": "started",
+            "runId": run_id,
+            "county": county,
+            "message": f"Processing {county} County"
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+        
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
+@app.route("/runs/<run_id>/aggregate", methods=["POST", "OPTIONS"])
+@require_auth
+def trigger_aggregation(run_id: str):
+    """Manually trigger aggregation for a run"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
+    try:
+        # Check metadata first (persistent storage)
+        metadata = load_run_metadata(run_id)
+        if not metadata:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        state = metadata.get("state")
+        if not state:
+            return jsonify({
+                "status": "error",
+                "error": "State not found in run metadata"
+            }), 400
+        
+        # Check if aggregation is already running
+        if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "aggregating":
+            return jsonify({
+                "status": "error",
+                "error": "Aggregation is already in progress"
+            }), 409  # Conflict
+        
+        # Update status
+        if run_id not in pipeline_runs:
+            pipeline_runs[run_id] = {}
+        pipeline_runs[run_id]["status"] = "aggregating"
+        pipeline_runs[run_id]["statusMessage"] = "Starting aggregation..."
+        
+        # Run aggregation in background thread (skip wait since manually triggered)
+        def run_aggregation():
+            try:
+                aggregate_final_results(run_id, state, skip_wait=True)
+            except Exception as e:
+                print(f"[{run_id}] Error during aggregation: {e}")
+                import traceback
+                traceback.print_exc()
+                if run_id in pipeline_runs:
+                    pipeline_runs[run_id]["status"] = "error"
+                    pipeline_runs[run_id]["statusMessage"] = f"Aggregation failed: {str(e)}"
+        
+        thread = threading.Thread(target=run_aggregation)
+        thread.daemon = True
+        thread.start()
+        
+        response = jsonify({
+            "status": "started",
+            "runId": run_id,
+            "message": "Aggregation started"
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+        
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({
         "status": "error",
         "error": f"Endpoint not found: {request.path}",
-        "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete"]
+        "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/process-county", "/runs/<run_id>/aggregate"]
     }), 404
 
 # Production: Use Waitress server
