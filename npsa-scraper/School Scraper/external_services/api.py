@@ -1039,7 +1039,8 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 "csv_filename": pipeline_runs[run_id]["csvFilename"],
                 "total_contacts": len(final_df),
                 "total_contacts_with_emails": len(contacts_with_emails_final),
-                "total_contacts_without_emails": len(contacts_without_emails_final)
+                "total_contacts_without_emails": len(contacts_without_emails_final),
+                "status": "finalizing"  # Will be updated to "completed" after 2-minute cooldown
             })
             save_run_metadata(run_id, metadata)
         else:
@@ -1070,6 +1071,15 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 pipeline_runs[run_id]["status"] = "completed"
                 pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts."
                 pipeline_runs[run_id]["completedAt"] = time.time()
+                
+                # Update metadata to mark as completed (so it appears in Finished tab)
+                metadata = load_run_metadata(run_id) or {}
+                metadata.update({
+                    "status": "completed",
+                    "completed_at": datetime.now().isoformat(),
+                    "completion_time": time.time()
+                })
+                save_run_metadata(run_id, metadata)
         
         finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
         finalize_thread.start()
@@ -2553,6 +2563,77 @@ def trigger_aggregation(run_id: str):
             "status": "started",
             "runId": run_id,
             "message": "Aggregation started"
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+        
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
+@app.route("/runs/<run_id>/update-status", methods=["POST", "OPTIONS"])
+@require_auth
+def update_run_status(run_id: str):
+    """Manually update run status in metadata (for fixing status issues)"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
+    try:
+        # Get new status from request body
+        data = request.get_json() or {}
+        new_status = data.get("status", "").strip()
+        
+        if not new_status:
+            return jsonify({
+                "status": "error",
+                "error": "Status parameter is required"
+            }), 400
+        
+        if new_status not in ["running", "completed", "error", "cancelled", "finalizing"]:
+            return jsonify({
+                "status": "error",
+                "error": f"Invalid status: {new_status}. Must be one of: running, completed, error, cancelled, finalizing"
+            }), 400
+        
+        # Load and update metadata
+        metadata = load_run_metadata(run_id)
+        if not metadata:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        metadata["status"] = new_status
+        if new_status == "completed":
+            metadata["completed_at"] = datetime.now().isoformat()
+            metadata["completion_time"] = time.time()
+        
+        save_run_metadata(run_id, metadata)
+        
+        # Also update in-memory if present
+        if run_id in pipeline_runs:
+            pipeline_runs[run_id]["status"] = new_status
+        
+        response = jsonify({
+            "status": "success",
+            "message": f"Run status updated to {new_status}",
+            "runId": run_id
         })
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 200
