@@ -1189,6 +1189,10 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                         print(f"[{run_id}] Resuming: {len(completed_counties)}/{total_counties} counties completed, starting from index {start_index}")
             
             # Save initial metadata for new run or resume
+            # Preserve original created_at if resuming, otherwise set new timestamp
+            existing_metadata = load_run_metadata(run_id)
+            original_created_at = existing_metadata.get("created_at") if existing_metadata else None
+            
             initial_metadata = {
                 "run_id": run_id,
                 "state": state,
@@ -1196,8 +1200,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "total_counties": total_counties,
                 "completed_counties": completed_counties,
                 "start_time": time.time(),
-                "created_at": datetime.now().isoformat()
+                "created_at": original_created_at if original_created_at else datetime.now().isoformat()
             }
+            # If resuming, also preserve original start_time for accurate duration calculation
+            if resume_from_checkpoint and existing_metadata and "start_time" in existing_metadata:
+                initial_metadata["original_start_time"] = existing_metadata.get("start_time")
             save_run_metadata(run_id, initial_metadata)
             
             if resume_from_checkpoint and completed_counties:
