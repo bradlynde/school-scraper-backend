@@ -320,6 +320,10 @@ class ContentCollector:
     
     def cleanup(self):
         """Basic cleanup: quit Selenium driver and kill all Chrome processes (bottom-up)"""
+        # Monitor processes before cleanup
+        before_zombies, before_orphaned, before_active = self._get_process_counts()
+        print(f"    {bold('[CLEANUP]')} BEFORE: Chrome processes - Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
+        
         # Cleanup Chrome processes first (bottom-up) before quitting driver
         self._kill_all_chrome_processes()
         time.sleep(0.5)  # Wait for children to die
@@ -342,6 +346,10 @@ class ContentCollector:
             self._kill_orphaned_chrome_processes()
         finally:
             self.driver = None
+            
+            # Monitor processes after cleanup
+            after_zombies, after_orphaned, after_active = self._get_process_counts()
+            print(f"    {bold('[CLEANUP]')} AFTER: Chrome processes - Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}")
     
     def _get_process_counts(self):
         """Get current Chrome process counts: (zombies, orphaned_zombies, active)"""
@@ -393,6 +401,10 @@ class ContentCollector:
         """
         if not HAS_PSUTIL:
             return 0
+        
+        # Monitor processes before cleanup
+        before_zombies, before_orphaned, before_active = self._get_process_counts()
+        print(f"      {bold('[CLEANUP]')} BEFORE kill_all: Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
         
         killed_count = 0  # Initialize early to ensure it's always defined
         
@@ -540,6 +552,10 @@ class ContentCollector:
             
         except Exception as e:
             pass
+        
+        # Monitor processes after cleanup
+        after_zombies, after_orphaned, after_active = self._get_process_counts()
+        print(f"      {bold('[CLEANUP]')} AFTER kill_all: Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}, Killed: {killed_count}")
         
         return killed_count
     

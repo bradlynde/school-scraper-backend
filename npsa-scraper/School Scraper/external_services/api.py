@@ -225,6 +225,38 @@ def list_chrome_processes():
         }
 
 
+def get_chrome_process_counts():
+    """Get current Chrome process counts: (zombies, orphaned_zombies, active)"""
+    if not HAS_PSUTIL:
+        return (0, 0, 0)
+    
+    zombies = 0
+    orphaned_zombies = 0
+    active = 0
+    
+    try:
+        for proc in psutil.process_iter(['name', 'pid', 'ppid', 'status']):
+            try:
+                name = proc.info.get('name', '').lower()
+                status = proc.info.get('status', '').lower()
+                ppid = proc.info.get('ppid', -1)
+                
+                if ('chrome' in name or 'chromium' in name or 'chromedriver' in name):
+                    if status == 'zombie':
+                        if ppid == 1:
+                            orphaned_zombies += 1
+                        else:
+                            zombies += 1
+                    else:
+                        active += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
+                continue
+    except:
+        pass
+    
+    return (zombies, orphaned_zombies, active)
+
+
 def kill_chrome_processes_bottom_up(current_pid: int = None):
     """
     Kill all Chrome/Chromium/ChromeDriver processes BOTTOM-UP (children first, then parents).
@@ -244,6 +276,10 @@ def kill_chrome_processes_bottom_up(current_pid: int = None):
     
     if current_pid is None:
         current_pid = os.getpid()
+    
+    # Monitor processes before cleanup
+    before_zombies, before_orphaned, before_active = get_chrome_process_counts()
+    print(f"{bold('[CLEANUP]')} BEFORE kill_chrome_processes_bottom_up: Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
     
     killed_count = 0
     try:
@@ -345,6 +381,10 @@ def kill_chrome_processes_bottom_up(current_pid: int = None):
         
         if killed_count > 0:
             print(f"{bold('[CLEANUP]')} Killed {killed_count} Chrome processes (bottom-up)")
+        
+        # Monitor processes after cleanup
+        after_zombies, after_orphaned, after_active = get_chrome_process_counts()
+        print(f"{bold('[CLEANUP]')} AFTER kill_chrome_processes_bottom_up: Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}, Killed: {killed_count}")
         
     except Exception as e:
         print(f"{bold('[CLEANUP]')} Error in bottom-up Chrome cleanup: {e}")
@@ -710,6 +750,11 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         # CRITICAL: Cleanup Chrome processes BOTTOM-UP (children first, then parents)
         # This prevents zombie processes by ensuring children are killed before parents.
         # Only targets worker's process tree (not system-wide) to protect main container.
+        
+        # Monitor processes before cleanup
+        before_zombies, before_orphaned, before_active = get_chrome_process_counts()
+        print(f"[{run_id}] [{county}] CLEANUP BEFORE: Chrome processes - Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
+        
         try:
             # First, try to quit the driver properly
             if 'pipeline' in locals() and pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
@@ -729,6 +774,10 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         
         # Brief delay after cleanup to provide buffer
         time.sleep(1.0)
+        
+        # Monitor processes after cleanup
+        after_zombies, after_orphaned, after_active = get_chrome_process_counts()
+        print(f"[{run_id}] [{county}] CLEANUP AFTER: Chrome processes - Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}")
 
 
 def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int):
@@ -1689,23 +1738,23 @@ def run_pipeline():
         # Allow concurrent runs for DIFFERENT states (supports 2 states with 4 workers each)
         active_runs_same_state = []
         finalizing_runs_same_state = []
+        active_runs_all_states = []  # Track all active runs for cap enforcement
         current_time = time.time()
         
         for rid, run_data in pipeline_runs.items():
             run_state = run_data.get("state", "").lower()
             status = run_data.get("status")
             
-            # Only check runs for the same state
-            if run_state != state:
-                continue
-            
-            # Check for running runs
+            # Check for running runs (all states - for cap enforcement)
             if status == "running":
                 # Verify thread is actually alive
                 if rid in running_threads:
                     thread = running_threads[rid].get('thread')
                     if thread and thread.is_alive():
-                        active_runs_same_state.append(rid)
+                        active_runs_all_states.append(rid)
+                        # Also track same-state runs
+                        if run_state == state:
+                            active_runs_same_state.append(rid)
                 else:
                     # Thread missing but status is running - mark as stale
                     pipeline_runs[rid]["status"] = "cancelled"
@@ -1715,12 +1764,30 @@ def run_pipeline():
                 finalizing_at = run_data.get("finalizingAt", 0)
                 elapsed = current_time - finalizing_at
                 if elapsed < 120:  # Still in 2-minute cooldown
-                    finalizing_runs_same_state.append(rid)
+                    if run_state == state:
+                        finalizing_runs_same_state.append(rid)
                 else:
                     # Cooldown expired, mark as completed
                     pipeline_runs[rid]["status"] = "completed"
                     if "completedAt" not in pipeline_runs[rid]:
                         pipeline_runs[rid]["completedAt"] = current_time
+        
+        # Enforce maximum 2 concurrent states cap
+        unique_active_states = set()
+        for rid in active_runs_all_states:
+            if rid in pipeline_runs:
+                run_state = pipeline_runs[rid].get("state", "").lower()
+                if run_state:
+                    unique_active_states.add(run_state)
+        
+        # Check if adding this state would exceed the cap
+        if state.lower() not in unique_active_states and len(unique_active_states) >= 2:
+            return jsonify({
+                "status": "error",
+                "error": f"Maximum of 2 concurrent states allowed. Currently running: {', '.join(sorted(unique_active_states))}. Please wait for one to complete.",
+                "activeStates": sorted(unique_active_states),
+                "maxConcurrentStates": 2
+            }), 409  # Conflict status code
         
         if active_runs_same_state:
             return jsonify({
