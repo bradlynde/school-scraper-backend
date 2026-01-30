@@ -136,8 +136,8 @@ METADATA_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "1"))
 
 # Number of parallel workers for processing counties
-# Default to 1 for sequential processing
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "1"))
+# Default to 4 for parallel processing (supports 2 states with 4 workers each)
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
 
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()
@@ -1133,6 +1133,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
     # Initialize progress tracking FIRST, before any operations that might fail
     pipeline_runs[run_id] = {
         "status": "running",
+        "state": state.lower(),  # Store state for concurrent run checking
         "progress": 0,
         "currentStep": 1,
         "totalSteps": 7,
@@ -1155,6 +1156,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
         "countyContacts": [],  # Track contacts per county for graphs
         "countySchools": [],  # Track schools per county for graphs
         "startTime": time.time(),  # Track overall start time
+        "initialEstimatedTimeRemaining": None,  # Static estimate calculated once at start (in seconds)
     }
     
     def process_all_counties():
@@ -1229,6 +1231,16 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             pipeline_runs[run_id]["statusMessage"] = f"Processing {state} ({len(completed_counties)}/{total_counties} counties completed)..."
             pipeline_runs[run_id]["currentCounty"] = "Starting..." if not completed_counties else f"Resuming from {len(completed_counties)}/{total_counties}"
             pipeline_runs[run_id]["countiesProcessed"] = len(completed_counties)
+            
+            # Calculate static initial estimated time remaining (only if not already set)
+            # Average county time: 871 seconds (~14.5 minutes) based on Arkansas run analysis
+            if pipeline_runs[run_id].get("initialEstimatedTimeRemaining") is None:
+                remaining_counties = total_counties - len(completed_counties)
+                avg_time_per_county = 871  # 14.5 minutes average from log analysis
+                # Account for parallel processing (MAX_WORKERS)
+                effective_remaining = max(1, remaining_counties / MAX_WORKERS)
+                initial_estimate = effective_remaining * avg_time_per_county
+                pipeline_runs[run_id]["initialEstimatedTimeRemaining"] = int(initial_estimate)
             
             # Determine processing mode message
             remaining_count = total_counties - len(completed_counties)
@@ -1673,13 +1685,19 @@ def run_pipeline():
                 "error": "Church scraping is not yet available"
             }), 400
         
-        # Check if another run is already active or finalizing
-        active_runs = []
-        finalizing_runs = []
+        # Check if another run for the SAME STATE is already active or finalizing
+        # Allow concurrent runs for DIFFERENT states (supports 2 states with 4 workers each)
+        active_runs_same_state = []
+        finalizing_runs_same_state = []
         current_time = time.time()
         
         for rid, run_data in pipeline_runs.items():
+            run_state = run_data.get("state", "").lower()
             status = run_data.get("status")
+            
+            # Only check runs for the same state
+            if run_state != state:
+                continue
             
             # Check for running runs
             if status == "running":
@@ -1687,7 +1705,7 @@ def run_pipeline():
                 if rid in running_threads:
                     thread = running_threads[rid].get('thread')
                     if thread and thread.is_alive():
-                        active_runs.append(rid)
+                        active_runs_same_state.append(rid)
                 else:
                     # Thread missing but status is running - mark as stale
                     pipeline_runs[rid]["status"] = "cancelled"
@@ -1697,26 +1715,28 @@ def run_pipeline():
                 finalizing_at = run_data.get("finalizingAt", 0)
                 elapsed = current_time - finalizing_at
                 if elapsed < 120:  # Still in 2-minute cooldown
-                    finalizing_runs.append(rid)
+                    finalizing_runs_same_state.append(rid)
                 else:
                     # Cooldown expired, mark as completed
                     pipeline_runs[rid]["status"] = "completed"
                     if "completedAt" not in pipeline_runs[rid]:
                         pipeline_runs[rid]["completedAt"] = current_time
         
-        if active_runs:
+        if active_runs_same_state:
             return jsonify({
                 "status": "error",
-                "error": f"Another run is already in progress. Please wait for it to complete or stop it first.",
-                "activeRunId": active_runs[0]
+                "error": f"Another run for {state} is already in progress. Please wait for it to complete or stop it first.",
+                "activeRunId": active_runs_same_state[0],
+                "state": state
             }), 409  # Conflict status code
         
-        if finalizing_runs:
+        if finalizing_runs_same_state:
             return jsonify({
                 "status": "error",
-                "error": f"A run is currently finalizing. Please wait 2 minutes for the container to restart before starting a new run.",
-                "activeRunId": finalizing_runs[0],
-                "isFinalizing": True
+                "error": f"A run for {state} is currently finalizing. Please wait 2 minutes before starting a new run for this state.",
+                "activeRunId": finalizing_runs_same_state[0],
+                "isFinalizing": True,
+                "state": state
             }), 409  # Conflict status code
         
         # Generate unique run ID
@@ -1804,37 +1824,43 @@ def pipeline_status(run_id):
                     "message": "Run completed. Status no longer available."
                 }), 410  # Gone status code
     
-    # Calculate estimated time remaining based on average county processing time
+    # Calculate server-side elapsed time
+    start_time = run_data.get("startTime")
+    if start_time:
+        elapsed_seconds = time.time() - start_time
+        run_data["elapsedTime"] = int(elapsed_seconds)
+    else:
+        run_data["elapsedTime"] = 0
+    
+    # Calculate static estimated time remaining (ticks down minute by minute)
+    # Estimate is calculated once at start and decreases as time passes
     if run_data["status"] == "running":
-        counties_processed = run_data.get("countiesProcessed", 0)
-        total_counties = run_data.get("totalCounties", 0)
-        county_times = run_data.get("countyTimes", [])
+        initial_estimate = run_data.get("initialEstimatedTimeRemaining")
+        elapsed_seconds = run_data.get("elapsedTime", 0)
         
-        if total_counties > 0:
-            remaining_counties = max(0, total_counties - counties_processed)
-            
-            # Calculate average time per county from completed counties
-            if len(county_times) > 0:
-                avg_time_per_county = sum(county_times) / len(county_times)
-            else:
-                # Fallback: use 11.75 minutes (705 seconds) based on actual Illinois run (Dec 11-12, 2025)
-                # Actual performance: 101 counties in 19h 47m = 11.75 min/county average
-                avg_time_per_county = 705  # 11.75 minutes average from actual production run
-            
-            # Account for parallel processing (MAX_WORKERS)
-            # With N workers, remaining time = (remaining_counties / N) * avg_time
-            # This assumes perfect parallelization (reality is ~75% efficiency)
-            effective_remaining = max(1, remaining_counties / MAX_WORKERS)
-            estimated_remaining = effective_remaining * avg_time_per_county
-        
-            run_data["estimatedTimeRemaining"] = int(estimated_remaining)
-            run_data["averageCountyTime"] = int(avg_time_per_county) if len(county_times) > 0 else None
+        if initial_estimate is not None and initial_estimate > 0:
+            # Calculate remaining as initial estimate minus elapsed time
+            remaining_seconds = max(0, initial_estimate - elapsed_seconds)
+            # Round to minutes (no seconds) - round up to nearest minute for display
+            remaining_minutes = int((remaining_seconds + 59) // 60)  # Round up to nearest minute
+            run_data["estimatedTimeRemaining"] = remaining_minutes * 60  # Convert back to seconds for consistency
         else:
-            run_data["estimatedTimeRemaining"] = 0
-            run_data["averageCountyTime"] = None
+            # Fallback: calculate dynamically if initial estimate not set (for old runs)
+            counties_processed = run_data.get("countiesProcessed", 0)
+            total_counties = run_data.get("totalCounties", 0)
+            
+            if total_counties > 0:
+                remaining_counties = max(0, total_counties - counties_processed)
+                avg_time_per_county = 871  # 14.5 minutes average from log analysis
+                effective_remaining = max(1, remaining_counties / MAX_WORKERS)
+                estimated_remaining = effective_remaining * avg_time_per_county
+                # Round to minutes
+                remaining_minutes = int((estimated_remaining + 59) // 60)
+                run_data["estimatedTimeRemaining"] = remaining_minutes * 60
+            else:
+                run_data["estimatedTimeRemaining"] = 0
     else:
         run_data["estimatedTimeRemaining"] = 0
-        run_data["averageCountyTime"] = None
     
     response = jsonify(run_data)
     response.headers.add("Access-Control-Allow-Origin", "*")
@@ -1990,7 +2016,36 @@ def resume_run(run_id: str):
                 "error": "State not found in run metadata"
             }), 400
         
-        # Check if run is currently running
+        # Check if another run for the SAME STATE is currently running
+        # Allow concurrent runs for DIFFERENT states
+        state_lower = state.lower()
+        active_runs_same_state = []
+        
+        for rid, run_data in pipeline_runs.items():
+            run_state = run_data.get("state", "").lower()
+            run_status = run_data.get("status")
+            
+            # Only check runs for the same state (skip the run we're trying to resume)
+            if rid == run_id or run_state != state_lower:
+                continue
+            
+            # Check for running runs
+            if run_status == "running":
+                # Verify thread is actually alive
+                if rid in running_threads:
+                    thread = running_threads[rid].get('thread')
+                    if thread and thread.is_alive():
+                        active_runs_same_state.append(rid)
+        
+        if active_runs_same_state:
+            return jsonify({
+                "status": "error",
+                "error": f"Another run for {state} is already running. Please stop it first before resuming.",
+                "activeRunId": active_runs_same_state[0],
+                "state": state
+            }), 409  # Conflict
+        
+        # Check if THIS run is currently running
         if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "running":
             # Check if thread is actually alive
             if run_id in running_threads:
@@ -1998,7 +2053,7 @@ def resume_run(run_id: str):
                 if thread and thread.is_alive():
                     return jsonify({
                         "status": "error",
-                        "error": "Run is already running. Please stop it first before resuming."
+                        "error": "This run is already running. Please stop it first before resuming."
                     }), 409  # Conflict
         
         # Check if checkpoint exists

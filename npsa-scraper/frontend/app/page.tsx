@@ -170,22 +170,33 @@ const STATE_COUNTY_COUNTS: Record<string, number> = {
   "wyoming": 23,
 };
 
-// Average time per county: 579.4 seconds (~9.7 minutes)
-const SECONDS_PER_COUNTY = 579.4;
+// Average time per county: 871 seconds (~14.5 minutes) - updated from Arkansas run analysis
+const SECONDS_PER_COUNTY = 871;
 
-// Helper function to format estimated time
+// Helper function to format estimated time (minutes only, no seconds)
 function formatEstimatedTime(seconds: number): string {
-  if (seconds < 3600) {
-    // Less than 1 hour, show as minutes
-    return `~${Math.round(seconds / 60)}m`;
-  } else if (seconds < 86400) {
-    // Less than 1 day, show as hours
-    const hours = seconds / 3600;
-    return `~${hours.toFixed(1)}h`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    // Less than 1 hour, show as minutes only
+    return `~${minutes}m`;
+  } else if (minutes < 1440) {
+    // Less than 1 day, show as hours (rounded to nearest minute)
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    if (remainingMinutes === 0) {
+      return `~${hours}h`;
+    } else {
+      return `~${hours}h ${remainingMinutes}m`;
+    }
   } else {
     // 1 day or more, show as days
-    const days = seconds / 86400;
-    return `~${days.toFixed(1)}d`;
+    const days = Math.floor(minutes / 1440);
+    const remainingHours = Math.floor((minutes % 1440) / 60);
+    if (remainingHours === 0) {
+      return `~${days}d`;
+    } else {
+      return `~${days}d ${remainingHours}h`;
+    }
   }
 }
 
@@ -333,32 +344,8 @@ export default function Home() {
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
 
-  // Restore elapsed time from localStorage on page load
-  useEffect(() => {
-    if (typeof window !== 'undefined' && selectedRunId && !startTime) {
-      const storedStartTime = localStorage.getItem(`run_startTime_${selectedRunId}`);
-      if (storedStartTime) {
-        const start = parseInt(storedStartTime, 10);
-        setStartTime(start);
-        const elapsed = (Date.now() - start) / 1000;
-        setElapsedTimeDisplay(elapsed);
-      }
-    }
-  }, [selectedRunId, startTime]);
-
-  // Stop updating when run completes (viewState === "summary")
-  useEffect(() => {
-    if (startTime && viewState === "progress") {
-      const interval = setInterval(() => {
-        const elapsed = (Date.now() - startTime) / 1000;
-        setElapsedTimeDisplay(elapsed);
-      }, 1000);
-      return () => clearInterval(interval);
-    } else if (!startTime) {
-      // Only reset to 0 when startTime is null (before a run starts)
-      setElapsedTimeDisplay(0);
-    }
-  }, [startTime, viewState]);
+  // Server-side elapsed time tracking - no client-side tracking needed
+  // Elapsed time is now calculated server-side and included in API response
 
   useEffect(() => {
     return () => {
@@ -502,9 +489,10 @@ export default function Home() {
           setPollingInterval(null);
         }
         
-        // Calculate final elapsed time - elapsedTimeDisplay will continue updating via useEffect
-        // but we ensure it's set correctly here as well
-        if (startTime) {
+        // Use server-side elapsed time if available, otherwise calculate from startTime
+        if (data.elapsedTime !== undefined) {
+          setElapsedTimeDisplay(data.elapsedTime);
+        } else if (startTime) {
           const finalElapsed = (Date.now() - startTime) / 1000;
           setElapsedTimeDisplay(finalElapsed);
         }
@@ -546,6 +534,11 @@ export default function Home() {
         const totalCounties = data.totalCounties || 1;
         const countyProgress = Math.round((countiesProcessed / totalCounties) * 100);
         setProgress(countyProgress);
+        
+        // Use server-side elapsed time
+        if (data.elapsedTime !== undefined) {
+          setElapsedTimeDisplay(data.elapsedTime);
+        }
         
         setEstimatedTime(data.estimatedTimeRemaining || null);
         
