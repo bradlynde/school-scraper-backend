@@ -45,6 +45,7 @@ from assets.shared.models import Contact
 
 # Import authentication module
 from external_services.auth import require_auth, verify_password, generate_token
+from external_services.notify import send_run_complete_email
 
 # Handle hyphens in filenames using importlib.util
 import importlib.util
@@ -945,6 +946,12 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                     pipeline_runs[run_id]["status"] = "completed"
                     pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found."
                     pipeline_runs[run_id]["completedAt"] = time.time()
+                    if not pipeline_runs[run_id].get("notify_sent"):
+                        duration = time.time() - pipeline_runs[run_id].get("startTime", time.time())
+                        send_run_complete_email(
+                            run_id, state, len(counties), len(counties), 0, 0, duration
+                        )
+                        pipeline_runs[run_id]["notify_sent"] = True
             
             finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
             finalize_thread.start()
@@ -1080,6 +1087,18 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                     "completion_time": time.time()
                 })
                 save_run_metadata(run_id, metadata)
+                if not pipeline_runs[run_id].get("notify_sent"):
+                    duration = time.time() - pipeline_runs[run_id].get("startTime", time.time())
+                    send_run_complete_email(
+                        run_id,
+                        state,
+                        len(counties),
+                        len(counties),
+                        pipeline_runs[run_id].get("totalContacts", 0),
+                        pipeline_runs[run_id].get("totalContactsWithEmails", 0),
+                        duration,
+                    )
+                    pipeline_runs[run_id]["notify_sent"] = True
         
         finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
         finalize_thread.start()
@@ -1422,6 +1441,18 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                             pipeline_runs[run_id]["status"] = "completed"
                             pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed"
                             pipeline_runs[run_id]["completedAt"] = time.time()
+                            if not pipeline_runs[run_id].get("notify_sent"):
+                                duration = time.time() - pipeline_runs[run_id].get("startTime", time.time())
+                                send_run_complete_email(
+                                    run_id,
+                                    state,
+                                    len(completed_counties),
+                                    total_counties,
+                                    pipeline_runs[run_id].get("totalContacts", 0),
+                                    pipeline_runs[run_id].get("totalContactsWithEmails", 0),
+                                    duration,
+                                )
+                                pipeline_runs[run_id]["notify_sent"] = True
                     
                     finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
                     finalize_thread.start()
