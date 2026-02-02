@@ -38,6 +38,7 @@ def send_run_complete_email(
     Call only when transitioning a run to "completed"; use a notify_sent flag at the call site to send at most once per run.
     """
     if not _is_enabled():
+        print(f"[NOTIFY] Email notifications disabled (Run ID: {run_id}, State: {state}) - check NOTIFY_ON_RUN_COMPLETE env var")
         return
     try:
         host = os.getenv("SMTP_HOST", "").strip()
@@ -47,6 +48,8 @@ def send_run_complete_email(
         password = os.getenv("SMTP_PASSWORD", "").strip()
         to_email = os.getenv("NOTIFY_EMAIL", "").strip()
         if not all([host, user, password, to_email]):
+            print(f"[NOTIFY] Email notification skipped - missing required env vars (Run ID: {run_id}, State: {state})")
+            print(f"[NOTIFY] Required: SMTP_HOST={bool(host)}, SMTP_PORT={bool(port_str)}, SMTP_USER={bool(user)}, SMTP_PASSWORD={'***' if password else 'missing'}, NOTIFY_EMAIL={bool(to_email)}")
             return
         # Build plain-text body
         lines = [
@@ -72,6 +75,9 @@ def send_run_complete_email(
             server.starttls(context=context)
             server.login(user, password)
             server.sendmail(user, [to_email], msg.as_string())
+        
+        # Success log
+        print(f"[NOTIFY] Run completion email sent successfully: {state} (Run ID: {run_id}, Counties: {counties_processed}/{total_counties}, Contacts: {total_contacts}, Duration: {duration_seconds}s)")
     except Exception as e:
         # Log but never fail the pipeline
-        print(f"[NOTIFY] Run completion email failed: {e}")
+        print(f"[NOTIFY] Run completion email failed: {e} (Run ID: {run_id}, State: {state})")
