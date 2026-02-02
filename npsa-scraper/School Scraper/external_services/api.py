@@ -2166,6 +2166,108 @@ def resume_run(run_id: str):
         return error_response, 500
 
 
+@app.route("/runs/<run_id>/aggregate", methods=["POST", "OPTIONS"])
+@require_auth
+def aggregate_run(run_id: str):
+    """Manually trigger aggregation for a run, skipping wait for incomplete counties."""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    # Security: Validate run_id to prevent path traversal
+    if not validate_run_id(run_id):
+        return jsonify({
+            "status": "error",
+            "error": "Invalid run ID format"
+        }), 400
+    
+    try:
+        # Check metadata first (persistent storage)
+        metadata = load_run_metadata(run_id)
+        if not metadata:
+            return jsonify({
+                "status": "error",
+                "error": "Run not found"
+            }), 404
+        
+        state = metadata.get("state")
+        if not state:
+            return jsonify({
+                "status": "error",
+                "error": "State not found in run metadata"
+            }), 400
+        
+        # Check if run is already aggregating or completed
+        if run_id in pipeline_runs:
+            current_status = pipeline_runs[run_id].get("status")
+            if current_status == "finalizing":
+                return jsonify({
+                    "status": "error",
+                    "error": "Run is already finalizing/aggregating. Please wait."
+                }), 409
+            elif current_status == "completed":
+                return jsonify({
+                    "status": "error",
+                    "error": "Run is already completed."
+                }), 409
+        
+        # Check if run directory exists
+        run_dir = RUNS_DIR / run_id
+        if not run_dir.exists():
+            return jsonify({
+                "status": "error",
+                "error": "Run directory not found"
+            }), 404
+        
+        # Initialize run status if not already in pipeline_runs
+        if run_id not in pipeline_runs:
+            pipeline_runs[run_id] = {
+                "status": "finalizing",
+                "state": state.lower(),
+                "statusMessage": "Manually triggering aggregation...",
+                "startTime": metadata.get("start_time", time.time())
+            }
+        else:
+            pipeline_runs[run_id]["status"] = "finalizing"
+            pipeline_runs[run_id]["statusMessage"] = "Manually triggering aggregation..."
+        
+        # Run aggregation in background thread with skip_wait=True
+        def run_aggregation():
+            try:
+                aggregate_final_results(run_id, state, skip_wait=True)
+            except Exception as e:
+                print(f"[{run_id}] Error during manual aggregation: {e}")
+                import traceback
+                traceback.print_exc()
+                if run_id in pipeline_runs:
+                    pipeline_runs[run_id]["status"] = "error"
+                    pipeline_runs[run_id]["error"] = f"Aggregation failed: {str(e)}"
+                    pipeline_runs[run_id]["statusMessage"] = f"Failed to aggregate: {str(e)}"
+        
+        aggregation_thread = threading.Thread(target=run_aggregation, daemon=True)
+        aggregation_thread.start()
+        
+        response = jsonify({
+            "status": "aggregating",
+            "runId": run_id,
+            "state": state,
+            "message": "Aggregation started. This will proceed with available county data, skipping incomplete counties."
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 200
+        
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", "*")
+        return error_response, 500
+
+
 @app.route("/runs/<run_id>/delete", methods=["DELETE", "OPTIONS"])
 @require_auth
 def delete_run(run_id: str):
