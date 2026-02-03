@@ -57,7 +57,7 @@ def bold(text: str) -> str:
 
 
 class ContentCollector:
-    def __init__(self, timeout: int = 10, max_retries: int = 1, use_selenium: bool = True):
+    def __init__(self, timeout: int = 10, max_retries: int = 3, use_selenium: bool = True):
         self.timeout = timeout  # HTTP request timeout (10 seconds)
         self.max_retries = max_retries  # 1 retry only
         self.use_selenium = use_selenium
@@ -670,9 +670,15 @@ class ContentCollector:
         return snapshot.get('total', 0)
     
     def safe_get(self, url: str) -> requests.Response:
-        """Make HTTP request with retry logic"""
+        """Make HTTP request with retry logic and delay before requests"""
         for attempt in range(self.max_retries):
             try:
+                # Small delay before each request to reduce load
+                if attempt > 0:
+                    time.sleep(0.3)  # 300ms delay before retry
+                else:
+                    time.sleep(0.2)  # 200ms delay before initial request
+                
                 response = requests.get(url, headers=self.headers, timeout=self.timeout)
                 response.raise_for_status()
                 return response

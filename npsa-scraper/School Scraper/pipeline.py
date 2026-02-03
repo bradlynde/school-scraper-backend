@@ -140,10 +140,10 @@ class StreamingPipeline:
         else:
             self.llm_school_filter = None
         
-        self.page_discoverer = step3.PageDiscoverer(timeout=10, max_retries=1)
+        self.page_discoverer = step3.PageDiscoverer(timeout=10, max_retries=3)
         # ContentCollector will create Selenium driver on init
         # Driver will be recycled after each county to prevent resource accumulation
-        self.content_collector = step4.ContentCollector(timeout=10, max_retries=1, use_selenium=True)
+        self.content_collector = step4.ContentCollector(timeout=10, max_retries=3, use_selenium=True)
         self.html_reducer = step5.HTMLReducer()
         self.html_chunker = step6.HTMLChunker()
         self.llm_parser = step7.LLMParser(openai_api_key, model="gpt-4o-mini")

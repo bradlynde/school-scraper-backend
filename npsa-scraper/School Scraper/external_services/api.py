@@ -136,8 +136,8 @@ METADATA_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "1"))
 
 # Number of parallel workers for processing counties
-# Default to 4 for parallel processing (supports 2 states with 4 workers each)
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
+# Default to 3 for parallel processing (supports 2 states with 3 workers each)
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "3"))
 
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()
@@ -1167,6 +1167,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
     Processing mode is controlled by MAX_WORKERS environment variable:
     - MAX_WORKERS=1: Sequential processing (one county at a time)
     - MAX_WORKERS=2: Parallel processing with 2 workers (50% time reduction)
+    - MAX_WORKERS=3: Parallel processing with 3 workers (66% time reduction)
     - MAX_WORKERS=4: Parallel processing with 4 workers (75% time reduction)
     
     Both sequential and parallel modes use multiprocessing.Pool with maxtasksperchild=1:
@@ -1735,7 +1736,7 @@ def run_pipeline():
             }), 400
         
         # Check if another run for the SAME STATE is already active or finalizing
-        # Allow concurrent runs for DIFFERENT states (supports 2 states with 4 workers each)
+        # Allow concurrent runs for DIFFERENT states (supports 2 states with 3 workers each)
         active_runs_same_state = []
         finalizing_runs_same_state = []
         active_runs_all_states = []  # Track all active runs for cap enforcement
