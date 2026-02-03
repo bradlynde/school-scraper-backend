@@ -108,15 +108,9 @@ class PageDiscoverer:
         ]
     
     def safe_get(self, url: str) -> requests.Response:
-        """Make HTTP request with retry logic and delay before requests"""
+        """Make HTTP request with retry logic"""
         for attempt in range(self.max_retries):
             try:
-                # Small delay before each request to reduce load
-                if attempt > 0:
-                    time.sleep(0.3)  # 300ms delay before retry
-                else:
-                    time.sleep(0.2)  # 200ms delay before initial request
-                
                 response = requests.get(url, headers=self.headers, timeout=self.timeout)
                 response.raise_for_status()
                 return response
