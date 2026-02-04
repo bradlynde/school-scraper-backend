@@ -1319,10 +1319,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                     pool_args = [(idx, county, state, run_id, total_counties) for idx, county in remaining_counties]
                     
                     # Submit all tasks immediately using apply_async - this ensures parallel execution
+                    # Note: wrap args in tuple since apply_async unpacks tuples, but our function expects a single tuple arg
                     async_results = {}
                     for args in pool_args:
                         idx, county, _, _, _ = args
-                        async_results[county] = pool.apply_async(process_county_worker_multiprocessing, args)
+                        async_results[county] = pool.apply_async(process_county_worker_multiprocessing, (args,))
                     
                     print(f"[{run_id}] Submitted {len(async_results)} counties to pool for parallel processing")
                     
