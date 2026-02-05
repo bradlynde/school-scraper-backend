@@ -673,6 +673,12 @@ class ContentCollector:
         """Make HTTP request with retry logic"""
         for attempt in range(self.max_retries):
             try:
+                # Small delay before request to avoid overwhelming servers
+                if attempt == 0:
+                    time.sleep(0.2)  # 200ms delay before initial request
+                else:
+                    time.sleep(0.3)  # 300ms delay before retries
+                
                 response = requests.get(url, headers=self.headers, timeout=self.timeout)
                 response.raise_for_status()
                 return response
@@ -710,6 +716,8 @@ class ContentCollector:
         
         def get_url():
             try:
+                # Small delay before Selenium navigation to avoid overwhelming servers
+                time.sleep(0.2)  # 200ms delay before driver.get()
                 driver.get(url)
                 result[0] = True
             except Exception as e:
