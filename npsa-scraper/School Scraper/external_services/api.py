@@ -131,6 +131,93 @@ RUNS_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# Automatic cleanup configuration
+# Delete runs older than this many days (default: 7 days)
+CLEANUP_DAYS = int(os.getenv("CLEANUP_DAYS", "7"))
+
+def cleanup_old_runs():
+    """
+    Clean up old completed runs to prevent storage exhaustion.
+    Deletes runs older than CLEANUP_DAYS that are completed or cancelled.
+    """
+    try:
+        import shutil
+        from datetime import timedelta
+
+        cutoff_date = datetime.now() - timedelta(days=CLEANUP_DAYS)
+        deleted_count = 0
+        freed_space = 0
+
+        # Get all metadata files
+        for metadata_file in METADATA_DIR.glob("*.json"):
+            try:
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
+
+                # Skip if already deleted or still running
+                if metadata.get("deleted", False):
+                    continue
+
+                status = metadata.get("status")
+                if status not in ["completed", "cancelled", "error"]:
+                    continue
+
+                # Check creation date
+                created_at_str = metadata.get("created_at", "")
+                if not created_at_str:
+                    continue
+
+                try:
+                    created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                    if created_at.tzinfo:
+                        created_at = created_at.replace(tzinfo=None)
+                except Exception:
+                    try:
+                        created_at = datetime.strptime(created_at_str.split('.')[0], '%Y-%m-%dT%H:%M:%S')
+                    except Exception:
+                        continue
+
+                if created_at < cutoff_date:
+                    run_id = metadata_file.stem
+                    run_dir = RUNS_DIR / run_id
+                    checkpoint_file = CHECKPOINTS_DIR / f"{run_id}.json"
+
+                    # Delete files
+                    try:
+                        if run_dir.exists():
+                            total_size = sum(f.stat().st_size for f in run_dir.rglob('*') if f.is_file())
+                            shutil.rmtree(run_dir)
+                            freed_space += total_size
+
+                        if checkpoint_file.exists():
+                            freed_space += checkpoint_file.stat().st_size
+                            checkpoint_file.unlink()
+                    except Exception as e:
+                        print(f"[CLEANUP] Error deleting files for {run_id}: {e}")
+                        continue
+
+                    # Mark as deleted in metadata
+                    metadata["deleted"] = True
+                    metadata["deleted_at"] = datetime.now().isoformat()
+                    metadata["auto_deleted"] = True
+                    save_run_metadata(run_id, metadata)
+
+                    deleted_count += 1
+                    print(f"[CLEANUP] Auto-deleted old run {run_id} (created: {created_at_str})")
+            except Exception as e:
+                print(f"[CLEANUP] Error processing metadata file {metadata_file}: {e}")
+                continue
+
+        if deleted_count > 0:
+            freed_mb = freed_space / (1024 * 1024)
+            print(f"[CLEANUP] Cleaned up {deleted_count} old runs, freed ~{freed_mb:.2f} MB")
+        else:
+            print(f"[CLEANUP] No old runs to clean up (cutoff: {cutoff_date.isoformat()})")
+    except Exception as e:
+        print(f"[CLEANUP] Error during cleanup: {e}")
+        import traceback
+        traceback.print_exc()
+
 # Batch size for checkpointing (save checkpoint every N counties)
 # Set to 1 to save after every county for better recovery
 CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "1"))
@@ -2315,16 +2402,34 @@ def delete_run(run_id: str):
             metadata["cancelled_at"] = datetime.now().isoformat()
             print(f"[{run_id}] Run stopped for deletion")
         
-        # Mark as deleted in metadata (don't actually delete files)
+        # Actually delete files to free up storage space
+        import shutil
+        run_dir = RUNS_DIR / run_id
+        checkpoint_file = CHECKPOINTS_DIR / f"{run_id}.json"
+
+        try:
+            # Delete run directory and all its contents
+            if run_dir.exists():
+                shutil.rmtree(run_dir)
+                print(f"[{run_id}] Deleted run directory: {run_dir}")
+
+            # Delete checkpoint file if it exists
+            if checkpoint_file.exists():
+                checkpoint_file.unlink()
+                print(f"[{run_id}] Deleted checkpoint file: {checkpoint_file}")
+        except Exception as e:
+            print(f"[{run_id}] Warning: Error deleting files: {e}")
+
+        # Mark as deleted in metadata
         metadata["deleted"] = True
         metadata["deleted_at"] = datetime.now().isoformat()
         save_run_metadata(run_id, metadata)
-        
+
         # Remove from in-memory storage if present
         pipeline_runs.pop(run_id, None)
         running_threads.pop(run_id, None)
-        
-        print(f"[{run_id}] Run marked as deleted")
+
+        print(f"[{run_id}] Run deleted and files removed")
         
         response = jsonify({
             "status": "success",
@@ -2508,6 +2613,10 @@ def not_found(e):
         "error": f"Endpoint not found: {request.path}",
         "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/archive", "/runs/<run_id>/unarchive"]
     }), 404
+
+# Cleanup old runs on startup to prevent storage exhaustion
+print("[STARTUP] Running cleanup of old runs...")
+cleanup_old_runs()
 
 # Production: Use Waitress server
 # NOTE: If Railway runs this file directly (bypassing Dockerfile ENTRYPOINT),
