@@ -57,10 +57,11 @@ def bold(text: str) -> str:
 
 
 class ContentCollector:
-    def __init__(self, timeout: int = 10, max_retries: int = 3, use_selenium: bool = True):
+    def __init__(self, timeout: int = 10, max_retries: int = 3, use_selenium: bool = True, chrome_user_data_dir: Optional[str] = None):
         self.timeout = timeout  # HTTP request timeout (10 seconds)
         self.max_retries = max_retries  # 1 retry only
         self.use_selenium = use_selenium
+        self.chrome_user_data_dir = chrome_user_data_dir  # Use volume path to avoid ephemeral storage exhaustion
         self.driver = None
         
         # Track if selenium was used for current school (for cleanup message)
@@ -198,6 +199,11 @@ class ContentCollector:
         }
         chrome_options.add_experimental_option('prefs', prefs)
         
+        # Redirect Chrome to volume to avoid Railway ephemeral storage file limit
+        if self.chrome_user_data_dir:
+            os.makedirs(self.chrome_user_data_dir, exist_ok=True)
+            chrome_options.add_argument(f'--user-data-dir={self.chrome_user_data_dir}')
+        
         driver = None
         try:
             # Use explicit ChromeDriver path to bypass Selenium Manager network issues
@@ -246,6 +252,8 @@ class ContentCollector:
                 minimal_options.add_argument('--headless')
                 minimal_options.add_argument('--no-sandbox')
                 minimal_options.add_argument('--disable-dev-shm-usage')
+                if self.chrome_user_data_dir:
+                    minimal_options.add_argument(f'--user-data-dir={self.chrome_user_data_dir}')
                 # Always use explicit ChromeDriver path to bypass Selenium Manager network lookups
                 chromedriver_path = os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver')
                 service = Service(executable_path=chromedriver_path)

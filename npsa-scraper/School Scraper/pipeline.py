@@ -110,7 +110,8 @@ class StreamingPipeline:
         global_max_api_calls: int = 25,
         max_pages_per_school: int = 3,
         state: str = 'Texas',
-        max_schools: int = None
+        max_schools: int = None,
+        chrome_tmp_dir: Optional[str] = None
     ):
         self.google_api_key = google_api_key
         self.openai_api_key = openai_api_key
@@ -143,7 +144,8 @@ class StreamingPipeline:
         self.page_discoverer = step3.PageDiscoverer(timeout=10, max_retries=3)
         # ContentCollector will create Selenium driver on init
         # Driver will be recycled after each county to prevent resource accumulation
-        self.content_collector = step4.ContentCollector(timeout=10, max_retries=3, use_selenium=True)
+        # chrome_tmp_dir: use volume path to avoid ephemeral storage exhaustion ( Railway file limit)
+        self.content_collector = step4.ContentCollector(timeout=10, max_retries=3, use_selenium=True, chrome_user_data_dir=chrome_tmp_dir)
         self.html_reducer = step5.HTMLReducer()
         self.html_chunker = step6.HTMLChunker()
         self.llm_parser = step7.LLMParser(openai_api_key, model="gpt-4o-mini")

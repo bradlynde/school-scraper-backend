@@ -25,6 +25,7 @@ import logging  # For logging
 import platform  # For OS detection
 import multiprocessing  # For subprocess isolation
 import re  # For regex validation
+import shutil
 
 # Try to import psutil for process tree killing (optional)
 try:
@@ -116,20 +117,22 @@ not_found_runs = {}
 
 # Container restart logic removed - container stays running after completion (matches backup branch)
 
-# Persistent storage configuration
-# Use /data for Railway volume, fallback to /tmp for local development
-PERSISTENT_DATA_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
-PERSISTENT_DATA_DIR.mkdir(parents=True, exist_ok=True)
+# Storage configuration
+# Ephemeral: runs, checkpoints, metadata during processing (cleaned up at run end)
+EPHEMERAL_DATA_DIR = Path(os.getenv("EPHEMERAL_DATA_DIR", "/tmp/npsa_data"))
+EPHEMERAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Subdirectories for persistent storage
-RUNS_DIR = PERSISTENT_DATA_DIR / "runs"
-CHECKPOINTS_DIR = PERSISTENT_DATA_DIR / "checkpoints"
-METADATA_DIR = PERSISTENT_DATA_DIR / "metadata"
+RUNS_DIR = EPHEMERAL_DATA_DIR / "runs"
+CHECKPOINTS_DIR = EPHEMERAL_DATA_DIR / "checkpoints"
+METADATA_DIR = EPHEMERAL_DATA_DIR / "metadata"
 
-# Create directories if they don't exist
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Volume: only the final state CSV is persisted here
+VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
+VOLUME_DIR.mkdir(parents=True, exist_ok=True)
 
 # Automatic cleanup configuration
 # Delete runs older than this many days (default: 7 days)
@@ -182,7 +185,7 @@ def cleanup_old_runs():
                     run_dir = RUNS_DIR / run_id
                     checkpoint_file = CHECKPOINTS_DIR / f"{run_id}.json"
 
-                    # Delete files
+                    # Delete ephemeral files
                     try:
                         if run_dir.exists():
                             total_size = sum(f.stat().st_size for f in run_dir.rglob('*') if f.is_file())
@@ -192,6 +195,15 @@ def cleanup_old_runs():
                         if checkpoint_file.exists():
                             freed_space += checkpoint_file.stat().st_size
                             checkpoint_file.unlink()
+
+                        # Delete final CSV from volume (only thing that was persisted)
+                        final_csv = metadata.get("final_csv_path")
+                        if final_csv and Path(final_csv).exists():
+                            try:
+                                Path(final_csv).unlink()
+                                freed_space += Path(final_csv).stat().st_size
+                            except Exception:
+                                pass
                     except Exception as e:
                         print(f"[CLEANUP] Error deleting files for {run_id}: {e}")
                         continue
@@ -217,6 +229,27 @@ def cleanup_old_runs():
         print(f"[CLEANUP] Error during cleanup: {e}")
         import traceback
         traceback.print_exc()
+
+
+def cleanup_ephemeral_run(run_id: str):
+    """
+    Delete all ephemeral run data after final CSV has been saved to volume.
+    Removes run dir (county CSVs, chrome_tmp, etc.) and checkpoint.
+    """
+    try:
+        run_dir = RUNS_DIR / run_id
+        checkpoint_file = CHECKPOINTS_DIR / f"{run_id}.json"
+        if run_dir.exists():
+            shutil.rmtree(run_dir, ignore_errors=True)
+            print(f"[{run_id}] Cleaned up ephemeral run data")
+        if checkpoint_file.exists():
+            try:
+                checkpoint_file.unlink()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[{run_id}] Error during ephemeral cleanup: {e}")
+
 
 # Batch size for checkpointing (save checkpoint every N counties)
 # Set to 1 to save after every county for better recovery
@@ -778,13 +811,18 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         # Create persistent output file (single file for all contacts)
         output_csv = str(county_dir / "final_contacts.csv")
         
+        # Chrome tmp dir on volume to avoid ephemeral storage exhaustion; deleted after county completes
+        chrome_tmp_dir = county_dir / "chrome_tmp"
+        chrome_tmp_dir.mkdir(parents=True, exist_ok=True)
+        
         # Initialize pipeline for this county
         pipeline = StreamingPipeline(
             google_api_key=os.getenv("GOOGLE_PLACES_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             global_max_api_calls=None,  # No limit for full state runs
             max_pages_per_school=2,  # Reduced from 3 to 2 for faster processing
-            state=state
+            state=state,
+            chrome_tmp_dir=str(chrome_tmp_dir)
         )
         
         # Run pipeline for this single county - collects all contacts
@@ -858,6 +896,14 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         # Kill Chrome processes BOTTOM-UP (only worker's process tree, protects main container)
         # This replaces system-wide process_iter() and pkill which could kill parents before children
         kill_chrome_processes_bottom_up()
+        
+        # Delete Chrome tmp dir (on volume) - no longer needed after county completes
+        try:
+            chrome_tmp_dir = RUNS_DIR / run_id / county.replace(' ', '_') / "chrome_tmp"
+            if chrome_tmp_dir.exists():
+                shutil.rmtree(chrome_tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
         
         # Brief delay after cleanup to provide buffer
         time.sleep(1.0)
@@ -1082,6 +1128,8 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                     pipeline_runs[run_id]["status"] = "completed"
                     pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found."
                     pipeline_runs[run_id]["completedAt"] = time.time()
+                    # Final data saved - clean up ephemeral run data
+                    cleanup_ephemeral_run(run_id)
                     if not pipeline_runs[run_id].get("notify_sent"):
                         duration = time.time() - pipeline_runs[run_id].get("startTime", time.time())
                         send_run_complete_email(
@@ -1153,13 +1201,26 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         
         print(f"[{run_id}] Step 13 complete: Final CSV saved to {final_csv_path}")
         
-        # Read final CSV for download
+        # Read final CSV and copy to volume (only persistent storage)
+        final_data_saved_to_volume = False
         if os.path.exists(final_csv_path):
             with open(final_csv_path, 'r') as f:
                 csv_content = f.read()
             
+            csv_filename = f"{state.title()}_leads_{run_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
             pipeline_runs[run_id]["csvData"] = csv_content
-            pipeline_runs[run_id]["csvFilename"] = f"{state.title()}_leads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            pipeline_runs[run_id]["csvFilename"] = csv_filename
+        
+            # Copy final CSV to volume (only thing persisted)
+            volume_csv_path = VOLUME_DIR / csv_filename
+            volume_saved = False
+            try:
+                shutil.copy2(final_csv_path, volume_csv_path)
+                volume_saved = True
+                final_data_saved_to_volume = True
+                print(f"[{run_id}] Final CSV saved to volume: {volume_csv_path}")
+            except Exception as e:
+                print(f"[{run_id}] WARNING: Could not copy final CSV to volume: {e}")
         
             # Count final contacts
             final_df = pd.read_csv(final_csv_path)
@@ -1175,11 +1236,11 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails_final)
             pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails_final)
             
-            # Save final CSV path to metadata
+            # Save metadata (ephemeral) - final_csv_path on volume for reference
             metadata = load_run_metadata(run_id) or {}
             metadata.update({
-                "final_csv_path": final_csv_path,
-                "csv_filename": pipeline_runs[run_id]["csvFilename"],
+                "final_csv_path": str(volume_csv_path) if volume_saved else final_csv_path,
+                "csv_filename": csv_filename,
                 "total_contacts": len(final_df),
                 "total_contacts_with_emails": len(contacts_with_emails_final),
                 "total_contacts_without_emails": len(contacts_without_emails_final),
@@ -1235,6 +1296,10 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                         duration,
                     )
                     pipeline_runs[run_id]["notify_sent"] = True
+        
+        # Clean up ephemeral run data only after final CSV successfully saved to volume
+        if final_data_saved_to_volume:
+            cleanup_ephemeral_run(run_id)
         
         finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
         finalize_thread.start()
@@ -2402,21 +2467,29 @@ def delete_run(run_id: str):
             metadata["cancelled_at"] = datetime.now().isoformat()
             print(f"[{run_id}] Run stopped for deletion")
         
-        # Actually delete files to free up storage space
-        import shutil
+        # Actually delete files (ephemeral + volume final CSV)
         run_dir = RUNS_DIR / run_id
         checkpoint_file = CHECKPOINTS_DIR / f"{run_id}.json"
 
         try:
-            # Delete run directory and all its contents
+            # Delete ephemeral run directory
             if run_dir.exists():
                 shutil.rmtree(run_dir)
-                print(f"[{run_id}] Deleted run directory: {run_dir}")
+                print(f"[{run_id}] Deleted ephemeral run directory: {run_dir}")
 
             # Delete checkpoint file if it exists
             if checkpoint_file.exists():
                 checkpoint_file.unlink()
                 print(f"[{run_id}] Deleted checkpoint file: {checkpoint_file}")
+
+            # Delete final CSV from volume if it exists
+            final_csv_path = metadata.get("final_csv_path")
+            if final_csv_path and Path(final_csv_path).exists():
+                try:
+                    Path(final_csv_path).unlink()
+                    print(f"[{run_id}] Deleted final CSV from volume: {final_csv_path}")
+                except Exception:
+                    pass
         except Exception as e:
             print(f"[{run_id}] Warning: Error deleting files: {e}")
 
