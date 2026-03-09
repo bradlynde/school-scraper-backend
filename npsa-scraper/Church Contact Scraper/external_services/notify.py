@@ -64,7 +64,7 @@ def send_run_complete_email(
             secs = int(duration_seconds % 60)
             lines.append(f"Duration: {mins}m {secs}s")
         body = "\n".join(lines)
-        subject = f"[NPSA Scraper] Run complete: {state}"
+        subject = f"[Church Scraper] Run complete: {state}"
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = user
