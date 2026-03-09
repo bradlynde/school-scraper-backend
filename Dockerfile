@@ -27,8 +27,8 @@ WORKDIR /app
 COPY ["npsa-scraper/requirements.txt", "./requirements.txt"]
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Copy the School Scraper directory contents
-COPY ["npsa-scraper/School Scraper/", "./"]
+# Copy the School Contact Scraper directory contents
+COPY ["npsa-scraper/School Contact Scraper/", "./"]
 
 # Verify assets/data/state_counties directory exists
 RUN ls -la assets/data/state_counties/ | head -5 || echo "Warning: assets/data/state_counties directory not found"
@@ -42,4 +42,4 @@ EXPOSE 8080
 # It's designed for production workloads and handles long-running processes better than Flask's dev server
 # dumb-init acts as PID 1 and automatically reaps zombie processes (fixes Chrome zombie accumulation)
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["waitress-serve", "--host=0.0.0.0", "--port=${PORT:-8080}", "--threads=4", "--channel-timeout=300", "external_services.api:app"]
+CMD waitress-serve --host=0.0.0.0 --port=${PORT:-8080} --threads=4 --channel-timeout=300 external_services.api:app
