@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from "react";
 import Sidebar from "../components/Sidebar";
 import LoginForm from "../components/LoginForm";
+import LOEGenerator from "../components/LOEGenerator";
 import { useAuth } from "../contexts/AuthContext";
 
 type StepSummary = {
@@ -325,7 +326,7 @@ export default function Home() {
   const { isAuthenticated, token, loading, logout } = useAuth();
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
-  const [selectedType, setSelectedType] = useState<"school" | "church" | "running" | "finished" | "archive">("school");
+  const [selectedType, setSelectedType] = useState<"loe" | "school" | "church" | "running" | "finished" | "archive">("loe");
   const [status, setStatus] = useState("");
   const [summary, setSummary] = useState<PipelineSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -808,7 +809,7 @@ export default function Home() {
     
     // Reset to school tab if on running/finished tabs
     if (selectedType === 'running' || selectedType === 'finished') {
-      setSelectedType('school');
+      setSelectedType('loe');
     }
     
     if (pollingInterval) {
@@ -850,7 +851,7 @@ export default function Home() {
             setSelectedType(tab);
             setSidebarOpen(false); // Close mobile menu on tab change
             // Switch view based on tab
-            if (tab === 'school' || tab === 'church') {
+            if (tab === 'loe' || tab === 'school' || tab === 'church') {
               setViewState("start");
               setSelectedRunId(null);
             } else if (tab === 'running' || tab === 'finished' || tab === 'archive') {
@@ -973,7 +974,14 @@ export default function Home() {
         />
       </div>
       <div className="flex-1 min-h-screen">
-        {/* START VIEW - Only show when school/church tab is active */}
+        {/* LOE Generator - Full view when LOE tab is active */}
+        {viewState === "start" && selectedType === "loe" && (
+          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden">
+            <LOEGenerator />
+          </div>
+        )}
+
+        {/* START VIEW - Show when school/church tab is active */}
         {viewState === "start" && (selectedType === "school" || selectedType === "church") && (
           <div className="animate-fade-in">
             <div className="flex items-center justify-center p-12 min-h-screen">
