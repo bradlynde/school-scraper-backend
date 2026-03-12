@@ -1,62 +1,18 @@
 """
 Authentication module for School Scraper API
-Handles user authentication, JWT token generation, and password hashing
+Validates JWT tokens issued by centralized auth service. Login handled by auth service.
 """
 
 import jwt
-import bcrypt
 import os
-from datetime import datetime, timedelta
 from functools import wraps
 from flask import request, jsonify
 
-# JWT Secret Key (from environment variable, REQUIRED in production)
+# JWT Secret - must match auth service. Tokens are issued by auth service.
 JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET:
     raise ValueError("JWT_SECRET environment variable must be set. This is required for security.")
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24
-
-# User credentials (passwords are hashed with bcrypt)
-# In production, these should be stored in a database
-# Pre-hash passwords on module load
-USERS = {
-    "Koen": {
-        "password_hash": bcrypt.hashpw("admin".encode('utf-8'), bcrypt.gensalt()),
-        "username": "Koen"
-    },
-    "Brad": {
-        "password_hash": bcrypt.hashpw("user1".encode('utf-8'), bcrypt.gensalt()),
-        "username": "Brad"
-    },
-    "Stuart": {
-        "password_hash": bcrypt.hashpw("user2".encode('utf-8'), bcrypt.gensalt()),
-        "username": "Stuart"
-    }
-}
-
-
-def verify_password(username: str, password: str) -> bool:
-    """Verify user password against stored hash"""
-    if username not in USERS:
-        return False
-    
-    stored_hash = USERS[username]["password_hash"]
-    # Handle both bytes and string formats
-    if isinstance(stored_hash, str):
-        stored_hash = stored_hash.encode('utf-8')
-    
-    return bcrypt.checkpw(password.encode('utf-8'), stored_hash)
-
-
-def generate_token(username: str) -> str:
-    """Generate JWT token for authenticated user"""
-    payload = {
-        "username": username,
-        "exp": datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS),
-        "iat": datetime.utcnow()
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 def verify_token(token: str) -> dict:
@@ -95,7 +51,7 @@ def require_auth(f):
                 "error": "Invalid authorization header format"
             }), 401
         
-        # Verify token
+        # Verify token (issued by auth service)
         payload = verify_token(token)
         if not payload:
             return jsonify({
