@@ -974,10 +974,18 @@ export default function Home() {
         />
       </div>
       <div className="flex-1 min-h-screen">
-        {/* LOE Generator - Full view when LOE tab is active */}
+        {/* LOE Generator - iframe when URL set, else inline */}
         {viewState === "start" && selectedType === "loe" && (
           <div className="animate-fade-in flex-1 min-h-0 overflow-hidden">
-            <LOEGenerator />
+            {process.env.NEXT_PUBLIC_LOE_API_URL ? (
+              <iframe
+                src={process.env.NEXT_PUBLIC_LOE_API_URL.replace(/\/+$/, "")}
+                className="w-full h-full border-0"
+                title="LOE Generator"
+              />
+            ) : (
+              <LOEGenerator />
+            )}
           </div>
         )}
 
