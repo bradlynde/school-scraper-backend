@@ -26,6 +26,7 @@ type SidebarProps = {
 
 const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
   const { token, username, logout } = useAuth();
+  const isDev = username === "Koen";
   const [runs, setRuns] = useState<RunMetadata[]>([]);
   const [loading, setLoading] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -43,7 +44,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     
     try {
       // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https
@@ -117,7 +118,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     
     try {
       // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https
@@ -163,12 +164,16 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
 
         {/* Navigation Items */}
       <nav className="p-4 space-y-2 flex-shrink-0">
+          {/* LOE Generator — dev-only during development */}
           <button
-            onClick={() => onTabChange('loe')}
+            onClick={() => isDev && onTabChange('loe')}
+            disabled={!isDev}
             className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'loe'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
+              !isDev
+                ? 'text-gray-400 bg-gray-50 cursor-not-allowed opacity-75'
+                : activeTab === 'loe'
+                  ? 'bg-[#1e3a5f] text-white shadow-md'
+                  : 'text-gray-700 hover:bg-gray-100'
             }`}
           >
             <svg
@@ -186,6 +191,8 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
             </svg>
             <span>LOE Generator</span>
           </button>
+
+          <div className="border-t border-gray-200 my-2" />
 
           <button
             onClick={() => onTabChange('school')}
@@ -211,12 +218,16 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
             <span>School Scraper</span>
           </button>
 
+          {/* Church Scraper — dev-only during development */}
           <button
-            onClick={() => onTabChange('church')}
+            onClick={() => isDev && onTabChange('church')}
+            disabled={!isDev}
             className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'church'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
+              !isDev
+                ? 'text-gray-400 bg-gray-50 cursor-not-allowed opacity-75'
+                : activeTab === 'church'
+                  ? 'bg-[#1e3a5f] text-white shadow-md'
+                  : 'text-gray-700 hover:bg-gray-100'
             }`}
           >
             <svg
@@ -381,7 +392,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                                   setDeleteConfirmRunId(null);
                                   try {
                                     // Ensure API URL includes protocol
-                                    let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+                                    let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
                                     apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
                                     if (!apiUrl.match(/^https?:\/\//)) {
                                       // If no protocol, assume https
@@ -496,7 +507,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                                 e.stopPropagation();
                                 try {
                                   // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https
@@ -536,7 +547,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                                 e.stopPropagation();
                                 try {
                                   // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https

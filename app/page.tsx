@@ -323,7 +323,8 @@ function createLineGraph(data: number[], width: number = 200, height: number = 8
 }
 
 export default function Home() {
-  const { isAuthenticated, token, loading, logout } = useAuth();
+  const { isAuthenticated, token, loading, logout, username } = useAuth();
+  const isDev = username === "Koen";
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
   const [selectedType, setSelectedType] = useState<"loe" | "school" | "church" | "running" | "finished" | "archive">("loe");
@@ -355,6 +356,13 @@ export default function Home() {
       }
     };
   }, [pollingInterval]);
+
+  // Redirect non-dev users away from LOE and Church tabs
+  useEffect(() => {
+    if (isAuthenticated && !isDev && (selectedType === "loe" || selectedType === "church")) {
+      setSelectedType("school");
+    }
+  }, [isAuthenticated, isDev, selectedType]);
 
   // Show login form if not authenticated (after all hooks are called)
   if (loading) {
@@ -426,7 +434,7 @@ export default function Home() {
   async function checkPipelineStatus(runId: string) {
     try {
       // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https
@@ -632,7 +640,7 @@ export default function Home() {
 
     try {
       // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https
@@ -769,13 +777,13 @@ export default function Home() {
         // Check for network errors
         else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed")) {
           // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https
         apiUrl = `https://${apiUrl}`;
       }
-          errorMessage = `Failed to connect to the backend API at ${apiUrl}. This could mean:\n\n1. The backend server is not running\n2. The API URL is incorrect\n3. There's a network connectivity issue\n\nPlease verify that NEXT_PUBLIC_API_URL is set correctly in your Vercel environment variables and that the Railway backend is running.`;
+          errorMessage = `Failed to connect to the backend API at ${apiUrl}. This could mean:\n\n1. The backend server is not running\n2. The API URL is incorrect\n3. There's a network connectivity issue\n\nPlease verify that NEXT_PUBLIC_SCHOOL_API_URL is set correctly in your Vercel environment variables and that the Railway backend is running.`;
         }
       }
       
@@ -864,7 +872,7 @@ export default function Home() {
             setSidebarOpen(false); // Close mobile menu on run select
             // Fetch run status to determine if it's running or finished
             // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https
@@ -1172,7 +1180,7 @@ export default function Home() {
                       onClick={async () => {
                         if (selectedRunId) {
                           // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https
