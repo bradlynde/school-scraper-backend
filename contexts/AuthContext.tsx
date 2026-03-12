@@ -123,7 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (username: string, password: string): Promise<boolean> => {
     try {
       // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
+      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
       apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
       if (!apiUrl.match(/^https?:\/\//)) {
         // If no protocol, assume https
@@ -183,7 +183,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error("Fetch error details:", fetchError);
         // Provide more helpful error message
         if (fetchError.message && fetchError.message.includes('fetch')) {
-          throw new Error(`Failed to connect to API at ${apiUrl}. Please check that the backend is running and NEXT_PUBLIC_API_URL is set correctly.`);
+          throw new Error(`Failed to connect to API at ${apiUrl}. Please check that the backend is running and NEXT_PUBLIC_SCHOOL_API_URL is set correctly.`);
         }
         throw fetchError;
       }
