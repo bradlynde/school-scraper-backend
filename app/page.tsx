@@ -357,15 +357,18 @@ export default function Home() {
     };
   }, [pollingInterval]);
 
-  // Brad/Stuart: only school, running, finished, archive. Others redirect or show "In Development".
-  const restrictedTabs = new Set(["loe", "loe-archive", "church"]);
-  const canAccessCurrentTab = isDev || !restrictedTabs.has(selectedType);
+  // Access: Koen = all. Stuart = loe, loe-archive, school, running, finished, archive. Brad = school, running, finished, archive only.
+  const canAccessCurrentTab =
+    isDev ||
+    (username === "Stuart" && ["loe", "loe-archive", "school", "running", "finished", "archive"].includes(selectedType)) ||
+    (username === "Brad" && ["school", "running", "finished", "archive"].includes(selectedType));
 
+  // Redirect Brad from restricted tabs (loe, loe-archive, church); Stuart can stay on loe/loe-archive
   useEffect(() => {
-    if (isAuthenticated && !isDev && restrictedTabs.has(selectedType)) {
+    if (isAuthenticated && username === "Brad" && ["loe", "loe-archive", "church"].includes(selectedType)) {
       setSelectedType("school");
     }
-  }, [isAuthenticated, isDev, selectedType]);
+  }, [isAuthenticated, username, selectedType]);
 
   // Show login form if not authenticated (after all hooks are called)
   if (loading) {

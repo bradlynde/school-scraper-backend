@@ -24,10 +24,15 @@ type SidebarProps = {
   onRunSelect?: (runId: string) => void;
 };
 
-// Koen = full access. Brad/Stuart = School Scraper + Running/Finished/Archive only.
-const SCHOOL_ONLY_TABS = new Set(["school", "running", "finished", "archive"] as const);
-const canAccessTab = (username: string | null, tab: string) =>
-  username === "Koen" || (username && SCHOOL_ONLY_TABS.has(tab as any));
+// Koen = full access. Stuart = LOE + School + Running/Finished/Archive. Brad = School + Running/Finished/Archive only.
+const BRAD_TABS = new Set(["school", "running", "finished", "archive"] as const);
+const STUART_TABS = new Set(["loe", "loe-archive", "school", "running", "finished", "archive"] as const);
+const canAccessTab = (username: string | null, tab: string) => {
+  if (username === "Koen") return true;
+  if (username === "Stuart") return STUART_TABS.has(tab as any);
+  if (username === "Brad") return BRAD_TABS.has(tab as any);
+  return false;
+};
 
 const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
   const { token, username, logout } = useAuth();
