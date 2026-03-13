@@ -19,8 +19,8 @@ type RunMetadata = {
 };
 
 type SidebarProps = {
-  activeTab: 'school' | 'church' | 'running' | 'finished' | 'archive';
-  onTabChange: (tab: 'school' | 'church' | 'running' | 'finished' | 'archive') => void;
+  activeTab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive';
+  onTabChange: (tab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive') => void;
   onRunSelect?: (runId: string) => void;
 };
 
@@ -163,6 +163,38 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
 
         {/* Navigation Items */}
       <nav className="p-4 space-y-2 flex-shrink-0">
+          {/* LOE Generator — loads via iframe when NEXT_PUBLIC_LOE_API_URL is set */}
+          <button
+            onClick={() => onTabChange('loe')}
+            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+              activeTab === 'loe'
+                ? 'bg-[#1e3a5f] text-white shadow-md'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <span>LOE Generator</span>
+          </button>
+
+          {/* LOE Archive — loads via iframe at LOE_API_URL/archive */}
+          <button
+            onClick={() => onTabChange('loe-archive')}
+            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+              activeTab === 'loe-archive'
+                ? 'bg-[#1e3a5f] text-white shadow-md'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+            </svg>
+            <span>LOE Archive</span>
+          </button>
+
+          <div className="border-t border-gray-200 my-2" />
+
           <button
             onClick={() => onTabChange('school')}
             className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${

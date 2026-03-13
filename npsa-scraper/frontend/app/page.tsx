@@ -325,7 +325,7 @@ export default function Home() {
   const { isAuthenticated, token, loading, logout } = useAuth();
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
-  const [selectedType, setSelectedType] = useState<"school" | "church" | "running" | "finished" | "archive">("school");
+  const [selectedType, setSelectedType] = useState<"loe" | "loe-archive" | "school" | "church" | "running" | "finished" | "archive">("loe");
   const [status, setStatus] = useState("");
   const [summary, setSummary] = useState<PipelineSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -806,9 +806,9 @@ export default function Home() {
     setSelectedRunId(null);
     setIsRunning(false);
     
-    // Reset to school tab if on running/finished tabs
+    // Reset to loe tab if on running/finished tabs
     if (selectedType === 'running' || selectedType === 'finished') {
-      setSelectedType('school');
+      setSelectedType('loe');
     }
     
     if (pollingInterval) {
@@ -850,7 +850,7 @@ export default function Home() {
             setSelectedType(tab);
             setSidebarOpen(false); // Close mobile menu on tab change
             // Switch view based on tab
-            if (tab === 'school' || tab === 'church') {
+            if (tab === 'loe' || tab === 'loe-archive' || tab === 'school' || tab === 'church') {
               setViewState("start");
               setSelectedRunId(null);
             } else if (tab === 'running' || tab === 'finished' || tab === 'archive') {
@@ -973,6 +973,46 @@ export default function Home() {
         />
       </div>
       <div className="flex-1 min-h-screen">
+        {/* LOE Generator - iframe when URL set */}
+        {viewState === "start" && selectedType === "loe" && (
+          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden">
+            {process.env.NEXT_PUBLIC_LOE_API_URL ? (
+              <iframe
+                src={process.env.NEXT_PUBLIC_LOE_API_URL.replace(/\/+$/, "")}
+                className="w-full h-full border-0"
+                title="LOE Generator"
+              />
+            ) : (
+              <div className="flex items-center justify-center min-h-screen p-12">
+                <div className="text-center text-gray-500">
+                  <p className="text-lg font-medium">LOE Generator not configured</p>
+                  <p className="text-sm mt-2">Set NEXT_PUBLIC_LOE_API_URL in Vercel to load the LOE Generator.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* LOE Archive - iframe to LOE_API_URL/archive */}
+        {viewState === "start" && selectedType === "loe-archive" && (
+          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden">
+            {process.env.NEXT_PUBLIC_LOE_API_URL ? (
+              <iframe
+                src={`${process.env.NEXT_PUBLIC_LOE_API_URL.replace(/\/+$/, "")}/archive`}
+                className="w-full h-full border-0"
+                title="LOE Archive"
+              />
+            ) : (
+              <div className="flex items-center justify-center min-h-screen p-12">
+                <div className="text-center text-gray-500">
+                  <p className="text-lg font-medium">LOE Archive not configured</p>
+                  <p className="text-sm mt-2">Set NEXT_PUBLIC_LOE_API_URL in Vercel to load the LOE Archive.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* START VIEW - Only show when school/church tab is active */}
         {viewState === "start" && (selectedType === "school" || selectedType === "church") && (
           <div className="animate-fade-in">
