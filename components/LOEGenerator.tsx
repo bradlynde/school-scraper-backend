@@ -785,15 +785,16 @@ export default function LOEGenerator() {
     const TOKENS_PRE = ["[CLIENT_NAME]","[GRANT_YEAR]","[MAX_AWARD]","[NUM_LOCATIONS]","[NUM_APPLICATIONS]","[UPFRONT_FEE]","[POST_AWARD_FEE]","[NOFO_CLAUSE]","[COMP_BLOCK]","[LOCATION_LIST]"];
     const TOKENS_POST = ["[CLIENT_NAME]","[GRANT_YEAR]","[POST_FEE]","[POST_PMT1]","[POST_PMT2]","[POST_PMT3]"];
     const tokens = editingTab==="pre"||editingTab==="inh" ? TOKENS_PRE : TOKENS_POST;
+    const TE_PRIMARY = "#1e3a5f", TE_BORDER = "#e5e7eb";
     return (
-      <div style={{display:"flex",height:"100vh",fontFamily:"Inter,sans-serif",background:"#f4f5f7"}}>
-        <div style={{width:260,background:"#1a2540",color:"#e8eaf0",overflowY:"auto",padding:"20px 16px",flexShrink:0}}>
-          <div style={{fontWeight:700,fontSize:13,color:"#fff",marginBottom:2}}>Template Editor</div>
-          <div style={{fontSize:11,color:"#8892aa",marginBottom:14}}>Editing: <span style={{color:editingTab==="pre"?"#5b9ec9":editingTab==="inh"?"#9aab2e":"#888",fontWeight:700}}>{editingTab==="pre"?"Pre-Award":editingTab==="inh"?"In-House Pre-Award":"Post-Award"}</span></div>
+      <div style={{display:"flex",height:"100vh",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",background:"#f5f5f5"}}>
+        <div style={{width:260,background:"#fff",borderRight:`1px solid ${TE_BORDER}`,color:"#374151",overflowY:"auto",padding:"20px 16px",flexShrink:0}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#111",marginBottom:2}}>Template Editor</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:14}}>Editing: <span style={{color:TE_PRIMARY,fontWeight:700}}>{editingTab==="pre"?"Pre-Award":editingTab==="inh"?"In-House Pre-Award":"Post-Award"}</span></div>
           {editingSections.map(s=>(
             <div key={s.id}>
               <button onClick={()=>setActiveEdit({sectionId:s.id,subId:null})}
-                style={{width:"100%",textAlign:"left",background:activeEdit?.sectionId===s.id&&!activeEdit?.subId?"#2a3d60":"transparent",border:"none",color:activeEdit?.sectionId===s.id&&!activeEdit?.subId?"#fff":"#b0b8cc",padding:"8px 10px",borderRadius:6,fontSize:12,cursor:"pointer",marginBottom:2,fontWeight:600}}>
+                style={{width:"100%",textAlign:"left",background:activeEdit?.sectionId===s.id&&!activeEdit?.subId?TE_PRIMARY:"transparent",border:"none",color:activeEdit?.sectionId===s.id&&!activeEdit?.subId?"#fff":"#6b7280",padding:"8px 10px",borderRadius:8,fontSize:12,cursor:"pointer",marginBottom:2,fontWeight:600}}>
                 {s.roman?`${s.roman} `:""}{s.title}
               </button>
               {s.subsections?.map(sub=>(
@@ -804,15 +805,15 @@ export default function LOEGenerator() {
               ))}
             </div>
           ))}
-          <div style={{marginTop:20,borderTop:"1px solid #2a3550",paddingTop:14,fontSize:10,color:"#6c7a9c"}}>Use tokens like {tokens[0]} where client-specific values appear.</div>
+          <div style={{marginTop:20,borderTop:`1px solid ${TE_BORDER}`,paddingTop:14,fontSize:10,color:"#6b7280"}}>Use tokens like {tokens[0]} where client-specific values appear.</div>
         </div>
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-          <div style={{background:"#fff",borderBottom:"1px solid #dde0e6",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div><span style={{fontWeight:700,fontSize:14,color:"#1a2540"}}>Editing Template</span><span style={{fontSize:12,color:"#888",marginLeft:12}}>{editingTab==="pre"?"Pre-Award":editingTab==="inh"?"In-House Pre-Award":"Post-Award"}</span></div>
+          <div style={{background:"#fff",borderBottom:`1px solid ${TE_BORDER}`,padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div><span style={{fontWeight:700,fontSize:14,color:TE_PRIMARY}}>Editing Template</span><span style={{fontSize:12,color:"#6b7280",marginLeft:12}}>{editingTab==="pre"?"Pre-Award":editingTab==="inh"?"In-House Pre-Award":"Post-Award"}</span></div>
             <div style={{display:"flex",gap:10}}>
-              <button onClick={resetTemplate} style={{background:"none",border:"1px solid #e0e0e0",borderRadius:6,padding:"7px 14px",fontSize:12,color:"#888",cursor:"pointer"}}>Reset to Default</button>
-              <button onClick={()=>setMode("document")} style={{background:"none",border:"1px solid #e0e0e0",borderRadius:6,padding:"7px 14px",fontSize:12,color:"#555",cursor:"pointer"}}>Cancel</button>
-              <button onClick={saveTemplate} style={{background:"#1a4a6e",border:"none",borderRadius:6,padding:"7px 18px",fontSize:12,color:"#fff",fontWeight:700,cursor:"pointer"}}>💾 Save Template</button>
+              <button onClick={resetTemplate} style={{background:"none",border:`1px solid ${TE_BORDER}`,borderRadius:12,padding:"7px 14px",fontSize:12,color:"#6b7280",cursor:"pointer"}}>Reset to Default</button>
+              <button onClick={()=>setMode("document")} style={{background:"none",border:`1px solid ${TE_BORDER}`,borderRadius:12,padding:"7px 14px",fontSize:12,color:"#374151",cursor:"pointer"}}>Cancel</button>
+              <button onClick={saveTemplate} style={{background:TE_PRIMARY,border:"none",borderRadius:12,padding:"7px 18px",fontSize:12,color:"#fff",fontWeight:700,cursor:"pointer"}}>💾 Save Template</button>
             </div>
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"32px 40px"}}>
@@ -825,16 +826,16 @@ export default function LOEGenerator() {
               const title=sub?`${sec.roman} ${sec.title} — ${sub.title}`:`${sec.roman||""} ${sec.title}`.trim();
               return (
                 <div style={{maxWidth:760,margin:"0 auto"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#1a4a6e",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>{title}</div>
+                  <div style={{fontSize:13,fontWeight:700,color:TE_PRIMARY,marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>{title}</div>
                   <textarea value={content} onChange={e=>updateContent(activeEdit.sectionId,activeEdit.subId,e.target.value)}
-                    style={{width:"100%",minHeight:420,fontFamily:"Georgia,serif",fontSize:13,lineHeight:1.75,padding:"16px 20px",border:"1.5px solid #c0cad8",borderRadius:8,resize:"vertical",outline:"none",color:"#1a1a1a",background:"#fff",boxSizing:"border-box"}}/>
+                    style={{width:"100%",minHeight:420,fontFamily:"Georgia,serif",fontSize:13,lineHeight:1.75,padding:"16px 20px",border:`1px solid ${TE_BORDER}`,borderRadius:12,resize:"vertical",outline:"none",color:"#1a1a1a",background:"#fff",boxSizing:"border-box"}}/>
                   <div style={{marginTop:10,display:"flex",gap:8,flexWrap:"wrap"}}>
                     {tokens.map(tok=>(
                       <button key={tok} onClick={()=>{
                         const ta=document.querySelector("textarea");
                         const s=ta.selectionStart,e=ta.selectionEnd;
                         updateContent(activeEdit.sectionId,activeEdit.subId,content.slice(0,s)+tok+content.slice(e));
-                      }} style={{background:"#eef2f8",border:"1px solid #c0cad8",borderRadius:4,padding:"3px 8px",fontSize:11,color:"#1a4a6e",cursor:"pointer",fontFamily:"monospace"}}>{tok}</button>
+                      }} style={{background:"#f3f4f6",border:`1px solid ${TE_BORDER}`,borderRadius:8,padding:"4px 10px",fontSize:11,color:TE_PRIMARY,cursor:"pointer",fontFamily:"monospace"}}>{tok}</button>
                     ))}
                   </div>
                 </div>
@@ -918,40 +919,39 @@ export default function LOEGenerator() {
     </>;
   };
 
-  return (
-    <div style={{display:"flex",height:"100vh",fontFamily:"Inter,sans-serif",background:"#f4f5f7"}}>
-      {/* ── SIDEBAR ── */}
-      <div style={{width:320,background:"#1a2540",color:"#e8eaf0",overflowY:"auto",padding:"20px 16px",flexShrink:0}}>
-        <div style={{marginBottom:16,borderBottom:"1px solid #2a3550",paddingBottom:14}}>
-          <span style={{fontWeight:800,fontSize:15,color:"#5b9ec9",fontFamily:"Georgia,serif"}}>nonprofit</span><br/>
-          <span style={{fontWeight:400,fontSize:13,color:"#9aab2e",fontFamily:"Georgia,serif"}}>security advisors</span>
-          <div style={{fontSize:10,color:"#8892aa",marginTop:3}}>Engagement Letter Generator</div>
-        </div>
+  const NPSA_BG = "#f5f5f5";
+  const NPSA_PRIMARY = "#1e3a5f";
+  const NPSA_CARD = "#fff";
+  const NPSA_BORDER = "#e5e7eb";
 
-        <button onClick={()=>setConfirmModal(docTab)} style={{width:"100%",background:"#2a3d60",border:"1px solid #3a5080",borderRadius:6,padding:"7px 0",fontSize:11,color:"#9ab8d8",cursor:"pointer",marginBottom:14,fontWeight:600,display:isGw?"none":"block"}}>
+  return (
+    <div style={{display:"flex",height:"100vh",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",background:NPSA_BG}}>
+      {/* ── SIDEBAR (no duplicate branding — parent app provides it) ── */}
+      <div style={{width:320,background:NPSA_CARD,borderRight:`1px solid ${NPSA_BORDER}`,color:"#374151",overflowY:"auto",padding:"20px 16px",flexShrink:0}}>
+        <button onClick={()=>setConfirmModal(docTab)} style={{width:"100%",background:NPSA_PRIMARY,border:"none",borderRadius:12,padding:"10px 0",fontSize:12,color:"#fff",cursor:"pointer",marginBottom:14,fontWeight:600,display:isGw?"none":"block"}}>
           ✏️ Edit {isPre?"Pre-Award":isInh?"In-House Pre-Award":"Post-Award"} Template
         </button>
-        {savedBanner&&<div style={{background:"#1e3a2f",border:"1px solid #2d5c42",borderRadius:6,padding:"7px 12px",fontSize:11,color:"#7edca8",marginBottom:12}}>✓ Template saved</div>}
+        {savedBanner&&<div style={{background:"#ecfdf5",border:"1px solid #a7f3d0",borderRadius:12,padding:"8px 12px",fontSize:12,color:"#059669",marginBottom:12}}>✓ Template saved</div>}
 
         {SHARED_FIELDS.map((f2,i)=>{
-          if(f2.section) return <div key={i} style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>{f2.section}</div>;
+          if(f2.section) return <div key={i} style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>{f2.section}</div>;
           return (
             <div key={f2.key} style={{marginBottom:10}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>{f2.label}</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>{f2.label}</label>
               <input value={form[f2.key]||""} onChange={e=>setF(f2.key,e.target.value)} placeholder={f2.placeholder||""}
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:12,padding:"8px 12px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           );
         })}
 
         {/* Locations — shared across all tabs */}
-        <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Locations</div>
+        <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Locations</div>
         {(form.locations||[]).map((loc,idx)=>(
-          <div key={idx} style={{background:"#1a2540",border:"1px solid #2e3d60",borderRadius:6,padding:"10px 10px 6px",marginBottom:8}}>
+          <div key={idx} style={{background:"#f9fafb",border:`1px solid ${NPSA_BORDER}`,borderRadius:12,padding:"12px",marginBottom:8}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <span style={{fontSize:11,color:"#6c7a9c",fontWeight:700}}>Location {idx+1}{idx===0?" (Primary)":""}</span>
+              <span style={{fontSize:11,color:"#6b7280",fontWeight:700}}>Location {idx+1}{idx===0?" (Primary)":""}</span>
               {idx>0&&<button onClick={()=>setF("locations",(form.locations||[]).filter((_,i)=>i!==idx))}
-                style={{background:"none",border:"none",color:"#e07070",fontSize:13,cursor:"pointer",padding:"0 2px",lineHeight:1}}>✕</button>}
+                style={{background:"none",border:"none",color:"#dc2626",fontSize:13,cursor:"pointer",padding:"0 2px",lineHeight:1}}>✕</button>}
             </div>
             {[{k:"name",ph:"Location / Site Name (optional)"},{k:"address",ph:"Street Address"},{k:"city",ph:"City"},{k:"state",ph:"State"},{k:"zip",ph:"ZIP"}].map(f2=>(
               <div key={f2.k} style={{marginBottom:6}}>
@@ -961,26 +961,26 @@ export default function LOEGenerator() {
                     updated[idx]={...updated[idx],[f2.k]:e.target.value};
                     setF("locations",updated);
                   }}
-                  style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"5px 8px",color:"#e8eaf0",fontSize:11,boxSizing:"border-box",outline:"none"}}/>
+                  style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:8,padding:"6px 10px",color:"#374151",fontSize:11,boxSizing:"border-box",outline:"none"}}/>
               </div>
             ))}
           </div>
         ))}
         <button onClick={()=>setF("locations",[...(form.locations||[]),{name:"",address:"",city:"",state:"",zip:""}])}
-          style={{width:"100%",background:"#222e4a",border:"1px dashed #3a5080",borderRadius:6,padding:"7px 0",fontSize:11,color:"#6c9ecf",cursor:"pointer",marginBottom:14}}>
+          style={{width:"100%",background:"#fff",border:`1px dashed ${NPSA_BORDER}`,borderRadius:12,padding:"8px 0",fontSize:12,color:NPSA_PRIMARY,cursor:"pointer",marginBottom:14}}>
           + Add Location
         </button>
 
         {/* Pre-award specific */}
         {isPre&&<>
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Grant Details</div>
-          <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Grant Type</label>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Grant Details</div>
+          <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Grant Type</label>
           <div style={{display:"flex",gap:6,marginBottom:10}}>
             {["Federal","State"].map(t=>(
               <button key={t} onClick={()=>setF("grantType",t)}
                 style={{flex:1,padding:"7px 0",borderRadius:6,border:"1px solid",fontSize:12,fontWeight:700,cursor:"pointer",
-                  background:form.grantType===t?"#1a4a6e":"#222e4a",
-                  borderColor:form.grantType===t?"#5b9ec9":"#2e3d60",
+                  background:form.grantType===t?NPSA_PRIMARY:"#f9fafb",
+                  borderColor:form.grantType===t?NPSA_PRIMARY:NPSA_BORDER,
                   color:form.grantType===t?"#fff":"#8892aa"}}>
                 {t}
               </button>
@@ -988,39 +988,39 @@ export default function LOEGenerator() {
           </div>
           {[{key:"grantYear",label:"Grant Year",placeholder:"2026"},{key:"maxAward",label:"Max Award Per Location ($)",placeholder:"200,000"}].map(f2=>(
             <div key={f2.key} style={{marginBottom:10}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>{f2.label}</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>{f2.label}</label>
               <input value={form[f2.key]||""} onChange={e=>setF(f2.key,e.target.value)} placeholder={f2.placeholder}
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           ))}
 
           {/* Fee Calculator */}
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Fee Calculator</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Fee Calculator</div>
 
-          <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Engagement Model</label>
+          <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Engagement Model</label>
           <select value={form.engagementModel} onChange={e=>setF("engagementModel",e.target.value)}
-            style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,marginBottom:10,outline:"none"}}>
+            style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,marginBottom:10,outline:"none"}}>
             <option value="pre-only">Pre-Award Only</option>
             <option value="partial-contingency">Pre-Award + Partial Contingency</option>
           </select>
 
-          <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Pricing Tier</label>
+          <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Pricing Tier</label>
           <select value={form.pricingTier} onChange={e=>setF("pricingTier",e.target.value)}
-            style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,marginBottom:10,outline:"none"}}>
+            style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,marginBottom:10,outline:"none"}}>
             {Object.entries(TIER_LABELS).filter(([k])=>k!=="max").map(([k,v])=><option key={k} value={k}>{v}</option>)}
           </select>
           {form.pricingTier==="custom"&&(
             <div style={{marginBottom:10,marginTop:-4,paddingLeft:0}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Custom Fee Amount ($)</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Custom Fee Amount ($)</label>
               <input value={form.customFee||""} onChange={e=>setF("customFee",e.target.value)} placeholder="e.g. 5,000"
-                style={{width:"100%",background:"#222e4a",border:"1px solid #5b9ec9",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
 
           {/* Fee summary card */}
-          <div style={{background:"#0f1a30",border:"1px solid #2e4060",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#5b9ec9",marginBottom:8}}>Fee Summary</div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#b0b8cc",marginBottom:4}}>
+          <div style={{background:"#f9fafb",border:`1px solid ${NPSA_BORDER}`,borderRadius:8,padding:"12px 14px",marginBottom:10}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:NPSA_PRIMARY,marginBottom:8}}>Fee Summary</div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280",marginBottom:4}}>
               <span>Upfront Fee</span><span style={{color:"#fff",fontWeight:600}}>{form.earlySigningDiscount&&fees.discount>0?<><span style={{textDecoration:"line-through",color:"#666",marginRight:6}}>{fmt(fees.baseUpfront)}</span>{fmt(fees.upfront)}</>:fmt(fees.upfront)}</span>
             </div>
             {form.earlySigningDiscount&&fees.discount>0&&(
@@ -1029,17 +1029,17 @@ export default function LOEGenerator() {
               </div>
             )}
             {fees.contingent!==null&&(
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#b0b8cc",marginBottom:4}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280",marginBottom:4}}>
                 <span>Contingent Fee (on award)</span><span style={{color:"#fff",fontWeight:600}}>{fmt(fees.contingent)}</span>
               </div>
             )}
             {form.optPostAwardScope&&(
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#b0b8cc",marginBottom:4}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280",marginBottom:4}}>
                 <span>Post-Award Fee (on award){numLocs>1?` ×${numLocs}`:""}</span><span style={{color:"#fff",fontWeight:600}}>{fmt(fees.postAward)}</span>
               </div>
             )}
             <div style={{borderTop:"1px solid #2e4060",marginTop:6,paddingTop:6,display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700}}>
-              <span style={{color:"#9aab2e"}}>Total</span><span style={{color:"#9aab2e"}}>{fmt(fees.total)}</span>
+              <span style={{color:NPSA_PRIMARY}}>Total</span><span style={{color:NPSA_PRIMARY}}>{fmt(fees.total)}</span>
             </div>
           </div>
 
@@ -1060,25 +1060,25 @@ export default function LOEGenerator() {
             </div>
           )}
 
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.installments?10:14,cursor:"pointer"}}>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#6b7280",marginBottom:form.installments?10:14,cursor:"pointer"}}>
             <input type="checkbox" checked={form.earlySigningDiscount} onChange={e=>setF("earlySigningDiscount",e.target.checked)} style={{accentColor:"#e8a020"}}/>
             Early signing discount
           </label>
 
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.installments?10:14,cursor:"pointer"}}>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#6b7280",marginBottom:form.installments?10:14,cursor:"pointer"}}>
             <input type="checkbox" checked={form.installments} onChange={e=>setF("installments",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
             Allow installment payments
           </label>
           {form.installments&&(
-            <div style={{background:"#0f1a30",border:"1px solid #2e4060",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#9aab2e",marginBottom:10}}>Installment Schedule</div>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:4}}>Number of Payments</label>
+            <div style={{background:"#f9fafb",border:`1px solid ${NPSA_BORDER}`,borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:NPSA_PRIMARY,marginBottom:10}}>Installment Schedule</div>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:4}}>Number of Payments</label>
               <div style={{display:"flex",gap:6,marginBottom:12}}>
                 {[2,3].map(n=>(
                   <button key={n} onClick={()=>setF("installmentCount",n)}
                     style={{flex:1,padding:"7px 0",borderRadius:6,border:"1px solid",fontSize:12,fontWeight:700,cursor:"pointer",
-                      background:form.installmentCount===n?"#1a4a6e":"#222e4a",
-                      borderColor:form.installmentCount===n?"#5b9ec9":"#2e3d60",
+                      background:form.installmentCount===n?NPSA_PRIMARY:"#f9fafb",
+                      borderColor:form.installmentCount===n?NPSA_PRIMARY:NPSA_BORDER,
                       color:form.installmentCount===n?"#fff":"#8892aa"}}>
                     {n} Payments
                   </button>
@@ -1093,17 +1093,17 @@ export default function LOEGenerator() {
                 const amt = Math.round(fees.upfront * pct / 100);
                 return (
                   <div key={row.num} style={{marginBottom:10,paddingBottom:10,borderBottom:"1px solid #1e3050"}}>
-                    <div style={{fontSize:10,color:"#5b9ec9",fontWeight:700,marginBottom:5}}>Payment {row.num}</div>
+                    <div style={{fontSize:10,color:NPSA_PRIMARY,fontWeight:700,marginBottom:5}}>Payment {row.num}</div>
                     <div style={{display:"flex",gap:6,marginBottom:5}}>
                       <div style={{flex:"0 0 70px"}}>
-                        <label style={{fontSize:10,color:"#9aa3b8",display:"block",marginBottom:2}}>%</label>
+                        <label style={{fontSize:10,color:"#6b7280",display:"block",marginBottom:2}}>%</label>
                         <input value={form[row.pctKey]} onChange={e=>setF(row.pctKey,e.target.value)} placeholder="50"
-                          style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"5px 8px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                          style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"5px 8px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
                       </div>
                       <div style={{flex:1}}>
-                        <label style={{fontSize:10,color:"#9aa3b8",display:"block",marginBottom:2}}>Due When</label>
+                        <label style={{fontSize:10,color:"#6b7280",display:"block",marginBottom:2}}>Due When</label>
                         <input value={form[row.labelKey]} onChange={e=>setF(row.labelKey,e.target.value)} placeholder="upon execution"
-                          style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"5px 8px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                          style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"5px 8px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
                       </div>
                     </div>
                     {fees.upfront>0&&pct>0&&<div style={{fontSize:10,color:"#7edca8"}}>= {fmt(amt)}</div>}
@@ -1113,14 +1113,14 @@ export default function LOEGenerator() {
               {fees.upfront>0&&(()=>{
                 const total = [form.installment1Pct,form.installment2Pct,form.installmentCount>=3?form.installment3Pct:"0"].slice(0,form.installmentCount).reduce((s,v)=>s+(parseFloat(v)||0),0);
                 const ok = Math.abs(total-100)<0.01;
-                return <div style={{fontSize:11,fontWeight:700,color:ok?"#7edca8":"#e07070",marginTop:4}}>{ok?"✓ Percentages total 100%":`⚠ Total: ${total}% (must equal 100%)`}</div>;
+                return <div style={{fontSize:11,fontWeight:700,color:ok?"#22c55e":"#dc2626",marginTop:4}}>{ok?"✓ Percentages total 100%":`⚠ Total: ${total}% (must equal 100%)`}</div>;
               })()}
             </div>
           )}
 
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Optional Guarantees</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Optional Guarantees</div>
           {[{key:"optPostAwardScope",label:"Include Post-Award Consulting scope"},{key:"optNofo",label:"No NOFO"},{key:"optStateSwitch",label:"State NSGP Switch Option"}].map(o=>(
-            <label key={o.key} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:9,cursor:"pointer"}}>
+            <label key={o.key} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#6b7280",marginBottom:9,cursor:"pointer"}}>
               <input type="checkbox" checked={form[o.key]} onChange={e=>setF(o.key,e.target.checked)} style={{accentColor:"#9aab2e"}}/>
               {o.label}
             </label>
@@ -1129,14 +1129,14 @@ export default function LOEGenerator() {
           {/* Post-Award Fee input — shown when toggle is on */}
           {form.optPostAwardScope&&(
             <div style={{marginBottom:10,marginTop:2,paddingLeft:22}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Post-Award Fee ($)</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Post-Award Fee ($)</label>
               <input value={form.postAwardFee||""} onChange={e=>setF("postAwardFee",e.target.value)} placeholder="1,000"
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
 
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Optional Clauses</div>
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:9,cursor:"pointer"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Optional Clauses</div>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#6b7280",marginBottom:9,cursor:"pointer"}}>
             <input type="checkbox" checked={form.optShortNotice} onChange={e=>setF("optShortNotice",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
             Short-notice application
           </label>
@@ -1144,14 +1144,14 @@ export default function LOEGenerator() {
 
         {/* In-House Pre-Award specific */}
         {isInh&&<>
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Grant Details</div>
-          <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Grant Type</label>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Grant Details</div>
+          <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Grant Type</label>
           <div style={{display:"flex",gap:6,marginBottom:10}}>
             {["Federal","State"].map(t=>(
               <button key={t} onClick={()=>setF("grantType",t)}
                 style={{flex:1,padding:"7px 0",borderRadius:6,border:"1px solid",fontSize:12,fontWeight:700,cursor:"pointer",
-                  background:form.grantType===t?"#1a4a6e":"#222e4a",
-                  borderColor:form.grantType===t?"#5b9ec9":"#2e3d60",
+                  background:form.grantType===t?NPSA_PRIMARY:"#f9fafb",
+                  borderColor:form.grantType===t?NPSA_PRIMARY:NPSA_BORDER,
                   color:form.grantType===t?"#fff":"#8892aa"}}>
                 {t}
               </button>
@@ -1159,38 +1159,38 @@ export default function LOEGenerator() {
           </div>
           {[{key:"grantYear",label:"Grant Year",placeholder:"2026"},{key:"maxAward",label:"Max Award Per Location ($)",placeholder:"200,000"}].map(f2=>(
             <div key={f2.key} style={{marginBottom:10}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>{f2.label}</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>{f2.label}</label>
               <input value={form[f2.key]||""} onChange={e=>setF(f2.key,e.target.value)} placeholder={f2.placeholder}
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           ))}
 
           {/* In-House Fee Calculator */}
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Fee Calculator</div>
-          <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Engagement Model</label>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Fee Calculator</div>
+          <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Engagement Model</label>
           <select value={form.inhEngagementModel} onChange={e=>setF("inhEngagementModel",e.target.value)}
-            style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,marginBottom:10,outline:"none"}}>
+            style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,marginBottom:10,outline:"none"}}>
             <option value="inh-pre-only">Pre-Award Only</option>
             <option value="inh-partial-contingency">Pre-Award + Partial Contingency</option>
           </select>
 
-          <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Pricing Tier</label>
+          <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Pricing Tier</label>
           <select value={form.inhPricingTier} onChange={e=>setF("inhPricingTier",e.target.value)}
-            style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,marginBottom:10,outline:"none"}}>
+            style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,marginBottom:10,outline:"none"}}>
             {Object.entries(TIER_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}
           </select>
           {form.inhPricingTier==="custom"&&(
             <div style={{marginBottom:10,marginTop:-4}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Custom Fee Amount ($)</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Custom Fee Amount ($)</label>
               <input value={form.inhCustomFee||""} onChange={e=>setF("inhCustomFee",e.target.value)} placeholder="e.g. 5,000"
-                style={{width:"100%",background:"#222e4a",border:"1px solid #5b9ec9",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
 
           {/* In-House Fee summary card */}
-          <div style={{background:"#0f1a30",border:"1px solid #2e4060",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#5b9ec9",marginBottom:8}}>Fee Summary</div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#b0b8cc",marginBottom:4}}>
+          <div style={{background:"#f9fafb",border:`1px solid ${NPSA_BORDER}`,borderRadius:8,padding:"12px 14px",marginBottom:10}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:NPSA_PRIMARY,marginBottom:8}}>Fee Summary</div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280",marginBottom:4}}>
               <span>Upfront Fee</span><span style={{color:"#fff",fontWeight:600}}>{form.inhEarlySigningDiscount&&inhFees.discount>0?<><span style={{textDecoration:"line-through",color:"#666",marginRight:6}}>{fmt(inhFees.baseUpfront)}</span>{fmt(inhFees.upfront)}</>:fmt(inhFees.upfront)}</span>
             </div>
             {form.inhEarlySigningDiscount&&inhFees.discount>0&&(
@@ -1199,17 +1199,17 @@ export default function LOEGenerator() {
               </div>
             )}
             {inhFees.contingent!==null&&(
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#b0b8cc",marginBottom:4}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280",marginBottom:4}}>
                 <span>Contingent Fee (on award)</span><span style={{color:"#fff",fontWeight:600}}>{fmt(inhFees.contingent)}</span>
               </div>
             )}
             {form.inhOptPostAwardScope&&(
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#b0b8cc",marginBottom:4}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7280",marginBottom:4}}>
                 <span>Post-Award Fee (on award){numLocs>1?` ×${numLocs}`:""}</span><span style={{color:"#fff",fontWeight:600}}>{fmt(inhFees.postAward)}</span>
               </div>
             )}
             <div style={{borderTop:"1px solid #2e4060",marginTop:6,paddingTop:6,display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700}}>
-              <span style={{color:"#9aab2e"}}>Total</span><span style={{color:"#9aab2e"}}>{fmt(inhFees.total)}</span>
+              <span style={{color:NPSA_PRIMARY}}>Total</span><span style={{color:NPSA_PRIMARY}}>{fmt(inhFees.total)}</span>
             </div>
           </div>
 
@@ -1230,25 +1230,25 @@ export default function LOEGenerator() {
             </div>
           )}
 
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.inhEarlySigningDiscount?10:14,cursor:"pointer"}}>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#6b7280",marginBottom:form.inhEarlySigningDiscount?10:14,cursor:"pointer"}}>
             <input type="checkbox" checked={form.inhEarlySigningDiscount} onChange={e=>setF("inhEarlySigningDiscount",e.target.checked)} style={{accentColor:"#e8a020"}}/>
             Early signing discount
           </label>
 
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.inhInstallments?10:14,cursor:"pointer"}}>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#6b7280",marginBottom:form.inhInstallments?10:14,cursor:"pointer"}}>
             <input type="checkbox" checked={form.inhInstallments} onChange={e=>setF("inhInstallments",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
             Allow installment payments
           </label>
           {form.inhInstallments&&(
-            <div style={{background:"#0f1a30",border:"1px solid #2e4060",borderRadius:8,padding:"12px 14px",marginBottom:14}}>
-              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#9aab2e",marginBottom:10}}>Installment Schedule</div>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:4}}>Number of Payments</label>
+            <div style={{background:"#f9fafb",border:`1px solid ${NPSA_BORDER}`,borderRadius:8,padding:"12px 14px",marginBottom:14}}>
+              <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:NPSA_PRIMARY,marginBottom:10}}>Installment Schedule</div>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:4}}>Number of Payments</label>
               <div style={{display:"flex",gap:6,marginBottom:12}}>
                 {[2,3].map(n=>(
                   <button key={n} onClick={()=>setF("inhInstallmentCount",n)}
                     style={{flex:1,padding:"7px 0",borderRadius:6,border:"1px solid",fontSize:12,fontWeight:700,cursor:"pointer",
-                      background:form.inhInstallmentCount===n?"#1a4a6e":"#222e4a",
-                      borderColor:form.inhInstallmentCount===n?"#5b9ec9":"#2e3d60",
+                      background:form.inhInstallmentCount===n?NPSA_PRIMARY:"#f9fafb",
+                      borderColor:form.inhInstallmentCount===n?NPSA_PRIMARY:NPSA_BORDER,
                       color:form.inhInstallmentCount===n?"#fff":"#8892aa"}}>
                     {n} Payments
                   </button>
@@ -1263,17 +1263,17 @@ export default function LOEGenerator() {
                 const amt = Math.round(inhFees.upfront * pct / 100);
                 return (
                   <div key={row.num} style={{marginBottom:10,paddingBottom:10,borderBottom:"1px solid #1e3050"}}>
-                    <div style={{fontSize:10,color:"#5b9ec9",fontWeight:700,marginBottom:5}}>Payment {row.num}</div>
+                    <div style={{fontSize:10,color:NPSA_PRIMARY,fontWeight:700,marginBottom:5}}>Payment {row.num}</div>
                     <div style={{display:"flex",gap:6,marginBottom:5}}>
                       <div style={{flex:"0 0 70px"}}>
-                        <label style={{fontSize:10,color:"#9aa3b8",display:"block",marginBottom:2}}>%</label>
+                        <label style={{fontSize:10,color:"#6b7280",display:"block",marginBottom:2}}>%</label>
                         <input value={form[row.pctKey]} onChange={e=>setF(row.pctKey,e.target.value)} placeholder="50"
-                          style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"5px 8px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                          style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"5px 8px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
                       </div>
                       <div style={{flex:1}}>
-                        <label style={{fontSize:10,color:"#9aa3b8",display:"block",marginBottom:2}}>Due When</label>
+                        <label style={{fontSize:10,color:"#6b7280",display:"block",marginBottom:2}}>Due When</label>
                         <input value={form[row.labelKey]} onChange={e=>setF(row.labelKey,e.target.value)} placeholder="upon execution"
-                          style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"5px 8px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                          style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"5px 8px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
                       </div>
                     </div>
                     {inhFees.upfront>0&&pct>0&&<div style={{fontSize:10,color:"#7edca8"}}>= {fmt(amt)}</div>}
@@ -1283,28 +1283,28 @@ export default function LOEGenerator() {
               {inhFees.upfront>0&&(()=>{
                 const total = [form.inhInstallment1Pct,form.inhInstallment2Pct,form.inhInstallmentCount>=3?form.inhInstallment3Pct:"0"].slice(0,form.inhInstallmentCount).reduce((s,v)=>s+(parseFloat(v)||0),0);
                 const ok = Math.abs(total-100)<0.01;
-                return <div style={{fontSize:11,fontWeight:700,color:ok?"#7edca8":"#e07070",marginTop:4}}>{ok?"✓ Percentages total 100%":`⚠ Total: ${total}% (must equal 100%)`}</div>;
+                return <div style={{fontSize:11,fontWeight:700,color:ok?"#22c55e":"#dc2626",marginTop:4}}>{ok?"✓ Percentages total 100%":`⚠ Total: ${total}% (must equal 100%)`}</div>;
               })()}
             </div>
           )}
 
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Optional Guarantees</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Optional Guarantees</div>
           {[{key:"inhOptPostAwardScope",label:"Include Post-Award Consulting scope"},{key:"inhOptNofo",label:"No NOFO"},{key:"inhOptStateSwitch",label:"State NSGP Switch Option"}].map(o=>(
-            <label key={o.key} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:9,cursor:"pointer"}}>
+            <label key={o.key} style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#6b7280",marginBottom:9,cursor:"pointer"}}>
               <input type="checkbox" checked={form[o.key]} onChange={e=>setF(o.key,e.target.checked)} style={{accentColor:"#9aab2e"}}/>
               {o.label}
             </label>
           ))}
           {form.inhOptPostAwardScope&&(
             <div style={{marginBottom:10,marginTop:2,paddingLeft:22}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Post-Award Fee ($)</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Post-Award Fee ($)</label>
               <input value={form.inhPostAwardFee||""} onChange={e=>setF("inhPostAwardFee",e.target.value)} placeholder="1,000"
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
 
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Optional Clauses</div>
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:9,cursor:"pointer"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Optional Clauses</div>
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#6b7280",marginBottom:9,cursor:"pointer"}}>
             <input type="checkbox" checked={form.inhOptShortNotice} onChange={e=>setF("inhOptShortNotice",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
             Short-notice application
           </label>
@@ -1312,29 +1312,29 @@ export default function LOEGenerator() {
 
         {/* Post-award fields */}
         {!isPre&&!isGw&&!isInh&&POST_FIELDS.map((f2,i)=>{
-          if(f2.section) return <div key={i} style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>{f2.section}</div>;
+          if(f2.section) return <div key={i} style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>{f2.section}</div>;
           return (
             <div key={f2.key} style={{marginBottom:10}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>{f2.label}</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>{f2.label}</label>
               <input value={form[f2.key]||""} onChange={e=>setF(f2.key,e.target.value)} placeholder={f2.placeholder||""}
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           );
         })}
 
         {/* Grant Writer sidebar fields */}
         {isGw&&<>
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:4,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Grant Writer</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:4,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Grant Writer</div>
           {[{key:"gwRecipientName",label:"Grant Writer Name",placeholder:"Name"},{key:"gwOrgName",label:"Organization",placeholder:"Organization"}].map(f2=>(
             <div key={f2.key} style={{marginBottom:10}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>{f2.label}</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>{f2.label}</label>
               <input value={form[f2.key]||""} onChange={e=>setF(f2.key,e.target.value)} placeholder={f2.placeholder}
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           ))}
 
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Requesting NPSA Consultant</div>
-          <div style={{fontSize:11,color:"#9aa3b8",marginBottom:6}}>Select consultant</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Requesting NPSA Consultant</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>Select consultant</div>
           <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:10}}>
             {[
               {name:"Brad Lynde",     email:"brad@lyndeconsulting.com",           phone:"815-255-9556"},
@@ -1350,20 +1350,20 @@ export default function LOEGenerator() {
                   setF("npsa1Email", rep.email);
                   setF("npsa1Phone", rep.phone);
                 }}
-                  style={{textAlign:"left",background:active?"#1a4a6e":"#222e4a",border:`1px solid ${active?"#5b9ec9":"#2e3d60"}`,borderRadius:6,padding:"7px 10px",color:active?"#fff":"#b0b8cc",fontSize:12,cursor:"pointer"}}>
+                  style={{textAlign:"left",background:active?NPSA_PRIMARY:"#f9fafb",border:`1px solid ${active?NPSA_PRIMARY:NPSA_BORDER}`,borderRadius:6,padding:"7px 10px",color:active?"#fff":"#374151",fontSize:12,cursor:"pointer"}}>
                   <span style={{fontWeight:active?700:400}}>{rep.name}</span>
                 </button>
               );
             })}
           </div>
 
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>CC Contacts</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>CC Contacts</div>
           {(form.gwCcContacts||[]).map((cc,idx)=>(
-            <div key={idx} style={{background:"#1a2540",border:"1px solid #2e3d60",borderRadius:6,padding:"10px 10px 6px",marginBottom:8}}>
+            <div key={idx} style={{background:"#f9fafb",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"10px 10px 6px",marginBottom:8}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <span style={{fontSize:11,color:"#6c7a9c",fontWeight:700}}>Contact {idx+1}</span>
+                <span style={{fontSize:11,color:"#6b7280",fontWeight:700}}>Contact {idx+1}</span>
                 <button onClick={()=>setF("gwCcContacts",(form.gwCcContacts||[]).filter((_,i)=>i!==idx))}
-                  style={{background:"none",border:"none",color:"#e07070",fontSize:13,cursor:"pointer",padding:"0 2px",lineHeight:1}}>✕</button>
+                  style={{background:"none",border:"none",color:"#dc2626",fontSize:13,cursor:"pointer",padding:"0 2px",lineHeight:1}}>✕</button>
               </div>
               {[{k:"name",ph:"Name"},{k:"title",ph:"Title"},{k:"phone",ph:"Phone"},{k:"email",ph:"Email"}].map(f2=>(
                 <div key={f2.k} style={{marginBottom:6}}>
@@ -1373,18 +1373,18 @@ export default function LOEGenerator() {
                       updated[idx]={...updated[idx],[f2.k]:e.target.value};
                       setF("gwCcContacts",updated);
                     }}
-                    style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"5px 8px",color:"#e8eaf0",fontSize:11,boxSizing:"border-box",outline:"none"}}/>
+                    style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"5px 8px",color:"#374151",fontSize:11,boxSizing:"border-box",outline:"none"}}/>
                 </div>
               ))}
             </div>
           ))}
           <button onClick={()=>setF("gwCcContacts",[...(form.gwCcContacts||[]),{name:"",title:"",phone:"",email:""}])}
-            style={{width:"100%",background:"#222e4a",border:"1px dashed #3a5080",borderRadius:6,padding:"7px 0",fontSize:11,color:"#6c9ecf",cursor:"pointer",marginBottom:14}}>
+            style={{width:"100%",background:"#fff",border:`1px dashed ${NPSA_BORDER}`,borderRadius:6,padding:"7px 0",fontSize:11,color:NPSA_PRIMARY,cursor:"pointer",marginBottom:14}}>
             + Add CC Contact
           </button>
 
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Additional Meeting Attendees</div>
-          <div style={{fontSize:11,color:"#6c7a9c",marginBottom:8,lineHeight:1.5}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Additional Meeting Attendees</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:8,lineHeight:1.5}}>
             Organization contacts are auto-populated from above (primary contact + all CC contacts).
           </div>
           {(()=>{
@@ -1392,14 +1392,14 @@ export default function LOEGenerator() {
               form.contactName ? {name:form.contactName, email:form.contactEmail} : null,
               ...(form.gwCcContacts||[]).filter(c=>c.name).map(c=>({name:c.name,email:c.email})),
             ].filter(Boolean);
-            if(!orgAttendees.length) return <div style={{fontSize:11,color:"#6c7a9c",fontStyle:"italic",marginBottom:10}}>Fill in client info above to see attendees here.</div>;
-            return <div style={{background:"#111d33",borderRadius:6,padding:"8px 10px",marginBottom:10}}>
+            if(!orgAttendees.length) return <div style={{fontSize:11,color:"#6b7280",fontStyle:"italic",marginBottom:10}}>Fill in client info above to see attendees here.</div>;
+            return <div style={{background:"#f3f4f6",borderRadius:6,padding:"8px 10px",marginBottom:10}}>
               {orgAttendees.map((a,i)=>(
-                <div key={i} style={{fontSize:11,color:"#b0b8cc",marginBottom:3}}>• {a.name}{a.email?` — ${a.email}`:""}</div>
+                <div key={i} style={{fontSize:11,color:"#6b7280",marginBottom:3}}>• {a.name}{a.email?` — ${a.email}`:""}</div>
               ))}
             </div>;
           })()}
-          <div style={{fontSize:11,color:"#9aa3b8",marginBottom:6}}>Add Steven and/or Stuart to the meeting</div>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:6}}>Add Steven and/or Stuart to the meeting</div>
           <div style={{display:"flex",flexDirection:"column",gap:5,marginBottom:14}}>
             {[
               {name:"Steven Timlick", email:"steven@nonprofitsecurityadvisors.com", phone:"815-255-9141"},
@@ -1414,57 +1414,57 @@ export default function LOEGenerator() {
                   if(selected){ setF("npsa2Selected", cur.filter(r=>r.name!==rep.name)); }
                   else { setF("npsa2Selected", [...cur, {name:rep.name,email:rep.email,phone:rep.phone}]); }
                 }}
-                  style={{textAlign:"left",background:selected?"#1a4a6e":"#222e4a",border:`1px solid ${selected?"#5b9ec9":"#2e3d60"}`,borderRadius:6,padding:"7px 10px",color:selected?"#fff":"#b0b8cc",fontSize:12,cursor:"pointer"}}>
+                  style={{textAlign:"left",background:selected?NPSA_PRIMARY:"#f9fafb",border:`1px solid ${selected?NPSA_PRIMARY:NPSA_BORDER}`,borderRadius:6,padding:"7px 10px",color:selected?"#fff":"#374151",fontSize:12,cursor:"pointer"}}>
                   <span style={{fontWeight:selected?700:400}}>{selected?"✓ ":""}{rep.name}</span>
                 </button>
               );
             })}
           </div>
 
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Contract Terms</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Contract Terms</div>
           {[{key:"gwProfFee",label:"Professional Fee ($)",placeholder:"$$$"},{key:"gwPaymentTerms",label:"Payment Terms",placeholder:"Net 30"}].map(f2=>(
             <div key={f2.key} style={{marginBottom:10}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>{f2.label}</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>{f2.label}</label>
               <input value={form[f2.key]||""} onChange={e=>setF(f2.key,e.target.value)} placeholder={f2.placeholder}
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           ))}
 
-          <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Guarantee Structure</div>
+          <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:12,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>Guarantee Structure</div>
           {[
             {key:"gwGuar1", label:"1. One additional application at no additional fee if not awarded", locked:false, note:null},
             {key:"gwGuar2", label:"2. If no NOFO: apply work or refund within 10 business days",      locked:false, note:form.optNofo?"Auto-selected: No NOFO is on":null},
             {key:"gwGuar3", label:"3. If no NOFO: apply work to next available opportunity",           locked:false, note:form.optNofo?"Deselected: No NOFO is on":null},
             {key:"gwGuar4", label:"4. Commercially reasonable efforts to meet deadline",               locked:false, note:form.optShortNotice?"Auto-selected: Short-notice is on":null},
           ].map(o=>(
-            <label key={o.key} style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,color:o.locked?"#6c9ecf":"#b0b8cc",marginBottom:8,cursor:o.locked?"default":"pointer",lineHeight:1.4,opacity:o.locked?0.8:1}}>
+            <label key={o.key} style={{display:"flex",alignItems:"flex-start",gap:8,fontSize:12,color:o.locked?NPSA_PRIMARY:"#6b7280",marginBottom:8,cursor:o.locked?"default":"pointer",lineHeight:1.4,opacity:o.locked?0.8:1}}>
               <input type="checkbox" checked={form[o.key]} onChange={e=>!o.locked&&setF(o.key,e.target.checked)} disabled={o.locked} style={{accentColor:"#9aab2e",marginTop:2,flexShrink:0}}/>
               <span>
                 {o.label}
-                {o.locked&&<span style={{fontSize:10,color:"#5b9ec9",marginLeft:6,fontStyle:"italic"}}>(always on)</span>}
+                {o.locked&&<span style={{fontSize:10,color:NPSA_PRIMARY,marginLeft:6,fontStyle:"italic"}}>(always on)</span>}
                 {o.note&&<span style={{fontSize:10,color:"#e8a020",display:"block",marginTop:1}}>{o.note}</span>}
               </span>
             </label>
           ))}
           {form.gwGuar4&&(
             <div style={{marginBottom:10,marginTop:-4,paddingLeft:20}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Deadline</label>
+              <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:2}}>Deadline</label>
               <input value={form.gwGuar4Deadline||""} onChange={e=>setF("gwGuar4Deadline",e.target.value)} placeholder="e.g. March 15, 2026"
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
+                style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"6px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
-          <div style={{fontSize:10,color:"#6c7a9c",fontStyle:"italic",marginTop:2,marginBottom:10,lineHeight:1.5}}>Note: Options 2 and 3 are mutually exclusive. Option 4 cannot be selected with 2 or 3.</div>
+          <div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",marginTop:2,marginBottom:10,lineHeight:1.5}}>Note: Options 2 and 3 are mutually exclusive. Option 4 cannot be selected with 2 or 3.</div>
         </>}
 
         {/* AI Clause — hidden on Grant Writer tab */}
         {!isGw&&<>
-        <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>AI Custom Clause</div>
+        <div style={{fontSize:10,fontWeight:700,color:"#6b7280",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:`1px solid ${NPSA_BORDER}`,paddingBottom:5}}>AI Custom Clause</div>
         <textarea value={isPre?form.customClause:form.postCustomClause} onChange={e=>setF(isPre?"customClause":"postCustomClause",e.target.value)}
           placeholder="Describe a clause in plain language..." rows={3}
-          style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"7px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",resize:"vertical",outline:"none"}}/>
+          style={{width:"100%",background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:6,padding:"7px 10px",color:"#374151",fontSize:12,boxSizing:"border-box",resize:"vertical",outline:"none"}}/>
         <button onClick={()=>polish(isPre?form.customClause:form.postCustomClause,r=>setF(isPre?"polishedClause":"postPolishedClause",r))}
           disabled={loading||(isPre?!form.customClause.trim():!form.postCustomClause.trim())}
-          style={{marginTop:7,width:"100%",background:loading?"#2e3d60":"#1a4a6e",color:"#fff",border:"none",borderRadius:6,padding:"7px 0",fontSize:12,fontWeight:600,cursor:loading?"default":"pointer"}}>
+          style={{marginTop:7,width:"100%",background:loading?"#9ca3af":NPSA_PRIMARY,color:"#fff",border:"none",borderRadius:6,padding:"7px 0",fontSize:12,fontWeight:600,cursor:loading?"default":"pointer"}}>
           {loading?"Polishing...":"✨ Polish with AI"}
         </button>
         {(isPre?form.polishedClause:form.postPolishedClause)&&(
@@ -1482,15 +1482,15 @@ export default function LOEGenerator() {
         {/* Management Approval Modal */}
         {mgmtApprovalModal&&(
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-            <div style={{background:"#1a2540",border:"1px solid #e07070",borderRadius:12,padding:"28px 32px",maxWidth:380,width:"90%",boxShadow:"0 8px 40px rgba(0,0,0,0.6)"}}>
+            <div style={{background:"#fff",border:`1px solid ${NPSA_BORDER}`,borderRadius:12,padding:"28px 32px",maxWidth:380,width:"90%",boxShadow:"0 8px 40px rgba(0,0,0,0.12)"}}>
               <div style={{fontSize:18,fontWeight:700,color:"#fff",marginBottom:8,textAlign:"center"}}>⚠ Management Approval Required</div>
-              <div style={{fontSize:13,color:"#b0b8cc",marginBottom:24,textAlign:"center",lineHeight:1.6}}>Has this AI-generated clause been reviewed and confirmed by management before inserting it into the contract?</div>
+              <div style={{fontSize:13,color:"#6b7280",marginBottom:24,textAlign:"center",lineHeight:1.6}}>Has this AI-generated clause been reviewed and confirmed by management before inserting it into the contract?</div>
               <div style={{display:"flex",gap:10}}>
                 <button onClick={()=>{
                   setMgmtApprovalModal(false);
                   setF(isPre?"polishedClause":"postPolishedClause","");
                   setF(isPre?"customClause":"postCustomClause","");
-                }} style={{flex:1,padding:"10px 0",borderRadius:8,border:"1px solid #555",background:"#2a3550",color:"#9aa3b8",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                }} style={{flex:1,padding:"10px 0",borderRadius:8,border:`1px solid ${NPSA_BORDER}`,background:"#f9fafb",color:"#6b7280",fontSize:13,fontWeight:700,cursor:"pointer"}}>
                   No — Discard
                 </button>
                 <button onClick={()=>setMgmtApprovalModal(false)}
@@ -1502,29 +1502,28 @@ export default function LOEGenerator() {
           </div>
         )}
 
-        <button onClick={handlePrint} style={{marginTop:20,width:"100%",background:"#7a8c1e",color:"#fff",border:"none",borderRadius:8,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+        <button onClick={handlePrint} style={{marginTop:20,width:"100%",background:NPSA_PRIMARY,color:"#fff",border:"none",borderRadius:12,padding:"10px 0",fontSize:13,fontWeight:700,cursor:"pointer"}}>
           {isGw ? "🖨 Print / Save as PDF" : "⬇ Download as HTML (open to print)"}
         </button>
       </div>
 
       {/* ── PREVIEW ── */}
-      <div style={{flex:1,overflowY:"auto",padding:"0 40px 40px",background:"#dde0e6"}}>
-        {/* Tabs */}
-        <div style={{maxWidth:800,margin:"0 auto",paddingTop:28,display:"flex"}}>
-          {[{id:"pre",label:"Pre-Award"},{id:"inh",label:"Pre-Award (In-House)"},{id:"post",label:"Post-Award"},{id:"gw",label:"3rd Party Grant Writer"}].map((t,i,arr)=>(
+      <div style={{flex:1,overflowY:"auto",padding:"24px 40px 40px",background:NPSA_BG}}>
+        {/* Tabs — match NPSA Tools tab styling */}
+        <div style={{maxWidth:800,margin:"0 auto",display:"flex",gap:0,background:NPSA_CARD,borderRadius:"16px 16px 0 0",border:`1px solid ${NPSA_BORDER}`,borderBottom:"none",overflow:"hidden"}}>
+          {[{id:"pre",label:"Pre-Award"},{id:"inh",label:"Pre-Award (In-House)"},{id:"post",label:"Post-Award"},{id:"gw",label:"3rd Party Grant Writer"}].map((t,i)=>(
             <button key={t.id} onClick={()=>setDocTab(t.id)}
-              style={{padding:"10px 22px",fontSize:13,fontWeight:700,border:"none",
-                borderRadius:i===0?"8px 0 0 0":i===arr.length-1?"0 8px 0 0":"0",
+              style={{flex:1,padding:"14px 20px",fontSize:13,fontWeight:600,border:"none",
                 cursor:"pointer",
-                background:docTab===t.id?"#fff":"#c8cdd8",
-                color:docTab===t.id?"#1a4a6e":"#666",
-                boxShadow:docTab===t.id?"0 -2px 0 #1a4a6e inset":""}}>
+                background:docTab===t.id?NPSA_PRIMARY:"transparent",
+                color:docTab===t.id?"#fff":"#6b7280",
+                borderBottom:docTab===t.id?"3px solid "+NPSA_PRIMARY:"3px solid transparent"}}>
               {t.label}
             </button>
           ))}
         </div>
 
-        <div style={{maxWidth:800,margin:"0 auto",background:"#fff",boxShadow:"0 4px 32px rgba(0,0,0,0.13)",padding:"64px 72px"}} ref={previewRef}>
+        <div style={{maxWidth:800,margin:"0 auto",background:NPSA_CARD,border:`1px solid ${NPSA_BORDER}`,borderTop:"none",borderRadius:"0 0 16px 16px",padding:"64px 72px"}} ref={previewRef}>
           {/* Logo */}
           <div style={{textAlign:"center",borderBottom:"2.5px solid #1a4a6e",paddingBottom:16,marginBottom:20}}>
             <span style={{fontWeight:800,fontSize:36,color:"#1a4a6e",fontFamily:"Georgia,serif",display:"block",letterSpacing:-0.5}}>nonprofit</span>
@@ -2016,7 +2015,7 @@ export default function LOEGenerator() {
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{background:"#fff",borderRadius:10,padding:"32px 36px",maxWidth:380,width:"90%",boxShadow:"0 8px 40px rgba(0,0,0,0.22)",textAlign:"center"}}>
             <div style={{fontSize:22,marginBottom:12}}>✏️</div>
-            <div style={{fontWeight:700,fontSize:16,color:"#1a2540",marginBottom:8}}>Edit {confirmModal==="pre"?"Pre-Award":confirmModal==="inh"?"In-House Pre-Award":"Post-Award"} Template?</div>
+            <div style={{fontWeight:700,fontSize:16,color:NPSA_PRIMARY,marginBottom:8}}>Edit {confirmModal==="pre"?"Pre-Award":confirmModal==="inh"?"In-House Pre-Award":"Post-Award"} Template?</div>
             <div style={{fontSize:13,color:"#555",lineHeight:1.6,marginBottom:24}}>Are you sure you want to edit this template? Changes will affect all future documents generated from it.</div>
             <div style={{display:"flex",gap:12,justifyContent:"center"}}>
               <button onClick={()=>setConfirmModal(null)}
@@ -2024,7 +2023,7 @@ export default function LOEGenerator() {
                 Never Mind
               </button>
               <button onClick={()=>{ enterTemplate(confirmModal); setConfirmModal(null); }}
-                style={{padding:"9px 24px",borderRadius:7,border:"none",background:"#1a4a6e",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer"}}>
+                style={{padding:"9px 24px",borderRadius:7,border:"none",background:NPSA_PRIMARY,fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer"}}>
                 Yes, Edit Template
               </button>
             </div>
