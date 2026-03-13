@@ -357,9 +357,12 @@ export default function Home() {
     };
   }, [pollingInterval]);
 
-  // Redirect non-dev users away from Church tab (in development)
+  // Brad/Stuart: only school, running, finished, archive. Others redirect or show "In Development".
+  const restrictedTabs = new Set(["loe", "loe-archive", "church"]);
+  const canAccessCurrentTab = isDev || !restrictedTabs.has(selectedType);
+
   useEffect(() => {
-    if (isAuthenticated && !isDev && selectedType === "church") {
+    if (isAuthenticated && !isDev && restrictedTabs.has(selectedType)) {
       setSelectedType("school");
     }
   }, [isAuthenticated, isDev, selectedType]);
@@ -984,14 +987,30 @@ export default function Home() {
       <div className="flex-1 min-h-screen">
         {/* LOE Generator - always inline (frontend owns the UI; backend is API-only) */}
         {viewState === "start" && selectedType === "loe" && (
-          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden">
+          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden relative">
+            {!canAccessCurrentTab ? (
+              <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                <div className="text-center bg-white rounded-2xl p-12 shadow-xl">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">In Development</h2>
+                  <p className="text-gray-600">This feature is coming soon. Use School Scraper in the meantime.</p>
+                </div>
+              </div>
+            ) : null}
             <LOEGenerator />
           </div>
         )}
 
         {/* LOE Archive - iframe when URL set, else placeholder */}
         {viewState === "start" && selectedType === "loe-archive" && (
-          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden">
+          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden relative">
+            {!canAccessCurrentTab ? (
+              <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                <div className="text-center bg-white rounded-2xl p-12 shadow-xl">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">In Development</h2>
+                  <p className="text-gray-600">This feature is coming soon. Use School Scraper in the meantime.</p>
+                </div>
+              </div>
+            ) : null}
             {process.env.NEXT_PUBLIC_LOE_API_URL ? (
               <iframe
                 src={`${process.env.NEXT_PUBLIC_LOE_API_URL.replace(/\/+$/, "")}/archive`}

@@ -24,10 +24,16 @@ type SidebarProps = {
   onRunSelect?: (runId: string) => void;
 };
 
+// Koen = full access. Brad/Stuart = School Scraper + Running/Finished/Archive only.
+const SCHOOL_ONLY_TABS = new Set(["school", "running", "finished", "archive"] as const);
+const canAccessTab = (username: string | null, tab: string) =>
+  username === "Koen" || (username && SCHOOL_ONLY_TABS.has(tab as any));
+
 const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
   const { token, username, logout } = useAuth();
   const isDev = username === "Koen";
   const [runs, setRuns] = useState<RunMetadata[]>([]);
+  const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
@@ -148,207 +154,101 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     }
   };
 
+  const NavBtn = ({ tab, icon, label, restricted }: { tab: typeof activeTab; icon: React.ReactNode; label: string; restricted?: boolean }) => {
+    const allowed = !restricted || canAccessTab(username, tab);
+    return (
+      <button
+        onClick={() => allowed && onTabChange(tab)}
+        disabled={!allowed}
+        title={label}
+        className={`w-full flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+          collapsed ? "justify-center px-2" : "px-4"
+        } ${
+          !allowed
+            ? "text-gray-400 bg-gray-50 cursor-not-allowed opacity-75"
+            : activeTab === tab
+              ? "bg-[#1e3a5f] text-white shadow-md"
+              : "text-gray-700 hover:bg-gray-100"
+        }`}
+      >
+        {icon}
+        {!collapsed && (
+          <>
+            <span className="flex-1 text-left truncate whitespace-nowrap overflow-hidden">{label}</span>
+            {!allowed && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded shrink-0">In Development</span>}
+          </>
+        )}
+      </button>
+    );
+  };
+
+  const DocIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  );
+  const ArchiveIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+    </svg>
+  );
+  const BookIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+    </svg>
+  );
+  const ChurchIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+    </svg>
+  );
+  const PlayIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+  const CheckIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+
   return (
-    <aside className="h-full w-80 bg-white border-r border-gray-200 shadow-sm flex flex-col">
-        {/* Logo Section */}
-        <div className="p-6 border-b border-gray-200 flex items-center justify-center">
-          <Image
-            src="/npsa-logo.png"
-            alt="Nonprofit Security Advisors"
-            width={160}
-            height={48}
-            className="h-auto"
-            priority
-          />
+    <aside
+      className="h-full bg-white border-r border-gray-200 shadow-sm flex flex-col transition-all duration-300 ease-out overflow-hidden"
+      style={{ width: collapsed ? 72 : 320 }}
+      onMouseEnter={() => setCollapsed(false)}
+      onMouseLeave={() => setCollapsed(true)}
+    >
+        {/* Logo Section — collapses to icon-sized */}
+        <div className="p-4 border-b border-gray-200 flex items-center justify-center min-h-[72px]">
+          <div className="transition-all duration-300 ease-out overflow-hidden flex items-center justify-center" style={{ width: collapsed ? 40 : 160 }}>
+            <Image
+              src="/npsa-logo.png"
+              alt="NPSA"
+              width={collapsed ? 40 : 160}
+              height={collapsed ? 12 : 48}
+              className="h-auto object-contain"
+              priority
+            />
+          </div>
         </div>
 
         {/* Navigation Items */}
-      <nav className="p-4 space-y-2 flex-shrink-0">
-          {/* LOE Generator — loads via iframe when NEXT_PUBLIC_LOE_API_URL is set */}
-          <button
-            onClick={() => onTabChange('loe')}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'loe'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            <span>LOE Generator</span>
-          </button>
-
-          {/* LOE Archive — loads via iframe at LOE_API_URL/archive */}
-          <button
-            onClick={() => onTabChange('loe-archive')}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'loe-archive'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-              />
-            </svg>
-            <span>LOE Archive</span>
-          </button>
-
+      <nav className="p-3 space-y-2 flex-shrink-0">
+          <NavBtn tab="loe" icon={<DocIcon />} label="LOE Generator" restricted />
+          <NavBtn tab="loe-archive" icon={<ArchiveIcon />} label="LOE Archive" restricted />
           <div className="border-t border-gray-200 my-2" />
-
-          <button
-            onClick={() => onTabChange('school')}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'school'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-              />
-            </svg>
-            <span>School Scraper</span>
-          </button>
-
-          {/* Church Scraper — dev-only during development */}
-          <button
-            onClick={() => isDev && onTabChange('church')}
-            disabled={!isDev}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              !isDev
-                ? 'text-gray-400 bg-gray-50 cursor-not-allowed opacity-75'
-                : activeTab === 'church'
-                  ? 'bg-[#1e3a5f] text-white shadow-md'
-                  : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-              />
-            </svg>
-            <span>Church Scraper</span>
-          </button>
-
-        <button
-          onClick={() => onTabChange('running')}
-          className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-            activeTab === 'running'
-              ? 'bg-[#1e3a5f] text-white shadow-md'
-              : 'text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          <svg
-            className="w-5 h-5 flex-shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-            />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <span>Running</span>
-        </button>
-
-        <button
-          onClick={() => onTabChange('finished')}
-          className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-            activeTab === 'finished'
-              ? 'bg-[#1e3a5f] text-white shadow-md'
-              : 'text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          <svg
-            className="w-5 h-5 flex-shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <span>Finished</span>
-          </button>
-
-          <button
-            onClick={() => onTabChange('archive')}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'archive'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-              />
-            </svg>
-            <span>Archive</span>
-          </button>
+          <NavBtn tab="school" icon={<BookIcon />} label="School Scraper" />
+          <NavBtn tab="church" icon={<ChurchIcon />} label="Church Scraper" restricted />
+        <NavBtn tab="running" icon={<PlayIcon />} label="Running" />
+        <NavBtn tab="finished" icon={<CheckIcon />} label="Finished" />
+        <NavBtn tab="archive" icon={<ArchiveIcon />} label="Archive" />
         </nav>
 
-      {/* Run List Section */}
-      {(activeTab === 'running' || activeTab === 'finished' || activeTab === 'archive') && (
+      {/* Run List Section — hidden when collapsed */}
+      {(activeTab === 'running' || activeTab === 'finished' || activeTab === 'archive') && !collapsed && (
         <div className="flex-1 overflow-y-auto min-h-0">
           <div className="p-4">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
@@ -629,11 +529,12 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
       )}
 
         {/* User Section at Bottom - Always stays at bottom */}
-        <div className="mt-auto p-4 border-t border-gray-200 flex-shrink-0">
+        <div className="mt-auto p-3 border-t border-gray-200 flex-shrink-0">
           <div className="relative">
             <button
               onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 text-gray-700 hover:bg-gray-100"
+              title={username || "User"}
+              className={`w-full flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 text-gray-700 hover:bg-gray-100 ${collapsed ? "justify-center px-2" : "px-4"}`}
             >
               <svg
                 className="w-5 h-5 flex-shrink-0"
@@ -648,15 +549,19 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                   d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
                 />
               </svg>
-              <span className="flex-1 text-left truncate">{username || "User"}</span>
-              <svg
-                className={`w-4 h-4 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+              {!collapsed && (
+                <>
+                  <span className="flex-1 text-left truncate">{username || "User"}</span>
+                  <svg
+                    className={`w-4 h-4 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </>
+              )}
             </button>
             
             {userMenuOpen && (
