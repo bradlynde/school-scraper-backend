@@ -925,7 +925,7 @@ export default function LOEGenerator() {
   const NPSA_BORDER = "#e5e7eb";
 
   return (
-    <div style={{display:"flex",height:"100vh",minHeight:0,fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",background:NPSA_BG}}>
+    <div style={{display:"flex",height:"100%",minHeight:0,width:"100%",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",background:NPSA_BG}}>
       {/* ── SIDEBAR (no duplicate branding — parent app provides it) ── */}
       <div style={{width:320,background:NPSA_CARD,borderRight:`1px solid ${NPSA_BORDER}`,color:"#374151",overflowY:"auto",padding:"20px 16px",flexShrink:0}}>
         <button onClick={()=>setConfirmModal(docTab)} style={{width:"100%",background:NPSA_PRIMARY,border:"none",borderRadius:12,padding:"10px 0",fontSize:12,color:"#fff",cursor:"pointer",marginBottom:14,fontWeight:600,display:isGw?"none":"block"}}>
@@ -1510,7 +1510,7 @@ export default function LOEGenerator() {
       {/* ── PREVIEW ── */}
       <div style={{flex:1,minWidth:0,minHeight:0,overflowY:"auto",padding:"24px 40px 40px",background:NPSA_BG}}>
         {/* Tabs — match NPSA Tools tab styling */}
-        <div style={{maxWidth:800,margin:"0 auto",display:"flex",gap:0,background:NPSA_CARD,borderRadius:"16px 16px 0 0",border:`1px solid ${NPSA_BORDER}`,borderBottom:"none",overflow:"hidden"}}>
+        <div style={{maxWidth:"min(1200px, 100%)",width:"100%",margin:"0 auto",display:"flex",gap:0,background:NPSA_CARD,borderRadius:"16px 16px 0 0",border:`1px solid ${NPSA_BORDER}`,borderBottom:"none",overflow:"hidden"}}>
           {[{id:"pre",label:"Pre-Award"},{id:"inh",label:"Pre-Award (In-House)"},{id:"post",label:"Post-Award"},{id:"gw",label:"3rd Party Grant Writer"}].map((t,i)=>(
             <button key={t.id} onClick={()=>setDocTab(t.id)}
               style={{flex:1,padding:"14px 20px",fontSize:13,fontWeight:600,border:"none",
@@ -1523,7 +1523,7 @@ export default function LOEGenerator() {
           ))}
         </div>
 
-        <div style={{maxWidth:800,margin:"0 auto",background:NPSA_CARD,border:`1px solid ${NPSA_BORDER}`,borderTop:"none",borderRadius:"0 0 16px 16px",padding:"64px 72px"}} ref={previewRef}>
+        <div style={{maxWidth:"min(1200px, 100%)",width:"100%",margin:"0 auto",background:NPSA_CARD,border:`1px solid ${NPSA_BORDER}`,borderTop:"none",borderRadius:"0 0 16px 16px",padding:"64px 72px"}} ref={previewRef}>
           {/* Logo */}
           <div style={{textAlign:"center",borderBottom:"2.5px solid #1a4a6e",paddingBottom:16,marginBottom:20}}>
             <span style={{fontWeight:800,fontSize:36,color:"#1a4a6e",fontFamily:"Georgia,serif",display:"block",letterSpacing:-0.5}}>nonprofit</span>

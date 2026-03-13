@@ -22,6 +22,7 @@ type SidebarProps = {
   activeTab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive';
   onTabChange: (tab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive') => void;
   onRunSelect?: (runId: string) => void;
+  onCollapsedChange?: (collapsed: boolean) => void;
 };
 
 // Koen = full access. Stuart = LOE + School + Running/Finished/Archive. Brad = School + Running/Finished/Archive only.
@@ -34,12 +35,16 @@ const canAccessTab = (username: string | null, tab: string) => {
   return false;
 };
 
-const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
+const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange }: SidebarProps) => {
   const { token, username, logout } = useAuth();
   const isDev = username === "Koen";
   const [runs, setRuns] = useState<RunMetadata[]>([]);
   const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    onCollapsedChange?.(collapsed);
+  }, [collapsed, onCollapsedChange]);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
 
@@ -223,8 +228,8 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     <aside
       className="h-full bg-white border-r border-gray-200 shadow-sm flex flex-col transition-all duration-300 ease-out overflow-hidden"
       style={{ width: collapsed ? 72 : 320 }}
-      onMouseEnter={() => setCollapsed(false)}
-      onMouseLeave={() => setCollapsed(true)}
+      onMouseEnter={() => { setCollapsed(false); onCollapsedChange?.(false); }}
+      onMouseLeave={() => { setCollapsed(true); onCollapsedChange?.(true); }}
     >
         {/* Logo Section — collapses to icon-sized */}
         <div className="p-4 border-b border-gray-200 flex items-center justify-center min-h-[72px]">

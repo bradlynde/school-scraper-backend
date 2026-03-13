@@ -342,6 +342,7 @@ export default function Home() {
   const [completedCountiesSet, setCompletedCountiesSet] = useState<Set<string>>(new Set());
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
@@ -856,11 +857,17 @@ export default function Home() {
         />
       )}
 
-      <div className={`fixed left-0 top-0 h-screen w-80 z-50 transition-transform duration-300 ${
-        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      } md:translate-x-0 md:relative md:z-auto md:h-full flex-shrink-0`}>
-        <Sidebar 
-          activeTab={selectedType} 
+      <div
+        className={
+          "fixed left-0 top-0 h-screen z-50 transition-all duration-300 ease-out w-80 " +
+          (sidebarOpen ? "translate-x-0" : "-translate-x-full") +
+          " md:translate-x-0 md:relative md:z-auto md:h-full flex-shrink-0 " +
+          (sidebarCollapsed ? "md:w-[72px]" : "md:w-80")
+        }
+      >
+        <Sidebar
+          activeTab={selectedType}
+          onCollapsedChange={setSidebarCollapsed}
           onTabChange={(tab) => {
             setSelectedType(tab);
             setSidebarOpen(false); // Close mobile menu on tab change
@@ -987,7 +994,7 @@ export default function Home() {
           }}
         />
       </div>
-      <div className="flex-1 min-h-screen">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* LOE Generator - always inline (frontend owns the UI; backend is API-only) */}
         {viewState === "start" && selectedType === "loe" && (
           <div className="animate-fade-in flex-1 min-h-0 overflow-hidden relative">
@@ -1033,8 +1040,7 @@ export default function Home() {
 
         {/* START VIEW - Show when school/church tab is active */}
         {viewState === "start" && (selectedType === "school" || selectedType === "church") && (
-          <div className="animate-fade-in">
-            <div className="flex items-center justify-center p-12 min-h-screen">
+          <div className="animate-fade-in flex-1 flex items-center justify-center p-12 min-h-0">
             <div className="w-full max-w-2xl relative">
               {/* In Development Overlay for Church Scraper */}
               {selectedType === "church" && (
@@ -1123,7 +1129,6 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          </div>
           </div>
         )}
 
