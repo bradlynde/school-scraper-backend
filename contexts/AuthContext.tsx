@@ -2,6 +2,14 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 
+// Resolve auth API URL once (env vars are baked in at build time)
+function getAuthApiUrl(): string {
+  let url = process.env.NEXT_PUBLIC_AUTH_API_URL || process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
+  url = url.replace(/\/+$/, "");
+  if (!url.match(/^https?:\/\//)) url = `https://${url}`;
+  return url;
+}
+
 interface AuthContextType {
   isAuthenticated: boolean;
   username: string | null;
@@ -9,6 +17,7 @@ interface AuthContextType {
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
   loading: boolean;
+  authApiUrl: string; // Exposed for debugging
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -120,16 +129,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [isAuthenticated]);
 
+  const authApiUrl = getAuthApiUrl();
+
   const login = async (username: string, password: string): Promise<boolean> => {
+    const apiUrl = authApiUrl;
     try {
-      // Use auth service when set; otherwise fall back to school API (legacy)
-      let apiUrl = process.env.NEXT_PUBLIC_AUTH_API_URL || process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
-      console.log("Attempting login to:", `${apiUrl}/login`);
+      console.log("[Auth] Attempting login to:", `${apiUrl}/login`);
       
       // Add timeout to prevent hanging
       const controller = new AbortController();
@@ -176,14 +181,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return false;
       } catch (fetchError: any) {
         clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
-          console.error("Login request timed out");
+        if (fetchError.name === "AbortError") {
+          console.error("[Auth] Login request timed out");
           throw new Error("Request timed out. Please check your connection and try again.");
         }
-        console.error("Fetch error details:", fetchError);
-        // Provide more helpful error message
-        if (fetchError.message && fetchError.message.includes('fetch')) {
-          throw new Error(`Failed to connect to API at ${apiUrl}. Please check that the auth service (or backend) is running and NEXT_PUBLIC_AUTH_API_URL is set correctly.`);
+        console.error("[Auth] Fetch error:", fetchError?.name, fetchError?.message, fetchError);
+        // Catch all network errors: CORS, failed to fetch, net::ERR_*, etc.
+        const isNetworkError =
+          fetchError?.name === "TypeError" ||
+          (fetchError?.message && (
+            fetchError.message.includes("fetch") ||
+            fetchError.message.includes("network") ||
+            fetchError.message.includes("Failed to fetch") ||
+            fetchError.message.includes("Load failed") ||
+            fetchError.message.includes("NetworkError")
+          ));
+        if (isNetworkError) {
+          throw new Error(`CONNECTION_FAILED:${apiUrl}`);
         }
         throw fetchError;
       }
@@ -194,7 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, username, token, login, logout, loading }}>
+    <AuthContext.Provider value={{ isAuthenticated, username, token, login, logout, loading, authApiUrl }}>
       {children}
     </AuthContext.Provider>
   );
