@@ -1,6 +1,6 @@
-# LOE Generator
+# LOE Generator API (Backend)
 
-Engagement Letter Generator for Nonprofit Security Advisors. Deploy to Railway or Vercel.
+Backend service for the LOE (Letter of Engagement) Generator. Provides AI clause polishing via `/api/polish-clause`.
 
 ## Setup
 
@@ -8,9 +8,11 @@ Engagement Letter Generator for Nonprofit Security Advisors. Deploy to Railway o
 2. Add `OPENAI_API_KEY` to environment variables
 3. `npm run build && npm start`
 
+## API
+
+- **POST /api/polish-clause** — Polishes rough clause text using AI. Body: `{ "text": "..." }`. Returns `{ "polished": "..." }`.
+
 ## Deployment
 
-- **Railway**: Connect this branch; set Root Directory to `npsa-scraper`; add `OPENAI_API_KEY`
-- **Vercel**: Import project; set Root Directory to `npsa-scraper`; add `OPENAI_API_KEY`
-
-The main NPSA frontend loads this app via iframe when `NEXT_PUBLIC_LOE_API_URL` is set.
+- **Railway**: Connect this branch; add `OPENAI_API_KEY`
+- Frontend (Vercel) calls this API when `NEXT_PUBLIC_LOE_API_URL` is set.

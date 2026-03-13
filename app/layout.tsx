@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "LOE Generator | NPSA",
-  description: "Engagement Letter Generator for Nonprofit Security Advisors",
+  title: "LOE Generator API | NPSA",
+  description: "Backend API for Engagement Letter Generator",
 };
 
 export default function RootLayout({
@@ -13,7 +12,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body style={{ margin: 0, fontFamily: "system-ui" }}>{children}</body>
     </html>
   );
 }

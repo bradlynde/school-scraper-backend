@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 /**
  * API route for polishing custom clauses with AI.
  * Uses OPENAI_API_KEY from env. Set in Vercel: Settings → Environment Variables.
- * The client never touches this file — they edit LOEGenerator.tsx only.
+ * Called by frontend LOEGenerator. Set OPENAI_API_KEY in env.
  */
 export async function POST(req: NextRequest) {
   try {
