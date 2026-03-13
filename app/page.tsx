@@ -982,22 +982,14 @@ export default function Home() {
         />
       </div>
       <div className="flex-1 min-h-screen">
-        {/* LOE Generator - iframe when URL set, else inline */}
+        {/* LOE Generator - always inline (frontend owns the UI; backend is API-only) */}
         {viewState === "start" && selectedType === "loe" && (
           <div className="animate-fade-in flex-1 min-h-0 overflow-hidden">
-            {process.env.NEXT_PUBLIC_LOE_API_URL ? (
-              <iframe
-                src={process.env.NEXT_PUBLIC_LOE_API_URL.replace(/\/+$/, "")}
-                className="w-full h-full border-0"
-                title="LOE Generator"
-              />
-            ) : (
-              <LOEGenerator />
-            )}
+            <LOEGenerator />
           </div>
         )}
 
-        {/* LOE Archive - iframe to LOE_API_URL/archive */}
+        {/* LOE Archive - iframe when URL set, else placeholder */}
         {viewState === "start" && selectedType === "loe-archive" && (
           <div className="animate-fade-in flex-1 min-h-0 overflow-hidden">
             {process.env.NEXT_PUBLIC_LOE_API_URL ? (
@@ -1009,8 +1001,8 @@ export default function Home() {
             ) : (
               <div className="flex items-center justify-center min-h-screen p-12">
                 <div className="text-center text-gray-500">
-                  <p className="text-lg font-medium">LOE Archive not configured</p>
-                  <p className="text-sm mt-2">Set NEXT_PUBLIC_LOE_API_URL in Vercel to load the LOE Archive.</p>
+                  <p className="text-lg font-medium">LOE Archive</p>
+                  <p className="text-sm mt-2">Set NEXT_PUBLIC_LOE_API_URL to an archive endpoint to load the LOE Archive.</p>
                 </div>
               </div>
             )}
