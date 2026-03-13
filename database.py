@@ -36,15 +36,31 @@ def init_db():
             """)
             conn.commit()
 
-            # Seed Koen if no users exist
+            # Seed users if table is empty
             cur.execute("SELECT COUNT(*) FROM users")
             if cur.fetchone()[0] == 0:
-                # Default: Koen / admin (change in production!)
-                pw_hash = bcrypt.hashpw("admin".encode("utf-8"), bcrypt.gensalt())
-                cur.execute(
-                    "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
-                    ("Koen", pw_hash),
-                )
+                users = [
+                    ("Koen", "admin"),
+                    ("Brad", "user1"),
+                    ("Stuart", "user2"),
+                ]
+                for username, password in users:
+                    pw_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+                    cur.execute(
+                        "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
+                        (username, pw_hash),
+                    )
+                conn.commit()
+            else:
+                # Ensure Brad and Stuart exist (for existing DBs that only had Koen)
+                for username, password in [("Brad", "user1"), ("Stuart", "user2")]:
+                    cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
+                    if cur.fetchone() is None:
+                        pw_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+                        cur.execute(
+                            "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
+                            (username, pw_hash),
+                        )
                 conn.commit()
 
 
