@@ -925,7 +925,7 @@ export default function LOEGenerator() {
   const NPSA_BORDER = "#e5e7eb";
 
   return (
-    <div style={{display:"flex",height:"100vh",fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",background:NPSA_BG}}>
+    <div style={{display:"flex",height:"100vh",minHeight:0,fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",background:NPSA_BG}}>
       {/* ── SIDEBAR (no duplicate branding — parent app provides it) ── */}
       <div style={{width:320,background:NPSA_CARD,borderRight:`1px solid ${NPSA_BORDER}`,color:"#374151",overflowY:"auto",padding:"20px 16px",flexShrink:0}}>
         <button onClick={()=>setConfirmModal(docTab)} style={{width:"100%",background:NPSA_PRIMARY,border:"none",borderRadius:12,padding:"10px 0",fontSize:12,color:"#fff",cursor:"pointer",marginBottom:14,fontWeight:600,display:isGw?"none":"block"}}>
@@ -1508,7 +1508,7 @@ export default function LOEGenerator() {
       </div>
 
       {/* ── PREVIEW ── */}
-      <div style={{flex:1,overflowY:"auto",padding:"24px 40px 40px",background:NPSA_BG}}>
+      <div style={{flex:1,minWidth:0,minHeight:0,overflowY:"auto",padding:"24px 40px 40px",background:NPSA_BG}}>
         {/* Tabs — match NPSA Tools tab styling */}
         <div style={{maxWidth:800,margin:"0 auto",display:"flex",gap:0,background:NPSA_CARD,borderRadius:"16px 16px 0 0",border:`1px solid ${NPSA_BORDER}`,borderBottom:"none",overflow:"hidden"}}>
           {[{id:"pre",label:"Pre-Award"},{id:"inh",label:"Pre-Award (In-House)"},{id:"post",label:"Post-Award"},{id:"gw",label:"3rd Party Grant Writer"}].map((t,i)=>(
