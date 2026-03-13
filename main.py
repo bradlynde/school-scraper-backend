@@ -64,6 +64,9 @@ async def login(req: LoginRequest):
     stored_hash = user["password_hash"]
     if isinstance(stored_hash, str):
         stored_hash = stored_hash.encode("utf-8")
+    elif not isinstance(stored_hash, bytes):
+        # PostgreSQL BYTEA returns memoryview; bcrypt needs bytes
+        stored_hash = bytes(stored_hash)
     if not bcrypt.checkpw(req.password.encode("utf-8"), stored_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
