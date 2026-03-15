@@ -47,7 +47,7 @@ export default function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
+    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#ffffff' }}>
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-8 md:p-12">
           <form onSubmit={handleSubmit} className="space-y-6">

@@ -48,7 +48,7 @@ export default function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: '#f5f5f5' }}>
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: '#ffffff' }}>
       {/* Logo - top left, same size/placement as expanded sidebar */}
       <div className="absolute top-0 left-0 p-4 min-h-[72px] flex items-center">
         <Image
