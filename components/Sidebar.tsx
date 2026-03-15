@@ -45,18 +45,6 @@ const canAccessTab = (username: string | null, tab: string) => {
   return false;
 };
 
-/** Returns true if run belongs to the given scraper context (handles scraper_type and legacy runs) */
-function runMatchesScraperContext(run: RunMetadata, context: "school" | "church"): boolean {
-  // Only exclude runs that clearly belong to the other context
-  if (run.scraper_type === "school" && context === "church") return false;
-  if (run.scraper_type === "church" && context === "school") return false;
-  // Infer from payload when scraper_type is missing (legacy or shared-storage runs)
-  const isChurch = run.churchesFound !== undefined || run.churchesProcessed !== undefined || (run.countyChurches && run.countyChurches.length > 0);
-  const isSchool = run.schoolsFound !== undefined || run.schoolsProcessed !== undefined || (run.countySchools && run.countySchools.length > 0);
-  if (context === "church") return !isSchool; // show unless clearly a school run
-  return !isChurch; // school context: show unless clearly a church run
-}
-
 const getApiUrl = (scraperContext: 'school' | 'church') => {
   const isChurch = scraperContext === 'church';
   let url = isChurch
@@ -444,9 +432,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
               <div className="text-center text-gray-500 py-4">Loading...</div>
             ) : (
               (() => {
-                const filteredRuns = runs
-                  .filter(run => runMatchesScraperContext(run, scraperContext))
-                  .filter(run => {
+                const filteredRuns = runs.filter(run => {
                     if (activeTab === 'running') {
                       return run.status === 'running' && !run.archived;
                     } else if (activeTab === 'archive') {
