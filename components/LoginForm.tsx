@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function LoginForm() {
@@ -47,7 +48,19 @@ export default function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: '#f5f5f5' }}>
+      {/* Logo - top left, same size/placement as expanded sidebar */}
+      <div className="absolute top-0 left-0 p-4 min-h-[72px] flex items-center">
+        <Image
+          src="/npsa-logo.png"
+          alt="NPSA"
+          width={160}
+          height={48}
+          className="h-auto object-contain"
+          priority
+        />
+      </div>
+      <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-8 md:p-12">
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -111,6 +124,7 @@ export default function LoginForm() {
             </button>
           </form>
         </div>
+      </div>
       </div>
     </div>
   );

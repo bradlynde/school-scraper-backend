@@ -2,9 +2,10 @@
 // Force Vercel redeploy - 2025-12-13
 
 import React, { useState, useEffect } from "react";
-import Sidebar from "../components/Sidebar";
+import Sidebar, { type TabType } from "../components/Sidebar";
 import LoginForm from "../components/LoginForm";
 import LOEGenerator from "../components/LOEGenerator";
+import Homepage from "../components/Homepage";
 import { useAuth } from "../contexts/AuthContext";
 
 type StepSummary = {
@@ -171,8 +172,9 @@ const STATE_COUNTY_COUNTS: Record<string, number> = {
   "wyoming": 23,
 };
 
-// Average time per county: 871 seconds (~14.5 minutes) - updated from Arkansas run analysis
-const SECONDS_PER_COUNTY = 871;
+// Average time per county: school 871s (~14.5 min), church 2400s (~40 min)
+const SECONDS_PER_COUNTY_SCHOOL = 871;
+const SECONDS_PER_COUNTY_CHURCH = 2400;
 
 // Helper function to format estimated time (minutes only, no seconds)
 function formatEstimatedTime(seconds: number): string {
@@ -327,7 +329,7 @@ export default function Home() {
   const isDev = username === "Koen";
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
-  const [selectedType, setSelectedType] = useState<"loe" | "loe-archive" | "school" | "church" | "running" | "finished" | "archive">("loe");
+  const [selectedType, setSelectedType] = useState<TabType>("home");
   const [status, setStatus] = useState("");
   const [summary, setSummary] = useState<PipelineSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -350,17 +352,18 @@ export default function Home() {
 
   // Keep scraperContext in sync when user switches between school/church tabs
   useEffect(() => {
-    if (selectedType === 'school' || selectedType === 'church') {
+    if (selectedType === "school" || selectedType === "church") {
       setScraperContext(selectedType);
     }
   }, [selectedType]);
 
-  const getApiUrl = () => {
-    const isChurch = scraperContext === 'church';
+  const getApiUrl = (override?: "school" | "church") => {
+    const ctx = override ?? scraperContext;
+    const isChurch = ctx === "church";
     let url = isChurch
       ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
       : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app");
-    url = url.replace(/\/+$/, '');
+    url = url.replace(/\/+$/, "");
     if (!url.match(/^https?:\/\//)) url = `https://${url}`;
     return url;
   };
@@ -376,15 +379,16 @@ export default function Home() {
     };
   }, [pollingInterval]);
 
-  // Access: Koen = all. Stuart = loe, loe-archive, school, church, running, finished, archive. Brad = school, running, finished, archive only.
+  // Access: Koen = all. Stuart = loe, loe-archive, loe-finished, school, church, running, finished, archive. Brad = school, running, finished, archive only.
   const canAccessCurrentTab =
     isDev ||
-    (username === "Stuart" && ["loe", "loe-archive", "school", "church", "running", "finished", "archive"].includes(selectedType)) ||
+    selectedType === "home" ||
+    (username === "Stuart" && ["loe", "loe-archive", "loe-finished", "school", "church", "running", "finished", "archive"].includes(selectedType)) ||
     (username === "Brad" && ["school", "running", "finished", "archive"].includes(selectedType));
 
-  // Redirect Brad from restricted tabs (loe, loe-archive, church); Stuart can stay on loe/loe-archive
+  // Redirect Brad from restricted tabs (loe, loe-archive, loe-finished, church)
   useEffect(() => {
-    if (isAuthenticated && username === "Brad" && ["loe", "loe-archive", "church"].includes(selectedType)) {
+    if (isAuthenticated && username === "Brad" && ["loe", "loe-archive", "loe-finished", "church"].includes(selectedType)) {
       setSelectedType("school");
     }
   }, [isAuthenticated, username, selectedType]);
@@ -454,6 +458,92 @@ export default function Home() {
   function truncateText(text: string, maxLength: number): string {
     if (text.length <= maxLength) return text;
     return text.slice(0, maxLength) + "...";
+  }
+
+  async function handleRunSelect(runId: string, sourceOverride?: "school" | "church", statusOverride?: string) {
+    if (sourceOverride) {
+      setScraperContext(sourceOverride);
+      setSelectedType(statusOverride === "running" ? "running" : "finished");
+    }
+    setSelectedRunId(runId);
+    setSidebarOpen(false);
+    const apiUrl = getApiUrl(sourceOverride);
+    try {
+      const runsResponse = await fetch(`${apiUrl}/runs`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let runMetadata: any = null;
+      if (runsResponse.ok) {
+        const runsData = await runsResponse.json();
+        runMetadata = runsData.runs?.find((r: any) => r.run_id === runId);
+      }
+      const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === "running") {
+          setViewState("progress");
+          setIsRunning(true);
+          if (pollingInterval) clearInterval(pollingInterval);
+          const interval = setInterval(() => checkPipelineStatus(runId), 60000);
+          setPollingInterval(interval);
+          checkPipelineStatus(runId);
+        } else if (data.status === "completed" || data.status === "error") {
+          const summaryData: PipelineSummary = {
+            ...data,
+            steps: data.steps || [],
+            schoolsFound: data.schoolsFound || data.schoolsProcessed || runMetadata?.schools_processed || 0,
+            runId: data.runId || runId,
+            totalContacts: data.totalContacts || runMetadata?.total_contacts || 0,
+            schoolsProcessed: data.schoolsProcessed || data.schoolsFound || runMetadata?.schools_processed || 0,
+            countyContacts: data.countyContacts || [],
+            countySchools: data.countySchools || [],
+            csvData: data.csvData,
+            csvFilename: data.csvFilename || runMetadata?.csv_filename,
+          };
+          if (runMetadata?.created_at && runMetadata?.completed_at) {
+            const start = new Date(runMetadata.created_at).getTime();
+            const end = new Date(runMetadata.completed_at).getTime();
+            setElapsedTimeDisplay((end - start) / 1000);
+            setStartTime(start);
+          } else if (data.elapsedTime) {
+            setElapsedTimeDisplay(data.elapsedTime);
+          }
+          setSummary(summaryData);
+          setViewState("summary");
+          setIsRunning(false);
+        }
+      } else if (response.status === 401) {
+        logout();
+      } else if (response.status === 410 || response.status === 404) {
+        if (runMetadata) {
+          const summaryData: PipelineSummary = {
+            status: runMetadata.status || "completed",
+            steps: [],
+            schoolsFound: runMetadata.schools_processed || 0,
+            runId: runId,
+            totalContacts: runMetadata.total_contacts || 0,
+            schoolsProcessed: runMetadata.schools_processed || 0,
+            countyContacts: [],
+            countySchools: [],
+            csvData: undefined,
+            csvFilename: runMetadata.csv_filename,
+          };
+          if (runMetadata.created_at && runMetadata.completed_at) {
+            const start = new Date(runMetadata.created_at).getTime();
+            const end = new Date(runMetadata.completed_at).getTime();
+            setElapsedTimeDisplay((end - start) / 1000);
+            setStartTime(start);
+          }
+          setSummary(summaryData);
+          setViewState("summary");
+          setIsRunning(false);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching run status:", error);
+    }
   }
 
   async function checkPipelineStatus(runId: string) {
@@ -829,9 +919,9 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
     setSelectedRunId(null);
     setIsRunning(false);
     
-    // Reset to school tab if on running/finished tabs
-    if (selectedType === 'running' || selectedType === 'finished') {
-      setSelectedType('loe');
+    // Reset to the scraper start form when leaving run view
+    if (selectedType === "running" || selectedType === "finished") {
+      setSelectedType(scraperContext);
     }
     
     if (pollingInterval) {
@@ -879,124 +969,29 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
           onTabChange={(tab) => {
             setSelectedType(tab);
             setSidebarOpen(false); // Close mobile menu on tab change
-            // Switch view based on tab
-            if (tab === 'loe' || tab === 'loe-archive' || tab === 'school' || tab === 'church') {
+            if (tab === "home") {
               setViewState("start");
               setSelectedRunId(null);
-            } else if (tab === 'running' || tab === 'finished' || tab === 'archive') {
+            } else if (tab === "loe" || tab === "loe-archive" || tab === "loe-finished" || tab === "school" || tab === "church") {
+              setViewState("start");
+              setSelectedRunId(null);
+            } else if (tab === "running" || tab === "finished" || tab === "archive") {
               setViewState(tab);
               setSelectedRunId(null);
             }
           }}
-          onRunSelect={async (runId) => {
-            setSelectedRunId(runId);
-            setSidebarOpen(false); // Close mobile menu on run select
-            // Fetch run status to determine if it's running or finished
-            const apiUrl = getApiUrl();
-            try {
-              // First, try to get run from /runs endpoint to get metadata
-              const runsResponse = await fetch(`${apiUrl}/runs`, {
-                headers: {
-                  "Authorization": `Bearer ${token}`,
-                },
-              });
-              let runMetadata = null;
-              if (runsResponse.ok) {
-                const runsData = await runsResponse.json();
-                runMetadata = runsData.runs?.find((r: any) => r.run_id === runId);
-              }
-              
-              // Then try pipeline-status endpoint
-              const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
-                headers: {
-                  "Authorization": `Bearer ${token}`,
-                },
-              });
-              if (response.ok) {
-                const data = await response.json();
-                if (data.status === "running") {
-                  setViewState("progress");
-                  setIsRunning(true);
-                  // Start polling
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
-                  const interval = setInterval(() => {
-                    checkPipelineStatus(runId);
-                  }, 60000);
-                  setPollingInterval(interval);
-                  checkPipelineStatus(runId);
-                } else if (data.status === "completed" || data.status === "error") {
-                  // Use data from pipeline-status if available, otherwise use metadata
-                  const summaryData: PipelineSummary = {
-                    ...data,
-                    steps: data.steps || [],
-                    schoolsFound: data.schoolsFound || data.schoolsProcessed || runMetadata?.schools_processed || 0,
-                    runId: data.runId || runId,
-                    totalContacts: data.totalContacts || runMetadata?.total_contacts || 0,
-                    schoolsProcessed: data.schoolsProcessed || data.schoolsFound || runMetadata?.schools_processed || 0,
-                    countyContacts: data.countyContacts || [],
-                    countySchools: data.countySchools || [],
-                    csvData: data.csvData,
-                    csvFilename: data.csvFilename || runMetadata?.csv_filename,
-                  };
-    
-                  // Calculate elapsed time
-                  if (runMetadata?.created_at && runMetadata?.completed_at) {
-                    const start = new Date(runMetadata.created_at).getTime();
-                    const end = new Date(runMetadata.completed_at).getTime();
-                    const elapsed = (end - start) / 1000;
-                    setElapsedTimeDisplay(elapsed);
-                    setStartTime(start);
-                  } else if (data.elapsedTime) {
-                    setElapsedTimeDisplay(data.elapsedTime);
-                  }
-                  
-                  setSummary(summaryData);
-                  setViewState("summary");
-                  setIsRunning(false);
-                }
-              } else if (response.status === 401) {
-                logout();
-              } else if (response.status === 401) {
-                logout();
-              } else if (response.status === 410 || response.status === 404) {
-                // Run is completed and status endpoint no longer available, use metadata
-                if (runMetadata) {
-                  const summaryData: PipelineSummary = {
-                    status: runMetadata.status || "completed",
-                    steps: [], // No step data available from metadata
-                    schoolsFound: runMetadata.schools_processed || 0,
-                    runId: runId,
-                    totalContacts: runMetadata.total_contacts || 0,
-                    schoolsProcessed: runMetadata.schools_processed || 0,
-                    countyContacts: [],
-                    countySchools: [],
-                    csvData: undefined,
-                    csvFilename: runMetadata.csv_filename,
-                  };
-                  
-                  // Calculate elapsed time from metadata
-                  if (runMetadata.created_at && runMetadata.completed_at) {
-                    const start = new Date(runMetadata.created_at).getTime();
-                    const end = new Date(runMetadata.completed_at).getTime();
-                    const elapsed = (end - start) / 1000;
-                    setElapsedTimeDisplay(elapsed);
-                    setStartTime(start);
-                  }
-                  
-                  setSummary(summaryData);
-                  setViewState("summary");
-                  setIsRunning(false);
-                }
-              }
-            } catch (error) {
-              console.error("Error fetching run status:", error);
-            }
-          }}
+          onRunSelect={(runId) => handleRunSelect(runId)}
         />
       </div>
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* Homepage - activity summary */}
+        {selectedType === "home" && (
+          <Homepage
+            onNavigate={(tab) => setSelectedType(tab as TabType)}
+            onViewRun={(runId, source, status) => handleRunSelect(runId, source, status)}
+          />
+        )}
+
         {/* LOE Generator - always inline (frontend owns the UI; backend is API-only) */}
         {viewState === "start" && selectedType === "loe" && (
           <div className="animate-fade-in flex-1 min-h-0 overflow-hidden relative">
@@ -1009,6 +1004,16 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
               </div>
             ) : null}
             <LOEGenerator />
+          </div>
+        )}
+
+        {/* LOE Finished - placeholder for completed LOEs */}
+        {viewState === "start" && selectedType === "loe-finished" && (
+          <div className="animate-fade-in flex-1 flex items-center justify-center p-12">
+            <div className="text-center text-gray-500 max-w-md">
+              <p className="text-lg font-medium">LOE Finished</p>
+              <p className="text-sm mt-2">Completed LOEs will appear here. This view is coming soon.</p>
+            </div>
           </div>
         )}
 
@@ -1073,7 +1078,8 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
                   {/* Preview row after state selection */}
                   {selectedState && (() => {
                     const countyCount = STATE_COUNTY_COUNTS[selectedState] || 0;
-                    const estimatedSeconds = countyCount * SECONDS_PER_COUNTY;
+                    const secondsPerCounty = scraperContext === "church" ? SECONDS_PER_COUNTY_CHURCH : SECONDS_PER_COUNTY_SCHOOL;
+                    const estimatedSeconds = countyCount * secondsPerCounty;
                     const estimatedTime = formatEstimatedTime(estimatedSeconds);
                     
                     return (

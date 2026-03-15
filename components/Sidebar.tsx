@@ -18,9 +18,11 @@ type RunMetadata = {
   archived?: boolean;
 };
 
+export type TabType = 'home' | 'loe' | 'loe-archive' | 'loe-finished' | 'school' | 'church' | 'running' | 'finished' | 'archive';
+
 type SidebarProps = {
-  activeTab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive';
-  onTabChange: (tab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive') => void;
+  activeTab: TabType;
+  onTabChange: (tab: TabType) => void;
   onRunSelect?: (runId: string) => void;
   onCollapsedChange?: (collapsed: boolean) => void;
   scraperContext?: 'school' | 'church';
@@ -28,7 +30,7 @@ type SidebarProps = {
 
 // Koen = full access. Stuart = LOE + School + Church + Running/Finished/Archive. Brad = School + Running/Finished/Archive only.
 const BRAD_TABS = new Set(["school", "running", "finished", "archive"] as const);
-const STUART_TABS = new Set(["loe", "loe-archive", "school", "church", "running", "finished", "archive"] as const);
+const STUART_TABS = new Set(["loe", "loe-archive", "loe-finished", "school", "church", "running", "finished", "archive"] as const);
 const canAccessTab = (username: string | null, tab: string) => {
   if (username === "Koen") return true;
   if (username === "Stuart") return STUART_TABS.has(tab as any);
@@ -52,6 +54,28 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
   const [runs, setRuns] = useState<RunMetadata[]>([]);
   const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [schoolExpanded, setSchoolExpanded] = useState(false);
+  const [churchExpanded, setChurchExpanded] = useState(false);
+  const [loeExpanded, setLoeExpanded] = useState(false);
+
+  // Auto-expand parent when it becomes active; collapse others
+  useEffect(() => {
+    if (activeTab === 'school' || activeTab === 'running' || activeTab === 'finished' || activeTab === 'archive') {
+      if (scraperContext === 'school') {
+        setSchoolExpanded(true);
+        setChurchExpanded(false);
+        setLoeExpanded(false);
+      }
+    } else if (activeTab === 'church') {
+      setChurchExpanded(true);
+      setSchoolExpanded(false);
+      setLoeExpanded(false);
+    } else if (activeTab === 'loe' || activeTab === 'loe-archive' || activeTab === 'loe-finished') {
+      setLoeExpanded(true);
+      setSchoolExpanded(false);
+      setChurchExpanded(false);
+    }
+  }, [activeTab, scraperContext]);
 
   useEffect(() => {
     onCollapsedChange?.(collapsed);
@@ -163,8 +187,15 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
     }
   };
 
-  const NavBtn = ({ tab, icon, label, restricted }: { tab: typeof activeTab; icon: React.ReactNode; label: string; restricted?: boolean }) => {
+  const ChevronDown = ({ expanded }: { expanded: boolean }) => (
+    <svg className={`w-4 h-4 flex-shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    </svg>
+  );
+
+  const NavBtn = ({ tab, icon, label, restricted }: { tab: TabType; icon: React.ReactNode; label: string; restricted?: boolean }) => {
     const allowed = !restricted || canAccessTab(username, tab);
+    const active = activeTab === tab;
     return (
       <button
         onClick={() => allowed && onTabChange(tab)}
@@ -175,7 +206,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
         } ${
           !allowed
             ? "text-gray-400 bg-gray-50 cursor-not-allowed opacity-75"
-            : activeTab === tab
+            : active
               ? "bg-[#1e3a5f] text-white shadow-md"
               : "text-gray-700 hover:bg-gray-100"
         }`}
@@ -187,6 +218,23 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
             {!allowed && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded shrink-0">In Development</span>}
           </>
         )}
+      </button>
+    );
+  };
+
+  const SubNavBtn = ({ tab, label, parent }: { tab: TabType; label: string; parent: 'school' | 'church' | 'loe' }) => {
+    const active = parent === 'loe'
+      ? activeTab === tab
+      : activeTab === tab && scraperContext === parent;
+    return (
+      <button
+        onClick={() => onTabChange(tab)}
+        title={label}
+        className={`w-full flex items-center gap-3 py-2.5 rounded-lg font-medium transition-all duration-200 pl-4 pr-4 ${
+          active ? "bg-[#1e3a5f]/10 text-[#1e3a5f]" : "text-gray-600 hover:bg-gray-100"
+        }`}
+      >
+        <span className="flex-1 text-left truncate text-sm">{label}</span>
       </button>
     );
   };
@@ -230,8 +278,11 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
       onMouseEnter={() => { setCollapsed(false); onCollapsedChange?.(false); }}
       onMouseLeave={() => { setCollapsed(true); onCollapsedChange?.(true); }}
     >
-        {/* Logo Section — collapses to icon-sized */}
-        <div className="p-4 border-b border-gray-200 flex items-center justify-center min-h-[72px]">
+        {/* Logo Section — collapses to icon-sized; clickable to go home */}
+        <button
+          onClick={() => onTabChange("home")}
+          className="w-full p-4 border-b border-gray-200 flex items-center justify-center min-h-[72px] hover:bg-gray-50 transition-colors"
+        >
           <div className="transition-all duration-300 ease-out overflow-hidden flex items-center justify-center" style={{ width: collapsed ? 40 : 160 }}>
             <Image
               src="/npsa-logo.png"
@@ -242,18 +293,125 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
               priority
             />
           </div>
-        </div>
+        </button>
 
-        {/* Navigation Items */}
-      <nav className="p-3 space-y-2 flex-shrink-0">
-          <NavBtn tab="loe" icon={<DocIcon />} label="LOE Generator" restricted />
-          <NavBtn tab="loe-archive" icon={<ArchiveIcon />} label="LOE Archive" restricted />
-          <div className="border-t border-gray-200 my-2" />
-          <NavBtn tab="school" icon={<BookIcon />} label="School Scraper" />
-          <NavBtn tab="church" icon={<ChurchIcon />} label="Church Scraper" />
-        <NavBtn tab="running" icon={<PlayIcon />} label="Running" />
-        <NavBtn tab="finished" icon={<CheckIcon />} label="Finished" />
-        <NavBtn tab="archive" icon={<ArchiveIcon />} label="Archive" />
+        {/* Navigation Items — 3 parent tabs with expandable sub-tabs */}
+      <nav className="p-3 space-y-1 flex-shrink-0">
+          {/* School Scraper */}
+          <div>
+            <div className="flex items-center">
+              <button
+                onClick={() => onTabChange("school")}
+                title="School Scraper"
+                className={`flex-1 flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+                  collapsed ? "justify-center px-2" : "px-4"
+                } ${
+                  activeTab === "school" || ((activeTab === "running" || activeTab === "finished" || activeTab === "archive") && scraperContext === "school")
+                    ? "bg-[#1e3a5f] text-white shadow-md"
+                    : "text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                <BookIcon />
+                {!collapsed && <span className="flex-1 text-left truncate">School Scraper</span>}
+              </button>
+              {!collapsed && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSchoolExpanded((v) => !v); }}
+                  className="p-2 rounded hover:bg-gray-200 transition-colors"
+                  title={schoolExpanded ? "Collapse" : "Expand"}
+                >
+                  <ChevronDown expanded={schoolExpanded} />
+                </button>
+              )}
+            </div>
+            {!collapsed && schoolExpanded && (
+              <div className="ml-2 mt-1 space-y-0.5 border-l-2 border-gray-200 pl-2">
+                <SubNavBtn tab="school" label="Start" parent="school" />
+                <SubNavBtn tab="running" label="Running" parent="school" />
+                <SubNavBtn tab="finished" label="Finished" parent="school" />
+                <SubNavBtn tab="archive" label="Archive" parent="school" />
+              </div>
+            )}
+          </div>
+
+          {/* Church Scraper */}
+          <div>
+            <div className="flex items-center">
+              <button
+                onClick={() => canAccessTab(username, "church") && onTabChange("church")}
+                disabled={!canAccessTab(username, "church")}
+                title="Church Scraper"
+                className={`flex-1 flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+                  collapsed ? "justify-center px-2" : "px-4"
+                } ${
+                  !canAccessTab(username, "church")
+                    ? "text-gray-400 bg-gray-50 cursor-not-allowed opacity-75"
+                    : activeTab === "church" || ((activeTab === "running" || activeTab === "finished" || activeTab === "archive") && scraperContext === "church")
+                      ? "bg-[#1e3a5f] text-white shadow-md"
+                      : "text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                <ChurchIcon />
+                {!collapsed && <span className="flex-1 text-left truncate">Church Scraper</span>}
+              </button>
+              {!collapsed && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setChurchExpanded((v) => !v); }}
+                  className="p-2 rounded hover:bg-gray-200 transition-colors"
+                  title={churchExpanded ? "Collapse" : "Expand"}
+                >
+                  <ChevronDown expanded={churchExpanded} />
+                </button>
+              )}
+            </div>
+            {!collapsed && churchExpanded && (
+              <div className="ml-2 mt-1 space-y-0.5 border-l-2 border-gray-200 pl-2">
+                <SubNavBtn tab="church" label="Start" parent="church" />
+                <SubNavBtn tab="running" label="Running" parent="church" />
+                <SubNavBtn tab="finished" label="Finished" parent="church" />
+                <SubNavBtn tab="archive" label="Archive" parent="church" />
+              </div>
+            )}
+          </div>
+
+          {/* LOE Generator */}
+          <div>
+            <div className="flex items-center">
+              <button
+                onClick={() => canAccessTab(username, "loe") && onTabChange("loe")}
+                disabled={!canAccessTab(username, "loe")}
+                title="LOE Generator"
+                className={`flex-1 flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+                  collapsed ? "justify-center px-2" : "px-4"
+                } ${
+                  !canAccessTab(username, "loe")
+                    ? "text-gray-400 bg-gray-50 cursor-not-allowed opacity-75"
+                    : activeTab === "loe" || activeTab === "loe-archive" || activeTab === "loe-finished"
+                      ? "bg-[#1e3a5f] text-white shadow-md"
+                      : "text-gray-700 hover:bg-gray-100"
+                }`}
+              >
+                <DocIcon />
+                {!collapsed && <span className="flex-1 text-left truncate">LOE Generator</span>}
+              </button>
+              {!collapsed && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setLoeExpanded((v) => !v); }}
+                  className="p-2 rounded hover:bg-gray-200 transition-colors"
+                  title={loeExpanded ? "Collapse" : "Expand"}
+                >
+                  <ChevronDown expanded={loeExpanded} />
+                </button>
+              )}
+            </div>
+            {!collapsed && loeExpanded && (
+              <div className="ml-2 mt-1 space-y-0.5 border-l-2 border-gray-200 pl-2">
+                <SubNavBtn tab="loe" label="Generator" parent="loe" />
+                <SubNavBtn tab="loe-finished" label="Finished" parent="loe" />
+                <SubNavBtn tab="loe-archive" label="Archive" parent="loe" />
+              </div>
+            )}
+          </div>
         </nav>
 
       {/* Run List Section — hidden when collapsed */}
