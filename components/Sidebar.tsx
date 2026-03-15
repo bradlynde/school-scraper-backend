@@ -16,6 +16,13 @@ type RunMetadata = {
   completed_at?: string;
   csv_filename?: string;
   archived?: boolean;
+  scraper_type?: "school" | "church";
+  churchesFound?: number;
+  churchesProcessed?: number;
+  countyChurches?: number[];
+  schoolsFound?: number;
+  schoolsProcessed?: number;
+  countySchools?: number[];
 };
 
 export type TabType = 'home' | 'loe' | 'loe-archive' | 'loe-finished' | 'school' | 'church' | 'running' | 'finished' | 'archive';
@@ -37,6 +44,18 @@ const canAccessTab = (username: string | null, tab: string) => {
   if (username === "Brad") return BRAD_TABS.has(tab as any);
   return false;
 };
+
+/** Returns true if run belongs to the given scraper context (handles scraper_type and legacy runs) */
+function runMatchesScraperContext(run: RunMetadata, context: "school" | "church"): boolean {
+  if (run.scraper_type) {
+    return run.scraper_type === context;
+  }
+  // Legacy runs: infer from payload structure
+  const isChurch = run.churchesFound !== undefined || run.churchesProcessed !== undefined || (run.countyChurches && run.countyChurches.length > 0);
+  const isSchool = run.schoolsFound !== undefined || run.schoolsProcessed !== undefined || (run.countySchools && run.countySchools.length > 0);
+  if (context === "church") return Boolean(isChurch && !isSchool);
+  return Boolean(isSchool || !isChurch); // school context: show school runs, or legacy runs without church markers
+}
 
 const getApiUrl = (scraperContext: 'school' | 'church') => {
   const isChurch = scraperContext === 'church';
@@ -425,15 +444,17 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
               <div className="text-center text-gray-500 py-4">Loading...</div>
             ) : (
               (() => {
-                const filteredRuns = runs.filter(run => {
-                  if (activeTab === 'running') {
-                    return run.status === 'running' && !run.archived;
-                  } else if (activeTab === 'archive') {
-                    return run.archived === true;
-                  } else {
-                    return (run.status === 'completed' || run.status === 'error') && !run.archived;
-                  }
-                });
+                const filteredRuns = runs
+                  .filter(run => runMatchesScraperContext(run, scraperContext))
+                  .filter(run => {
+                    if (activeTab === 'running') {
+                      return run.status === 'running' && !run.archived;
+                    } else if (activeTab === 'archive') {
+                      return run.archived === true;
+                    } else {
+                      return (run.status === 'completed' || run.status === 'error') && !run.archived;
+                    }
+                  });
                 
                 if (filteredRuns.length === 0) {
                   return (

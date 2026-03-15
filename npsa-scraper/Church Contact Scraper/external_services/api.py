@@ -741,6 +741,9 @@ def list_all_runs() -> list:
                     # Ensure archived field exists (default to False for backwards compatibility)
                     if "archived" not in metadata:
                         metadata["archived"] = False
+                    # Backfill scraper_type at read-time for legacy runs (this backend only stores church runs)
+                    if "scraper_type" not in metadata:
+                        metadata["scraper_type"] = "church"
                     runs.append(metadata)
             except Exception as e:
                 print(f"Error reading metadata file {metadata_file}: {e}")
@@ -1418,7 +1421,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "total_counties": total_counties,
                 "completed_counties": completed_counties,
                 "start_time": time.time(),
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now().isoformat(),
+                "scraper_type": "church",
             }
             save_run_metadata(run_id, initial_metadata)
             
@@ -1628,7 +1632,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "completed_counties": completed_counties,
                 "progress": 100,
                 "completed_at": datetime.now().isoformat(),
-                "completion_time": time.time()
+                "completion_time": time.time(),
+                "scraper_type": "church",
+                "churchesFound": pipeline_runs.get(run_id, {}).get("churchesFound", 0),
+                "churchesProcessed": pipeline_runs.get(run_id, {}).get("churchesProcessed", 0),
+                "countyChurches": pipeline_runs.get(run_id, {}).get("countyChurches", []),
             })
             save_run_metadata(run_id, final_metadata)
             
