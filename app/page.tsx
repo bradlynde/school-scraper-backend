@@ -1093,9 +1093,9 @@ export default function Home() {
                   {/* Enhanced primary CTA button (dashboard-18) */}
                   <button
                     onClick={runPipeline}
-                    disabled={!selectedState || selectedType === "church" || isFinalizing}
+                    disabled={!selectedState || isFinalizing}
                     className={`w-full px-8 py-5 rounded-xl text-lg font-semibold text-white transition-all duration-200 shadow-lg flex items-center justify-center gap-3 ${
-                      !selectedState || selectedType === "church" || isFinalizing
+                      !selectedState || isFinalizing
                         ? "bg-gray-400 cursor-not-allowed opacity-60"
                         : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-xl transform hover:-translate-y-1"
                     }`}
