@@ -12,16 +12,7 @@ type RunMetadata = {
   total_contacts?: number;
   created_at?: string;
   completed_at?: string;
-  scraper_type?: "school" | "church";
-  churchesFound?: number;
-  churchesProcessed?: number;
-  countyChurches?: unknown[];
-  schoolsFound?: number;
-  schoolsProcessed?: number;
-  countySchools?: unknown[];
 };
-
-type RunWithSource = RunMetadata & { source: "school" | "church" };
 
 const getSchoolApiUrl = () => {
   let url = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
@@ -78,21 +69,18 @@ export default function Homepage({
     fetchRuns();
   }, [token, logout]);
 
-  // Dedupe runs by run_id (when both APIs share storage) and resolve source from scraper_type
-  const getRunSource = (r: { run_id: string; scraper_type?: string; churchesFound?: number; churchesProcessed?: number; countyChurches?: unknown[] }) => {
-    if (r.scraper_type) return r.scraper_type as "school" | "church";
-    const isChurch = r.churchesFound !== undefined || r.churchesProcessed !== undefined || (Array.isArray(r.countyChurches) && r.countyChurches.length > 0);
-    return isChurch ? "church" : "school";
-  };
-  const allRunsDeduped: RunWithSource[] = Array.from(
-    new Map([...schoolRuns, ...churchRuns].map((r) => [r.run_id, { ...r, source: getRunSource(r) }])).values()
-  );
+  const totalContacts =
+    [...schoolRuns, ...churchRuns].reduce((sum, r) => sum + (r.total_contacts || 0), 0);
+  const completedRuns = [...schoolRuns, ...churchRuns].filter(
+    (r) => r.status === "completed" || r.status === "error"
+  ).length;
+  const activeRuns = [...schoolRuns, ...churchRuns].filter((r) => r.status === "running").length;
 
-  const totalContacts = allRunsDeduped.reduce((sum, r) => sum + (r.total_contacts || 0), 0);
-  const completedRuns = allRunsDeduped.filter((r) => r.status === "completed" || r.status === "error").length;
-  const activeRuns = allRunsDeduped.filter((r) => r.status === "running").length;
-
-  const recentActivity = [...allRunsDeduped]
+  const recentActivity = [...schoolRuns, ...churchRuns]
+    .map((r) => ({
+      ...r,
+      source: schoolRuns.some((s) => s.run_id === r.run_id) ? "school" as const : "church" as const,
+    }))
     .sort((a, b) => {
       const aTime = new Date(a.created_at || 0).getTime();
       const bTime = new Date(b.created_at || 0).getTime();

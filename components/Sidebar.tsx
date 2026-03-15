@@ -16,13 +16,6 @@ type RunMetadata = {
   completed_at?: string;
   csv_filename?: string;
   archived?: boolean;
-  scraper_type?: "school" | "church";
-  churchesFound?: number;
-  churchesProcessed?: number;
-  countyChurches?: number[];
-  schoolsFound?: number;
-  schoolsProcessed?: number;
-  countySchools?: number[];
 };
 
 export type TabType = 'home' | 'loe' | 'loe-archive' | 'loe-finished' | 'school' | 'church' | 'running' | 'finished' | 'archive';
