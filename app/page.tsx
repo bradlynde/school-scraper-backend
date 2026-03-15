@@ -782,10 +782,22 @@ export default function Home() {
         if (err.name === 'AbortError' || err.message.includes('timeout')) {
           errorMessage = "Request timed out. The backend may be slow to respond or unavailable. Please try again.";
         }
-        // Check for network errors
-        else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed")) {
+        // Check for network errors (includes CORS, connection refused, DNS, etc.)
+        else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed") || err.message.includes("Load failed")) {
           const apiUrl = getApiUrl();
-          errorMessage = `Failed to connect to the backend API at ${apiUrl}. This could mean:\n\n1. The backend server is not running\n2. The API URL is incorrect\n3. There's a network connectivity issue\n\nPlease verify that NEXT_PUBLIC_${scraperContext === 'church' ? 'CHURCH' : 'SCHOOL'}_API_URL is set correctly in your Vercel environment variables and that the Railway backend is running.`;
+          const origin = typeof window !== 'undefined' ? window.location.origin : 'unknown';
+          const apiVar = scraperContext === 'church' ? 'NEXT_PUBLIC_CHURCH_API_URL' : 'NEXT_PUBLIC_SCHOOL_API_URL';
+          const serviceName = scraperContext === 'church' ? 'church-scraper' : 'school-scraper';
+          errorMessage = `Cannot reach ${serviceName} backend at ${apiUrl}
+
+Your origin: ${origin}
+
+Common causes:
+• CORS: In Railway (${serviceName} service), set ALLOWED_ORIGIN to your frontend URL (e.g. ${origin})
+• Backend not running: Check Railway deployment status
+• Wrong URL: In Vercel, verify ${apiVar} matches your Railway public domain
+
+Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CORS.`;
         }
       }
       
@@ -1080,7 +1092,17 @@ export default function Home() {
 
                   {error && (
                     <div className="p-5 bg-red-50 border border-red-200 rounded-xl">
-                      <p className="text-red-700 text-base">{error}</p>
+                      <p className="text-red-700 text-base whitespace-pre-line">{error}</p>
+                      {error.includes("/health") && (
+                        <a
+                          href={`${getApiUrl()}/health`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block mt-3 text-sm font-medium text-[#1e3a5f] hover:underline"
+                        >
+                          Open health endpoint in new tab →
+                        </a>
+                      )}
                     </div>
                   )}
 
