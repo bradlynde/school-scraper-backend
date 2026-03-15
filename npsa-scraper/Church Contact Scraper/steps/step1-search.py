@@ -248,8 +248,8 @@ class ChurchSearcher:
             f"Chapel in {county} County, {state}",
             f"Worship center in {county} County, {state}",
         ]
-        # Default to 3 terms when not specified
-        limit = max_search_terms if max_search_terms is not None else 3
+        # Default to 6 terms when not specified
+        limit = max_search_terms if max_search_terms is not None else 6
         search_terms = all_search_terms[:max(0, limit)]
 
         for query in search_terms:
