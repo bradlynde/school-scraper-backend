@@ -346,6 +346,24 @@ export default function Home() {
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+  const [scraperContext, setScraperContext] = useState<'school' | 'church'>('school');
+
+  // Keep scraperContext in sync when user switches between school/church tabs
+  useEffect(() => {
+    if (selectedType === 'school' || selectedType === 'church') {
+      setScraperContext(selectedType);
+    }
+  }, [selectedType]);
+
+  const getApiUrl = () => {
+    const isChurch = scraperContext === 'church';
+    let url = isChurch
+      ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
+      : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app");
+    url = url.replace(/\/+$/, '');
+    if (!url.match(/^https?:\/\//)) url = `https://${url}`;
+    return url;
+  };
 
   // Server-side elapsed time tracking - no client-side tracking needed
   // Elapsed time is now calculated server-side and included in API response
@@ -358,10 +376,10 @@ export default function Home() {
     };
   }, [pollingInterval]);
 
-  // Access: Koen = all. Stuart = loe, loe-archive, school, running, finished, archive. Brad = school, running, finished, archive only.
+  // Access: Koen = all. Stuart = loe, loe-archive, school, church, running, finished, archive. Brad = school, running, finished, archive only.
   const canAccessCurrentTab =
     isDev ||
-    (username === "Stuart" && ["loe", "loe-archive", "school", "running", "finished", "archive"].includes(selectedType)) ||
+    (username === "Stuart" && ["loe", "loe-archive", "school", "church", "running", "finished", "archive"].includes(selectedType)) ||
     (username === "Brad" && ["school", "running", "finished", "archive"].includes(selectedType));
 
   // Redirect Brad from restricted tabs (loe, loe-archive, church); Stuart can stay on loe/loe-archive
@@ -440,13 +458,7 @@ export default function Home() {
 
   async function checkPipelineStatus(runId: string) {
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl();
       const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
         method: "GET",
         headers: {
@@ -624,11 +636,6 @@ export default function Home() {
       return;
     }
 
-    if (selectedType === "church") {
-      setError("Church scraping is not yet available");
-      return;
-    }
-
     if (!token) {
       setError("Authentication token is missing. Please log in again.");
       logout();
@@ -646,13 +653,7 @@ export default function Home() {
     setEstimatedTime(null);
 
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl();
       console.log("Starting pipeline with API URL:", apiUrl);
       console.log("Request payload:", { state: selectedState.toLowerCase().replace(' ', '_'), type: selectedType });
 
@@ -783,14 +784,8 @@ export default function Home() {
         }
         // Check for network errors
         else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed")) {
-          // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
-          errorMessage = `Failed to connect to the backend API at ${apiUrl}. This could mean:\n\n1. The backend server is not running\n2. The API URL is incorrect\n3. There's a network connectivity issue\n\nPlease verify that NEXT_PUBLIC_SCHOOL_API_URL is set correctly in your Vercel environment variables and that the Railway backend is running.`;
+          const apiUrl = getApiUrl();
+          errorMessage = `Failed to connect to the backend API at ${apiUrl}. This could mean:\n\n1. The backend server is not running\n2. The API URL is incorrect\n3. There's a network connectivity issue\n\nPlease verify that NEXT_PUBLIC_${scraperContext === 'church' ? 'CHURCH' : 'SCHOOL'}_API_URL is set correctly in your Vercel environment variables and that the Railway backend is running.`;
         }
       }
       
@@ -867,6 +862,7 @@ export default function Home() {
       >
         <Sidebar
           activeTab={selectedType}
+          scraperContext={scraperContext}
           onCollapsedChange={setSidebarCollapsed}
           onTabChange={(tab) => {
             setSelectedType(tab);
@@ -884,13 +880,7 @@ export default function Home() {
             setSelectedRunId(runId);
             setSidebarOpen(false); // Close mobile menu on run select
             // Fetch run status to determine if it's running or finished
-            // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+            const apiUrl = getApiUrl();
             try {
               // First, try to get run from /runs endpoint to get metadata
               const runsResponse = await fetch(`${apiUrl}/runs`, {
@@ -1042,16 +1032,6 @@ export default function Home() {
         {viewState === "start" && (selectedType === "school" || selectedType === "church") && (
           <div className="animate-fade-in flex-1 flex items-center justify-center p-12 min-h-0">
             <div className="w-full max-w-2xl relative">
-              {/* In Development Overlay for Church Scraper */}
-              {selectedType === "church" && (
-                <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 rounded-xl flex items-center justify-center">
-                  <div className="text-center">
-                    <h2 className="text-4xl font-bold text-white mb-3">In Development</h2>
-                    <p className="text-gray-300 text-lg">Church scraper functionality coming soon</p>
-                  </div>
-                </div>
-              )}
-              
               <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-8 md:p-12">
                 <div className="flex flex-col space-y-8">
                   <div>
@@ -1218,14 +1198,8 @@ export default function Home() {
                     <button
                       onClick={async () => {
                         if (selectedRunId) {
-                          // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
                           try {
+                            const apiUrl = getApiUrl();
                             const response = await fetch(`${apiUrl}/runs/${selectedRunId}/download`, {
                               headers: {
                                 "Authorization": `Bearer ${token}`,

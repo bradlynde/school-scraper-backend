@@ -23,11 +23,12 @@ type SidebarProps = {
   onTabChange: (tab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive') => void;
   onRunSelect?: (runId: string) => void;
   onCollapsedChange?: (collapsed: boolean) => void;
+  scraperContext?: 'school' | 'church';
 };
 
-// Koen = full access. Stuart = LOE + School + Running/Finished/Archive. Brad = School + Running/Finished/Archive only.
+// Koen = full access. Stuart = LOE + School + Church + Running/Finished/Archive. Brad = School + Running/Finished/Archive only.
 const BRAD_TABS = new Set(["school", "running", "finished", "archive"] as const);
-const STUART_TABS = new Set(["loe", "loe-archive", "school", "running", "finished", "archive"] as const);
+const STUART_TABS = new Set(["loe", "loe-archive", "school", "church", "running", "finished", "archive"] as const);
 const canAccessTab = (username: string | null, tab: string) => {
   if (username === "Koen") return true;
   if (username === "Stuart") return STUART_TABS.has(tab as any);
@@ -35,7 +36,17 @@ const canAccessTab = (username: string | null, tab: string) => {
   return false;
 };
 
-const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange }: SidebarProps) => {
+const getApiUrl = (scraperContext: 'school' | 'church') => {
+  const isChurch = scraperContext === 'church';
+  let url = isChurch
+    ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
+    : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app");
+  url = url.replace(/\/+$/, '');
+  if (!url.match(/^https?:\/\//)) url = `https://${url}`;
+  return url;
+};
+
+const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scraperContext = 'school' }: SidebarProps) => {
   const { token, username, logout } = useAuth();
   const isDev = username === "Koen";
   const [runs, setRuns] = useState<RunMetadata[]>([]);
@@ -53,19 +64,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange }: Sid
     // Refresh runs every 30 seconds
     const interval = setInterval(fetchRuns, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [scraperContext]);
 
   const fetchRuns = async () => {
     if (!token) return;
     
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl(scraperContext);
       const response = await fetch(`${apiUrl}/runs`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -133,13 +138,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange }: Sid
     if (!token) return;
     
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl(scraperContext);
       const response = await fetch(`${apiUrl}/runs/${runId}/download`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -251,7 +250,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange }: Sid
           <NavBtn tab="loe-archive" icon={<ArchiveIcon />} label="LOE Archive" restricted />
           <div className="border-t border-gray-200 my-2" />
           <NavBtn tab="school" icon={<BookIcon />} label="School Scraper" />
-          <NavBtn tab="church" icon={<ChurchIcon />} label="Church Scraper" restricted />
+          <NavBtn tab="church" icon={<ChurchIcon />} label="Church Scraper" />
         <NavBtn tab="running" icon={<PlayIcon />} label="Running" />
         <NavBtn tab="finished" icon={<CheckIcon />} label="Finished" />
         <NavBtn tab="archive" icon={<ArchiveIcon />} label="Archive" />
@@ -323,13 +322,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange }: Sid
                                   e.stopPropagation();
                                   setDeleteConfirmRunId(null);
                                   try {
-                                    // Ensure API URL includes protocol
-                                    let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-                                    apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-                                    if (!apiUrl.match(/^https?:\/\//)) {
-                                      // If no protocol, assume https
-                                      apiUrl = `https://${apiUrl}`;
-                                    }
+                                    const apiUrl = getApiUrl(scraperContext);
                                     const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
                                       method: 'DELETE',
                                       headers: {
@@ -438,13 +431,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange }: Sid
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                  // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+                                  const apiUrl = getApiUrl(scraperContext);
                                   const response = await fetch(`${apiUrl}/runs/${run.run_id}/archive`, {
                                     method: 'POST',
                                     headers: {
@@ -478,13 +465,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange }: Sid
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                  // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+                                  const apiUrl = getApiUrl(scraperContext);
                                   const response = await fetch(`${apiUrl}/runs/${run.run_id}/unarchive`, {
                                     method: 'POST',
                                     headers: {
