@@ -45,7 +45,7 @@ from pipeline import StreamingPipeline
 from assets.shared.models import Contact
 
 # Import authentication module
-from external_services.auth import require_auth
+from external_services.auth import require_auth, verify_password, generate_token
 from external_services.notify import send_run_complete_email
 
 # Handle hyphens in filenames using importlib.util
@@ -742,6 +742,9 @@ def list_all_runs() -> list:
                     # Ensure archived field exists (default to False for backwards compatibility)
                     if "archived" not in metadata:
                         metadata["archived"] = False
+                    # Backfill scraper_type at read-time for legacy runs (this backend only stores school runs)
+                    if "scraper_type" not in metadata:
+                        metadata["scraper_type"] = "school"
                     runs.append(metadata)
             except Exception as e:
                 print(f"Error reading metadata file {metadata_file}: {e}")
@@ -1419,7 +1422,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "total_counties": total_counties,
                 "completed_counties": completed_counties,
                 "start_time": time.time(),
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now().isoformat(),
+                "scraper_type": "school",
             }
             save_run_metadata(run_id, initial_metadata)
             
@@ -1629,7 +1633,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "completed_counties": completed_counties,
                 "progress": 100,
                 "completed_at": datetime.now().isoformat(),
-                "completion_time": time.time()
+                "completion_time": time.time(),
+                "scraper_type": "school",
+                "schoolsFound": pipeline_runs.get(run_id, {}).get("schoolsFound", 0),
+                "schoolsProcessed": pipeline_runs.get(run_id, {}).get("schoolsProcessed", 0),
+                "countySchools": pipeline_runs.get(run_id, {}).get("countySchools", []),
             })
             save_run_metadata(run_id, final_metadata)
             
@@ -1769,7 +1777,86 @@ def health():
     return response, 200
 
 
-# Login removed - use centralized auth service. JWT validation via require_auth.
+# Rate limiting for login endpoint (simple in-memory implementation)
+login_attempts = {}
+LOGIN_RATE_LIMIT = 5  # Max attempts per IP
+LOGIN_RATE_WINDOW = 300  # 5 minutes in seconds
+
+def check_rate_limit(ip_address: str) -> bool:
+    """Check if IP has exceeded rate limit"""
+    current_time = time.time()
+    if ip_address not in login_attempts:
+        login_attempts[ip_address] = []
+    
+    # Clean old attempts
+    login_attempts[ip_address] = [
+        attempt_time for attempt_time in login_attempts[ip_address]
+        if current_time - attempt_time < LOGIN_RATE_WINDOW
+    ]
+    
+    # Check if limit exceeded
+    if len(login_attempts[ip_address]) >= LOGIN_RATE_LIMIT:
+        return False
+    
+    # Record this attempt
+    login_attempts[ip_address].append(current_time)
+    return True
+
+
+@app.route("/login", methods=["POST", "OPTIONS"])
+def login():
+    """Login endpoint - authenticate user and return JWT token"""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    
+    try:
+        # Rate limiting
+        client_ip = request.remote_addr or "unknown"
+        if not check_rate_limit(client_ip):
+            return jsonify({
+                "status": "error",
+                "error": "Too many login attempts. Please try again later."
+            }), 429
+        
+        data = request.get_json() or {}
+        username = data.get("username", "").strip()
+        password = data.get("password", "")
+        
+        if not username or not password:
+            return jsonify({
+                "status": "error",
+                "error": "Username and password are required"
+            }), 400
+        
+        # Verify credentials
+        if not verify_password(username, password):
+            return jsonify({
+                "status": "error",
+                "error": "Invalid username or password"
+            }), 401
+        
+        # Generate token
+        token = generate_token(username)
+        
+        response = jsonify({
+            "status": "success",
+            "token": token,
+            "username": username
+        })
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        return response, 200
+        
+    except Exception as e:
+        error_response = jsonify({
+            "status": "error",
+            "error": str(e)
+        })
+        error_response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        return error_response, 500
 
 
 @app.route("/run-pipeline", methods=["POST", "OPTIONS"])
