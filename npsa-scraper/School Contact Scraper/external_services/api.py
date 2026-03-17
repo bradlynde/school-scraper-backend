@@ -131,7 +131,8 @@ CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Volume: only the final state CSV is persisted here
-VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
+# School service uses /data/school (set PERSISTENT_DATA_DIR in Railway)
+VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data/school"))
 VOLUME_DIR.mkdir(parents=True, exist_ok=True)
 
 # Automatic cleanup configuration
