@@ -131,7 +131,8 @@ CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Volume: only the final state CSV is persisted here
-VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
+# School service uses /data/school (set PERSISTENT_DATA_DIR in Railway)
+VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data/school"))
 VOLUME_DIR.mkdir(parents=True, exist_ok=True)
 
 # Automatic cleanup configuration
@@ -742,6 +743,9 @@ def list_all_runs() -> list:
                     # Ensure archived field exists (default to False for backwards compatibility)
                     if "archived" not in metadata:
                         metadata["archived"] = False
+                    # Backfill scraper_type at read-time for legacy runs (this backend only stores school runs)
+                    if "scraper_type" not in metadata:
+                        metadata["scraper_type"] = "school"
                     runs.append(metadata)
             except Exception as e:
                 print(f"Error reading metadata file {metadata_file}: {e}")
@@ -1419,7 +1423,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "total_counties": total_counties,
                 "completed_counties": completed_counties,
                 "start_time": time.time(),
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now().isoformat(),
+                "scraper_type": "school",
             }
             save_run_metadata(run_id, initial_metadata)
             
@@ -1629,7 +1634,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "completed_counties": completed_counties,
                 "progress": 100,
                 "completed_at": datetime.now().isoformat(),
-                "completion_time": time.time()
+                "completion_time": time.time(),
+                "scraper_type": "school",
+                "schoolsFound": pipeline_runs.get(run_id, {}).get("schoolsFound", 0),
+                "schoolsProcessed": pipeline_runs.get(run_id, {}).get("schoolsProcessed", 0),
+                "countySchools": pipeline_runs.get(run_id, {}).get("countySchools", []),
             })
             save_run_metadata(run_id, final_metadata)
             

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function LoginForm() {
@@ -8,7 +9,7 @@ export default function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, authApiUrl } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,9 +28,16 @@ export default function LoginForm() {
       console.error("Login form error:", err);
       let errorMessage = err?.message || "An error occurred during login. Please check your connection and try again.";
       
-      // Make error messages more user-friendly
-      if (errorMessage.includes("Failed to connect to API")) {
-        errorMessage = "Cannot connect to the backend server. Please ensure the API is running and configured correctly.";
+      // Connection failed - include URL and actionable steps
+      if (errorMessage.startsWith("CONNECTION_FAILED:")) {
+        const attemptedUrl = errorMessage.replace("CONNECTION_FAILED:", "");
+        const origin = typeof window !== "undefined" ? window.location.origin : "unknown";
+        errorMessage = `Cannot connect to the auth server.\n\nAttempted: ${attemptedUrl}\nYour origin: ${origin}\n\nFix: 1) Set NEXT_PUBLIC_AUTH_API_URL in Vercel. 2) Add "${origin}" to CORS_ORIGINS on the auth service (Railway).`;
+      } else if (errorMessage.includes("Failed to connect to API")) {
+        const urlMatch = errorMessage.match(/at (https?:\/\/[^\s]+)/);
+        const attemptedUrl = urlMatch ? urlMatch[1] : authApiUrl;
+        const origin = typeof window !== "undefined" ? window.location.origin : "unknown";
+        errorMessage = `Cannot connect to the auth server.\n\nAttempted: ${attemptedUrl}\nYour origin: ${origin}\n\nFix: 1) Set NEXT_PUBLIC_AUTH_API_URL in Vercel. 2) Add "${origin}" to CORS_ORIGINS on the auth service (Railway).`;
       } else if (errorMessage.includes("timed out")) {
         errorMessage = "Connection timed out. The server may be slow or unreachable.";
       }
@@ -40,7 +48,19 @@ export default function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: '#ffffff' }}>
+      {/* Logo - top left, same size/placement as expanded sidebar */}
+      <div className="absolute top-0 left-0 p-4 min-h-[72px] flex items-center">
+        <Image
+          src="/npsa-logo.png"
+          alt="NPSA"
+          width={160}
+          height={48}
+          className="h-auto object-contain"
+          priority
+        />
+      </div>
+      <div className="flex-1 flex items-center justify-center">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-8 md:p-12">
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -77,8 +97,17 @@ export default function LoginForm() {
             </div>
 
             {error && (
-              <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
-                <p className="text-red-700 text-sm">{error}</p>
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl space-y-2">
+                <p className="text-red-700 text-sm font-medium">Connection error</p>
+                <p className="text-red-600 text-sm whitespace-pre-line">{error}</p>
+                <details className="text-xs text-gray-600 mt-2">
+                  <summary className="cursor-pointer hover:text-gray-800">Debug info</summary>
+                  <div className="mt-2 space-y-1 font-mono">
+                    <p>Auth API: {authApiUrl}</p>
+                    <p>Origin: {typeof window !== "undefined" ? window.location.origin : "—"}</p>
+                    <p>AUTH_API_URL set: {process.env.NEXT_PUBLIC_AUTH_API_URL ? "yes" : "no"}</p>
+                  </div>
+                </details>
               </div>
             )}
 
@@ -95,6 +124,7 @@ export default function LoginForm() {
             </button>
           </form>
         </div>
+      </div>
       </div>
     </div>
   );

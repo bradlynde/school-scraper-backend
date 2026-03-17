@@ -2,9 +2,10 @@
 // Force Vercel redeploy - 2025-12-13
 
 import React, { useState, useEffect } from "react";
-import Sidebar from "../components/Sidebar";
+import Sidebar, { type TabType } from "../components/Sidebar";
 import LoginForm from "../components/LoginForm";
 import LOEGenerator from "../components/LOEGenerator";
+import Homepage from "../components/Homepage";
 import { useAuth } from "../contexts/AuthContext";
 
 type StepSummary = {
@@ -171,8 +172,9 @@ const STATE_COUNTY_COUNTS: Record<string, number> = {
   "wyoming": 23,
 };
 
-// Average time per county: 871 seconds (~14.5 minutes) - updated from Arkansas run analysis
-const SECONDS_PER_COUNTY = 871;
+// Average time per county: school 871s (~14.5 min), church 2400s (~40 min)
+const SECONDS_PER_COUNTY_SCHOOL = 871;
+const SECONDS_PER_COUNTY_CHURCH = 2400;
 
 // Helper function to format estimated time (minutes only, no seconds)
 function formatEstimatedTime(seconds: number): string {
@@ -323,10 +325,11 @@ function createLineGraph(data: number[], width: number = 200, height: number = 8
 }
 
 export default function Home() {
-  const { isAuthenticated, token, loading, logout } = useAuth();
+  const { isAuthenticated, token, loading, logout, username } = useAuth();
+  const isDev = username === "Koen";
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
-  const [selectedType, setSelectedType] = useState<"loe" | "school" | "church" | "running" | "finished" | "archive">("loe");
+  const [selectedType, setSelectedType] = useState<TabType>("home");
   const [status, setStatus] = useState("");
   const [summary, setSummary] = useState<PipelineSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -341,9 +344,29 @@ export default function Home() {
   const [completedCountiesSet, setCompletedCountiesSet] = useState<Set<string>>(new Set());
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+  const [scraperContext, setScraperContext] = useState<'school' | 'church'>('school');
+
+  // Keep scraperContext in sync when user switches between school/church tabs
+  useEffect(() => {
+    if (selectedType === "school" || selectedType === "church") {
+      setScraperContext(selectedType);
+    }
+  }, [selectedType]);
+
+  const getApiUrl = (override?: "school" | "church") => {
+    const ctx = override ?? scraperContext;
+    const isChurch = ctx === "church";
+    let url = isChurch
+      ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
+      : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app");
+    url = url.replace(/\/+$/, "");
+    if (!url.match(/^https?:\/\//)) url = `https://${url}`;
+    return url;
+  };
 
   // Server-side elapsed time tracking - no client-side tracking needed
   // Elapsed time is now calculated server-side and included in API response
@@ -355,6 +378,20 @@ export default function Home() {
       }
     };
   }, [pollingInterval]);
+
+  // Access: Koen = all. Stuart = loe, loe-archive, loe-finished, school, church, running, finished, archive. Brad = school, running, finished, archive only.
+  const canAccessCurrentTab =
+    isDev ||
+    selectedType === "home" ||
+    (username === "Stuart" && ["loe", "loe-archive", "loe-finished", "school", "church", "running", "finished", "archive"].includes(selectedType)) ||
+    (username === "Brad" && ["school", "running", "finished", "archive"].includes(selectedType));
+
+  // Redirect Brad from restricted tabs (loe, loe-archive, loe-finished, church)
+  useEffect(() => {
+    if (isAuthenticated && username === "Brad" && ["loe", "loe-archive", "loe-finished", "church"].includes(selectedType)) {
+      setSelectedType("school");
+    }
+  }, [isAuthenticated, username, selectedType]);
 
   // Show login form if not authenticated (after all hooks are called)
   if (loading) {
@@ -423,15 +460,95 @@ export default function Home() {
     return text.slice(0, maxLength) + "...";
   }
 
+  async function handleRunSelect(runId: string, sourceOverride?: "school" | "church", statusOverride?: string) {
+    if (sourceOverride) {
+      setScraperContext(sourceOverride);
+      setSelectedType(statusOverride === "running" ? "running" : "finished");
+    }
+    setSelectedRunId(runId);
+    setSidebarOpen(false);
+    const apiUrl = getApiUrl(sourceOverride);
+    try {
+      const runsResponse = await fetch(`${apiUrl}/runs`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      let runMetadata: any = null;
+      if (runsResponse.ok) {
+        const runsData = await runsResponse.json();
+        runMetadata = runsData.runs?.find((r: any) => r.run_id === runId);
+      }
+      const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === "running") {
+          setViewState("progress");
+          setIsRunning(true);
+          if (pollingInterval) clearInterval(pollingInterval);
+          const interval = setInterval(() => checkPipelineStatus(runId), 60000);
+          setPollingInterval(interval);
+          checkPipelineStatus(runId);
+        } else if (data.status === "completed" || data.status === "error") {
+          const summaryData: PipelineSummary = {
+            ...data,
+            steps: data.steps || [],
+            schoolsFound: data.schoolsFound || data.schoolsProcessed || runMetadata?.schools_processed || 0,
+            runId: data.runId || runId,
+            totalContacts: data.totalContacts || runMetadata?.total_contacts || 0,
+            schoolsProcessed: data.schoolsProcessed || data.schoolsFound || runMetadata?.schools_processed || 0,
+            countyContacts: data.countyContacts || [],
+            countySchools: data.countySchools || [],
+            csvData: data.csvData,
+            csvFilename: data.csvFilename || runMetadata?.csv_filename,
+          };
+          if (runMetadata?.created_at && runMetadata?.completed_at) {
+            const start = new Date(runMetadata.created_at).getTime();
+            const end = new Date(runMetadata.completed_at).getTime();
+            setElapsedTimeDisplay((end - start) / 1000);
+            setStartTime(start);
+          } else if (data.elapsedTime) {
+            setElapsedTimeDisplay(data.elapsedTime);
+          }
+          setSummary(summaryData);
+          setViewState("summary");
+          setIsRunning(false);
+        }
+      } else if (response.status === 401) {
+        logout();
+      } else if (response.status === 410 || response.status === 404) {
+        if (runMetadata) {
+          const summaryData: PipelineSummary = {
+            status: runMetadata.status || "completed",
+            steps: [],
+            schoolsFound: runMetadata.schools_processed || 0,
+            runId: runId,
+            totalContacts: runMetadata.total_contacts || 0,
+            schoolsProcessed: runMetadata.schools_processed || 0,
+            countyContacts: [],
+            countySchools: [],
+            csvData: undefined,
+            csvFilename: runMetadata.csv_filename,
+          };
+          if (runMetadata.created_at && runMetadata.completed_at) {
+            const start = new Date(runMetadata.created_at).getTime();
+            const end = new Date(runMetadata.completed_at).getTime();
+            setElapsedTimeDisplay((end - start) / 1000);
+            setStartTime(start);
+          }
+          setSummary(summaryData);
+          setViewState("summary");
+          setIsRunning(false);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching run status:", error);
+    }
+  }
+
   async function checkPipelineStatus(runId: string) {
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl();
       const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
         method: "GET",
         headers: {
@@ -609,11 +726,6 @@ export default function Home() {
       return;
     }
 
-    if (selectedType === "church") {
-      setError("Church scraping is not yet available");
-      return;
-    }
-
     if (!token) {
       setError("Authentication token is missing. Please log in again.");
       logout();
@@ -631,13 +743,7 @@ export default function Home() {
     setEstimatedTime(null);
 
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl();
       console.log("Starting pipeline with API URL:", apiUrl);
       console.log("Request payload:", { state: selectedState.toLowerCase().replace(' ', '_'), type: selectedType });
 
@@ -766,16 +872,22 @@ export default function Home() {
         if (err.name === 'AbortError' || err.message.includes('timeout')) {
           errorMessage = "Request timed out. The backend may be slow to respond or unavailable. Please try again.";
         }
-        // Check for network errors
-        else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed")) {
-          // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
-          errorMessage = `Failed to connect to the backend API at ${apiUrl}. This could mean:\n\n1. The backend server is not running\n2. The API URL is incorrect\n3. There's a network connectivity issue\n\nPlease verify that NEXT_PUBLIC_API_URL is set correctly in your Vercel environment variables and that the Railway backend is running.`;
+        // Check for network errors (includes CORS, connection refused, DNS, etc.)
+        else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed") || err.message.includes("Load failed")) {
+          const apiUrl = getApiUrl();
+          const origin = typeof window !== 'undefined' ? window.location.origin : 'unknown';
+          const apiVar = scraperContext === 'church' ? 'NEXT_PUBLIC_CHURCH_API_URL' : 'NEXT_PUBLIC_SCHOOL_API_URL';
+          const serviceName = scraperContext === 'church' ? 'church-scraper' : 'school-scraper';
+          errorMessage = `Cannot reach ${serviceName} backend at ${apiUrl}
+
+Your origin: ${origin}
+
+Common causes:
+• CORS: In Railway (${serviceName} service), set ALLOWED_ORIGIN to your frontend URL (e.g. ${origin})
+• Backend not running: Check Railway deployment status
+• Wrong URL: In Vercel, verify ${apiVar} matches your Railway public domain
+
+Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CORS.`;
         }
       }
       
@@ -807,9 +919,9 @@ export default function Home() {
     setSelectedRunId(null);
     setIsRunning(false);
     
-    // Reset to school tab if on running/finished tabs
-    if (selectedType === 'running' || selectedType === 'finished') {
-      setSelectedType('loe');
+    // Reset to the scraper start form when leaving run view
+    if (selectedType === "running" || selectedType === "finished") {
+      setSelectedType(scraperContext);
     }
     
     if (pollingInterval) {
@@ -842,168 +954,101 @@ export default function Home() {
         />
       )}
 
-      <div className={`fixed left-0 top-0 h-screen w-80 z-50 transition-transform duration-300 ${
-        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      } md:translate-x-0 md:relative md:z-auto md:h-full flex-shrink-0`}>
-        <Sidebar 
-          activeTab={selectedType} 
+      <div
+        className={
+          "fixed left-0 top-0 h-screen z-50 transition-all duration-300 ease-out w-80 " +
+          (sidebarOpen ? "translate-x-0" : "-translate-x-full") +
+          " md:translate-x-0 md:relative md:z-auto md:h-full flex-shrink-0 " +
+          (sidebarCollapsed ? "md:w-[72px]" : "md:w-80")
+        }
+      >
+        <Sidebar
+          activeTab={selectedType}
+          scraperContext={scraperContext}
+          onCollapsedChange={setSidebarCollapsed}
           onTabChange={(tab) => {
             setSelectedType(tab);
             setSidebarOpen(false); // Close mobile menu on tab change
-            // Switch view based on tab
-            if (tab === 'loe' || tab === 'school' || tab === 'church') {
+            if (tab === "home") {
               setViewState("start");
               setSelectedRunId(null);
-            } else if (tab === 'running' || tab === 'finished' || tab === 'archive') {
+            } else if (tab === "loe" || tab === "loe-archive" || tab === "loe-finished" || tab === "school" || tab === "church") {
+              setViewState("start");
+              setSelectedRunId(null);
+            } else if (tab === "running" || tab === "finished" || tab === "archive") {
               setViewState(tab);
               setSelectedRunId(null);
             }
           }}
-          onRunSelect={async (runId) => {
-            setSelectedRunId(runId);
-            setSidebarOpen(false); // Close mobile menu on run select
-            // Fetch run status to determine if it's running or finished
-            // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
-            try {
-              // First, try to get run from /runs endpoint to get metadata
-              const runsResponse = await fetch(`${apiUrl}/runs`, {
-                headers: {
-                  "Authorization": `Bearer ${token}`,
-                },
-              });
-              let runMetadata = null;
-              if (runsResponse.ok) {
-                const runsData = await runsResponse.json();
-                runMetadata = runsData.runs?.find((r: any) => r.run_id === runId);
-              }
-              
-              // Then try pipeline-status endpoint
-              const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
-                headers: {
-                  "Authorization": `Bearer ${token}`,
-                },
-              });
-              if (response.ok) {
-                const data = await response.json();
-                if (data.status === "running") {
-                  setViewState("progress");
-                  setIsRunning(true);
-                  // Start polling
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
-                  const interval = setInterval(() => {
-                    checkPipelineStatus(runId);
-                  }, 60000);
-                  setPollingInterval(interval);
-                  checkPipelineStatus(runId);
-                } else if (data.status === "completed" || data.status === "error") {
-                  // Use data from pipeline-status if available, otherwise use metadata
-                  const summaryData: PipelineSummary = {
-                    ...data,
-                    steps: data.steps || [],
-                    schoolsFound: data.schoolsFound || data.schoolsProcessed || runMetadata?.schools_processed || 0,
-                    runId: data.runId || runId,
-                    totalContacts: data.totalContacts || runMetadata?.total_contacts || 0,
-                    schoolsProcessed: data.schoolsProcessed || data.schoolsFound || runMetadata?.schools_processed || 0,
-                    countyContacts: data.countyContacts || [],
-                    countySchools: data.countySchools || [],
-                    csvData: data.csvData,
-                    csvFilename: data.csvFilename || runMetadata?.csv_filename,
-                  };
-    
-                  // Calculate elapsed time
-                  if (runMetadata?.created_at && runMetadata?.completed_at) {
-                    const start = new Date(runMetadata.created_at).getTime();
-                    const end = new Date(runMetadata.completed_at).getTime();
-                    const elapsed = (end - start) / 1000;
-                    setElapsedTimeDisplay(elapsed);
-                    setStartTime(start);
-                  } else if (data.elapsedTime) {
-                    setElapsedTimeDisplay(data.elapsedTime);
-                  }
-                  
-                  setSummary(summaryData);
-                  setViewState("summary");
-                  setIsRunning(false);
-                }
-              } else if (response.status === 401) {
-                logout();
-              } else if (response.status === 401) {
-                logout();
-              } else if (response.status === 410 || response.status === 404) {
-                // Run is completed and status endpoint no longer available, use metadata
-                if (runMetadata) {
-                  const summaryData: PipelineSummary = {
-                    status: runMetadata.status || "completed",
-                    steps: [], // No step data available from metadata
-                    schoolsFound: runMetadata.schools_processed || 0,
-                    runId: runId,
-                    totalContacts: runMetadata.total_contacts || 0,
-                    schoolsProcessed: runMetadata.schools_processed || 0,
-                    countyContacts: [],
-                    countySchools: [],
-                    csvData: undefined,
-                    csvFilename: runMetadata.csv_filename,
-                  };
-                  
-                  // Calculate elapsed time from metadata
-                  if (runMetadata.created_at && runMetadata.completed_at) {
-                    const start = new Date(runMetadata.created_at).getTime();
-                    const end = new Date(runMetadata.completed_at).getTime();
-                    const elapsed = (end - start) / 1000;
-                    setElapsedTimeDisplay(elapsed);
-                    setStartTime(start);
-                  }
-                  
-                  setSummary(summaryData);
-                  setViewState("summary");
-                  setIsRunning(false);
-                }
-              }
-            } catch (error) {
-              console.error("Error fetching run status:", error);
-            }
-          }}
+          onRunSelect={(runId) => handleRunSelect(runId)}
         />
       </div>
-      <div className="flex-1 min-h-screen">
-        {/* LOE Generator - iframe when URL set, else inline */}
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* Homepage - activity summary */}
+        {selectedType === "home" && (
+          <Homepage
+            onNavigate={(tab) => setSelectedType(tab as TabType)}
+            onViewRun={(runId, source, status) => handleRunSelect(runId, source, status)}
+          />
+        )}
+
+        {/* LOE Generator - always inline (frontend owns the UI; backend is API-only) */}
         {viewState === "start" && selectedType === "loe" && (
-          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden">
+          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden relative">
+            {!canAccessCurrentTab ? (
+              <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                <div className="text-center bg-white rounded-2xl p-12 shadow-xl">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">In Development</h2>
+                  <p className="text-gray-600">This feature is coming soon. Use School Scraper in the meantime.</p>
+                </div>
+              </div>
+            ) : null}
+            <LOEGenerator />
+          </div>
+        )}
+
+        {/* LOE Finished - placeholder for completed LOEs */}
+        {viewState === "start" && selectedType === "loe-finished" && (
+          <div className="animate-fade-in flex-1 flex items-center justify-center p-12">
+            <div className="text-center text-gray-500 max-w-md">
+              <p className="text-lg font-medium">LOE Finished</p>
+              <p className="text-sm mt-2">Completed LOEs will appear here. This view is coming soon.</p>
+            </div>
+          </div>
+        )}
+
+        {/* LOE Archive - iframe when URL set, else placeholder */}
+        {viewState === "start" && selectedType === "loe-archive" && (
+          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden relative">
+            {!canAccessCurrentTab ? (
+              <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                <div className="text-center bg-white rounded-2xl p-12 shadow-xl">
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">In Development</h2>
+                  <p className="text-gray-600">This feature is coming soon. Use School Scraper in the meantime.</p>
+                </div>
+              </div>
+            ) : null}
             {process.env.NEXT_PUBLIC_LOE_API_URL ? (
               <iframe
-                src={process.env.NEXT_PUBLIC_LOE_API_URL.replace(/\/+$/, "")}
+                src={`${process.env.NEXT_PUBLIC_LOE_API_URL.replace(/\/+$/, "")}/archive`}
                 className="w-full h-full border-0"
-                title="LOE Generator"
+                title="LOE Archive"
               />
             ) : (
-              <LOEGenerator />
+              <div className="flex items-center justify-center min-h-screen p-12">
+                <div className="text-center text-gray-500">
+                  <p className="text-lg font-medium">LOE Archive</p>
+                  <p className="text-sm mt-2">Set NEXT_PUBLIC_LOE_API_URL to an archive endpoint to load the LOE Archive.</p>
+                </div>
+              </div>
             )}
           </div>
         )}
 
         {/* START VIEW - Show when school/church tab is active */}
         {viewState === "start" && (selectedType === "school" || selectedType === "church") && (
-          <div className="animate-fade-in">
-            <div className="flex items-center justify-center p-12 min-h-screen">
+          <div className="animate-fade-in flex-1 flex items-center justify-center p-12 min-h-0">
             <div className="w-full max-w-2xl relative">
-              {/* In Development Overlay for Church Scraper */}
-              {selectedType === "church" && (
-                <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 rounded-xl flex items-center justify-center">
-                  <div className="text-center">
-                    <h2 className="text-4xl font-bold text-white mb-3">In Development</h2>
-                    <p className="text-gray-300 text-lg">Church scraper functionality coming soon</p>
-                  </div>
-                </div>
-              )}
-              
               <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-8 md:p-12">
                 <div className="flex flex-col space-y-8">
                   <div>
@@ -1033,7 +1078,8 @@ export default function Home() {
                   {/* Preview row after state selection */}
                   {selectedState && (() => {
                     const countyCount = STATE_COUNTY_COUNTS[selectedState] || 0;
-                    const estimatedSeconds = countyCount * SECONDS_PER_COUNTY;
+                    const secondsPerCounty = scraperContext === "church" ? SECONDS_PER_COUNTY_CHURCH : SECONDS_PER_COUNTY_SCHOOL;
+                    const estimatedSeconds = countyCount * secondsPerCounty;
                     const estimatedTime = formatEstimatedTime(estimatedSeconds);
                     
                     return (
@@ -1052,7 +1098,17 @@ export default function Home() {
 
                   {error && (
                     <div className="p-5 bg-red-50 border border-red-200 rounded-xl">
-                      <p className="text-red-700 text-base">{error}</p>
+                      <p className="text-red-700 text-base whitespace-pre-line">{error}</p>
+                      {error.includes("/health") && (
+                        <a
+                          href={`${getApiUrl()}/health`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block mt-3 text-sm font-medium text-[#1e3a5f] hover:underline"
+                        >
+                          Open health endpoint in new tab →
+                        </a>
+                      )}
                     </div>
                   )}
 
@@ -1065,9 +1121,9 @@ export default function Home() {
                   {/* Enhanced primary CTA button (dashboard-18) */}
                   <button
                     onClick={runPipeline}
-                    disabled={!selectedState || selectedType === "church" || isFinalizing}
+                    disabled={!selectedState || isFinalizing}
                     className={`w-full px-8 py-5 rounded-xl text-lg font-semibold text-white transition-all duration-200 shadow-lg flex items-center justify-center gap-3 ${
-                      !selectedState || selectedType === "church" || isFinalizing
+                      !selectedState || isFinalizing
                         ? "bg-gray-400 cursor-not-allowed opacity-60"
                         : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-xl transform hover:-translate-y-1"
                     }`}
@@ -1081,7 +1137,6 @@ export default function Home() {
                 </div>
               </div>
             </div>
-          </div>
           </div>
         )}
 
@@ -1171,14 +1226,8 @@ export default function Home() {
                     <button
                       onClick={async () => {
                         if (selectedRunId) {
-                          // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
                           try {
+                            const apiUrl = getApiUrl();
                             const response = await fetch(`${apiUrl}/runs/${selectedRunId}/download`, {
                               headers: {
                                 "Authorization": `Bearer ${token}`,

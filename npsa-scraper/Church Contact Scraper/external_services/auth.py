@@ -40,12 +40,12 @@ def verify_password(username: str, password: str) -> bool:
     """Verify user password against stored hash"""
     if username not in USERS:
         return False
-    
+
     stored_hash = USERS[username]["password_hash"]
     # Handle both bytes and string formats
     if isinstance(stored_hash, str):
         stored_hash = stored_hash.encode('utf-8')
-    
+
     return bcrypt.checkpw(password.encode('utf-8'), stored_hash)
 
 
@@ -77,7 +77,7 @@ def require_auth(f):
         # Skip auth for OPTIONS requests (CORS preflight)
         if request.method == "OPTIONS":
             return f(*args, **kwargs)
-        
+
         # Get token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header:
@@ -85,7 +85,7 @@ def require_auth(f):
                 "status": "error",
                 "error": "Authorization header missing"
             }), 401
-        
+
         # Extract token from "Bearer <token>" format
         try:
             token = auth_header.split(" ")[1] if " " in auth_header else auth_header
@@ -94,7 +94,7 @@ def require_auth(f):
                 "status": "error",
                 "error": "Invalid authorization header format"
             }), 401
-        
+
         # Verify token
         payload = verify_token(token)
         if not payload:
@@ -102,10 +102,10 @@ def require_auth(f):
                 "status": "error",
                 "error": "Invalid or expired token"
             }), 401
-        
+
         # Add user info to request context
         request.current_user = payload.get("username")
-        
+
         return f(*args, **kwargs)
-    
+
     return decorated_function

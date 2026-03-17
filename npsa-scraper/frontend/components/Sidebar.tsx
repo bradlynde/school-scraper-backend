@@ -18,16 +18,68 @@ type RunMetadata = {
   archived?: boolean;
 };
 
+export type TabType = 'home' | 'loe' | 'loe-archive' | 'loe-finished' | 'school' | 'church' | 'running' | 'finished' | 'archive';
+
 type SidebarProps = {
-  activeTab: 'loe' | 'school' | 'church' | 'running' | 'finished' | 'archive';
-  onTabChange: (tab: 'loe' | 'school' | 'church' | 'running' | 'finished' | 'archive') => void;
+  activeTab: TabType;
+  onTabChange: (tab: TabType) => void;
   onRunSelect?: (runId: string) => void;
+  onCollapsedChange?: (collapsed: boolean) => void;
+  scraperContext?: 'school' | 'church';
 };
 
-const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
+// Koen = full access. Stuart = LOE + School + Church + Running/Finished/Archive. Brad = School + Running/Finished/Archive only.
+const BRAD_TABS = new Set(["school", "running", "finished", "archive"] as const);
+const STUART_TABS = new Set(["loe", "loe-archive", "loe-finished", "school", "church", "running", "finished", "archive"] as const);
+const canAccessTab = (username: string | null, tab: string) => {
+  if (username === "Koen") return true;
+  if (username === "Stuart") return STUART_TABS.has(tab as any);
+  if (username === "Brad") return BRAD_TABS.has(tab as any);
+  return false;
+};
+
+const getApiUrl = (scraperContext: 'school' | 'church') => {
+  const isChurch = scraperContext === 'church';
+  let url = isChurch
+    ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
+    : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app");
+  url = url.replace(/\/+$/, '');
+  if (!url.match(/^https?:\/\//)) url = `https://${url}`;
+  return url;
+};
+
+const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scraperContext = 'school' }: SidebarProps) => {
   const { token, username, logout } = useAuth();
+  const isDev = username === "Koen";
   const [runs, setRuns] = useState<RunMetadata[]>([]);
+  const [collapsed, setCollapsed] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [schoolExpanded, setSchoolExpanded] = useState(false);
+  const [churchExpanded, setChurchExpanded] = useState(false);
+  const [loeExpanded, setLoeExpanded] = useState(false);
+
+  // Auto-expand parent when it becomes active; collapse others
+  useEffect(() => {
+    if (activeTab === 'school' || activeTab === 'running' || activeTab === 'finished' || activeTab === 'archive') {
+      if (scraperContext === 'school') {
+        setSchoolExpanded(true);
+        setChurchExpanded(false);
+        setLoeExpanded(false);
+      }
+    } else if (activeTab === 'church') {
+      setChurchExpanded(true);
+      setSchoolExpanded(false);
+      setLoeExpanded(false);
+    } else if (activeTab === 'loe' || activeTab === 'loe-archive' || activeTab === 'loe-finished') {
+      setLoeExpanded(true);
+      setSchoolExpanded(false);
+      setChurchExpanded(false);
+    }
+  }, [activeTab, scraperContext]);
+
+  useEffect(() => {
+    onCollapsedChange?.(collapsed);
+  }, [collapsed, onCollapsedChange]);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
 
@@ -36,19 +88,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     // Refresh runs every 30 seconds
     const interval = setInterval(fetchRuns, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [scraperContext]);
 
   const fetchRuns = async () => {
     if (!token) return;
     
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl(scraperContext);
       const response = await fetch(`${apiUrl}/runs`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -116,13 +162,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     if (!token) return;
     
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl(scraperContext);
       const response = await fetch(`${apiUrl}/runs/${runId}/download`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -147,175 +187,235 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     }
   };
 
+  const ChevronDown = ({ expanded }: { expanded: boolean }) => (
+    <svg className={`w-4 h-4 flex-shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    </svg>
+  );
+
+  const NavBtn = ({ tab, icon, label, restricted }: { tab: TabType; icon: React.ReactNode; label: string; restricted?: boolean }) => {
+    const allowed = !restricted || canAccessTab(username, tab);
+    const active = activeTab === tab;
+    return (
+      <button
+        onClick={() => allowed && onTabChange(tab)}
+        disabled={!allowed}
+        title={label}
+        className={`w-full flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+          collapsed ? "justify-center px-2" : "px-4"
+        } ${
+          !allowed
+            ? "text-gray-400 bg-gray-50 cursor-not-allowed opacity-75"
+            : active
+              ? "bg-[#1e3a5f] text-white shadow-md"
+              : "text-gray-700 hover:bg-gray-100"
+        }`}
+      >
+        {icon}
+        {!collapsed && (
+          <>
+            <span className="flex-1 text-left truncate whitespace-nowrap overflow-hidden">{label}</span>
+            {!allowed && <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded shrink-0">In Development</span>}
+          </>
+        )}
+      </button>
+    );
+  };
+
+  const SubNavBtn = ({ tab, label, parent }: { tab: TabType; label: string; parent: 'school' | 'church' | 'loe' }) => {
+    const active = parent === 'loe'
+      ? activeTab === tab
+      : activeTab === tab && scraperContext === parent;
+    return (
+      <button
+        onClick={() => onTabChange(tab)}
+        title={label}
+        className={`w-full flex items-center gap-3 py-2.5 rounded-lg font-medium transition-all duration-200 pl-4 pr-4 ${
+          active ? "bg-[#1e3a5f]/10 text-[#1e3a5f]" : "text-gray-600 hover:bg-gray-100"
+        }`}
+      >
+        <span className="flex-1 text-left truncate text-sm">{label}</span>
+      </button>
+    );
+  };
+
+  const DocIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+  );
+  const ArchiveIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+    </svg>
+  );
+  const BookIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+    </svg>
+  );
+  const ChurchIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+    </svg>
+  );
+  const PlayIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+  const CheckIcon = () => (
+    <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+
   return (
-    <aside className="h-full w-80 bg-white border-r border-gray-200 shadow-sm flex flex-col">
-        {/* Logo Section */}
-        <div className="p-6 border-b border-gray-200 flex items-center justify-center">
-          <Image
-            src="/npsa-logo.png"
-            alt="Nonprofit Security Advisors"
-            width={160}
-            height={48}
-            className="h-auto"
-            priority
-          />
-        </div>
-
-        {/* Navigation Items */}
-      <nav className="p-4 space-y-2 flex-shrink-0">
-          <button
-            onClick={() => onTabChange('loe')}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'loe'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
-            <span>LOE Generator</span>
-          </button>
-
-          <button
-            onClick={() => onTabChange('school')}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'school'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-              />
-            </svg>
-            <span>School Scraper</span>
-          </button>
-
-          <button
-            onClick={() => onTabChange('church')}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'church'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
-              />
-            </svg>
-            <span>Church Scraper</span>
-          </button>
-
+    <aside
+      className="h-full bg-white border-r border-gray-200 shadow-sm flex flex-col transition-all duration-300 ease-out overflow-hidden"
+      style={{ width: collapsed ? 72 : 320 }}
+      onMouseEnter={() => { setCollapsed(false); onCollapsedChange?.(false); }}
+      onMouseLeave={() => { setCollapsed(true); onCollapsedChange?.(true); }}
+    >
+        {/* Logo Section — collapses to icon-sized; clickable to go home */}
         <button
-          onClick={() => onTabChange('running')}
-          className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-            activeTab === 'running'
-              ? 'bg-[#1e3a5f] text-white shadow-md'
-              : 'text-gray-700 hover:bg-gray-100'
-          }`}
+          onClick={() => onTabChange("home")}
+          className="w-full p-4 border-b border-gray-200 flex items-center justify-center min-h-[72px] hover:bg-gray-50 transition-colors"
         >
-          <svg
-            className="w-5 h-5 flex-shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+          <div className="transition-all duration-300 ease-out overflow-hidden flex items-center justify-center" style={{ width: collapsed ? 40 : 160 }}>
+            <Image
+              src="/npsa-logo.png"
+              alt="NPSA"
+              width={collapsed ? 40 : 160}
+              height={collapsed ? 12 : 48}
+              className="h-auto object-contain"
+              priority
             />
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <span>Running</span>
+          </div>
         </button>
 
-        <button
-          onClick={() => onTabChange('finished')}
-          className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-            activeTab === 'finished'
-              ? 'bg-[#1e3a5f] text-white shadow-md'
-              : 'text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          <svg
-            className="w-5 h-5 flex-shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-          <span>Finished</span>
-          </button>
-
-          <button
-            onClick={() => onTabChange('archive')}
-            className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
-              activeTab === 'archive'
-                ? 'bg-[#1e3a5f] text-white shadow-md'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
-          >
-            <svg
-              className="w-5 h-5 flex-shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+        {/* Navigation Items — 3 parent tabs with expandable sub-tabs */}
+      <nav className="p-3 space-y-1 flex-shrink-0">
+          {/* School Scraper */}
+          <div>
+            <button
+              onClick={() => onTabChange("school")}
+              title="School Scraper"
+              className={`w-full flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+                collapsed ? "justify-center px-2" : "px-4"
+              } ${
+                activeTab === "school" || ((activeTab === "running" || activeTab === "finished" || activeTab === "archive") && scraperContext === "school")
+                  ? "bg-[#1e3a5f] text-white shadow-md"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-              />
-            </svg>
-            <span>Archive</span>
-          </button>
+              <BookIcon />
+              {!collapsed && <span className="flex-1 text-left truncate">School Scraper</span>}
+              {!collapsed && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); setSchoolExpanded((v) => !v); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setSchoolExpanded((v) => !v); } }}
+                  className="flex-shrink-0 p-1 -m-1 rounded hover:opacity-80 transition-opacity"
+                  title={schoolExpanded ? "Collapse" : "Expand"}
+                >
+                  <ChevronDown expanded={schoolExpanded} />
+                </span>
+              )}
+            </button>
+            {!collapsed && schoolExpanded && (
+              <div className="ml-2 mt-1 space-y-0.5 border-l-2 border-gray-200 pl-2">
+                <SubNavBtn tab="running" label="Running" parent="school" />
+                <SubNavBtn tab="finished" label="Finished" parent="school" />
+                <SubNavBtn tab="archive" label="Archive" parent="school" />
+              </div>
+            )}
+          </div>
+
+          {/* Church Scraper */}
+          <div>
+            <button
+              onClick={() => canAccessTab(username, "church") && onTabChange("church")}
+              disabled={!canAccessTab(username, "church")}
+              title="Church Scraper"
+              className={`w-full flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+                collapsed ? "justify-center px-2" : "px-4"
+              } ${
+                !canAccessTab(username, "church")
+                  ? "text-gray-400 bg-gray-50 cursor-not-allowed opacity-75"
+                  : activeTab === "church" || ((activeTab === "running" || activeTab === "finished" || activeTab === "archive") && scraperContext === "church")
+                    ? "bg-[#1e3a5f] text-white shadow-md"
+                    : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              <ChurchIcon />
+              {!collapsed && <span className="flex-1 text-left truncate">Church Scraper</span>}
+              {!collapsed && canAccessTab(username, "church") && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); setChurchExpanded((v) => !v); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setChurchExpanded((v) => !v); } }}
+                  className="flex-shrink-0 p-1 -m-1 rounded hover:opacity-80 transition-opacity"
+                  title={churchExpanded ? "Collapse" : "Expand"}
+                >
+                  <ChevronDown expanded={churchExpanded} />
+                </span>
+              )}
+            </button>
+            {!collapsed && churchExpanded && (
+              <div className="ml-2 mt-1 space-y-0.5 border-l-2 border-gray-200 pl-2">
+                <SubNavBtn tab="running" label="Running" parent="church" />
+                <SubNavBtn tab="finished" label="Finished" parent="church" />
+                <SubNavBtn tab="archive" label="Archive" parent="church" />
+              </div>
+            )}
+          </div>
+
+          {/* LOE Generator */}
+          <div>
+            <button
+              onClick={() => canAccessTab(username, "loe") && onTabChange("loe")}
+              disabled={!canAccessTab(username, "loe")}
+              title="LOE Generator"
+              className={`w-full flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
+                collapsed ? "justify-center px-2" : "px-4"
+              } ${
+                !canAccessTab(username, "loe")
+                  ? "text-gray-400 bg-gray-50 cursor-not-allowed opacity-75"
+                  : activeTab === "loe" || activeTab === "loe-archive" || activeTab === "loe-finished"
+                    ? "bg-[#1e3a5f] text-white shadow-md"
+                    : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              <DocIcon />
+              {!collapsed && <span className="flex-1 text-left truncate">LOE Generator</span>}
+              {!collapsed && canAccessTab(username, "loe") && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); setLoeExpanded((v) => !v); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setLoeExpanded((v) => !v); } }}
+                  className="flex-shrink-0 p-1 -m-1 rounded hover:opacity-80 transition-opacity"
+                  title={loeExpanded ? "Collapse" : "Expand"}
+                >
+                  <ChevronDown expanded={loeExpanded} />
+                </span>
+              )}
+            </button>
+            {!collapsed && loeExpanded && (
+              <div className="ml-2 mt-1 space-y-0.5 border-l-2 border-gray-200 pl-2">
+                <SubNavBtn tab="loe-finished" label="Finished" parent="loe" />
+                <SubNavBtn tab="loe-archive" label="Archive" parent="loe" />
+              </div>
+            )}
+          </div>
         </nav>
 
-      {/* Run List Section */}
-      {(activeTab === 'running' || activeTab === 'finished' || activeTab === 'archive') && (
+      {/* Run List Section — hidden when collapsed */}
+      {(activeTab === 'running' || activeTab === 'finished' || activeTab === 'archive') && !collapsed && (
         <div className="flex-1 overflow-y-auto min-h-0">
           <div className="p-4">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
@@ -326,14 +426,14 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
             ) : (
               (() => {
                 const filteredRuns = runs.filter(run => {
-                  if (activeTab === 'running') {
-                    return run.status === 'running' && !run.archived;
-                  } else if (activeTab === 'archive') {
-                    return run.archived === true;
-                  } else {
-                    return (run.status === 'completed' || run.status === 'error') && !run.archived;
-                  }
-                });
+                    if (activeTab === 'running') {
+                      return run.status === 'running' && !run.archived;
+                    } else if (activeTab === 'archive') {
+                      return run.archived === true;
+                    } else {
+                      return (run.status === 'completed' || run.status === 'error') && !run.archived;
+                    }
+                  });
                 
                 if (filteredRuns.length === 0) {
                   return (
@@ -380,13 +480,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                                   e.stopPropagation();
                                   setDeleteConfirmRunId(null);
                                   try {
-                                    // Ensure API URL includes protocol
-                                    let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-                                    apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-                                    if (!apiUrl.match(/^https?:\/\//)) {
-                                      // If no protocol, assume https
-                                      apiUrl = `https://${apiUrl}`;
-                                    }
+                                    const apiUrl = getApiUrl(scraperContext);
                                     const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
                                       method: 'DELETE',
                                       headers: {
@@ -495,13 +589,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                  // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+                                  const apiUrl = getApiUrl(scraperContext);
                                   const response = await fetch(`${apiUrl}/runs/${run.run_id}/archive`, {
                                     method: 'POST',
                                     headers: {
@@ -535,13 +623,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                  // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+                                  const apiUrl = getApiUrl(scraperContext);
                                   const response = await fetch(`${apiUrl}/runs/${run.run_id}/unarchive`, {
                                     method: 'POST',
                                     headers: {
@@ -596,11 +678,12 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
       )}
 
         {/* User Section at Bottom - Always stays at bottom */}
-        <div className="mt-auto p-4 border-t border-gray-200 flex-shrink-0">
+        <div className="mt-auto p-3 border-t border-gray-200 flex-shrink-0">
           <div className="relative">
             <button
               onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className="w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 text-gray-700 hover:bg-gray-100"
+              title={username || "User"}
+              className={`w-full flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 text-gray-700 hover:bg-gray-100 ${collapsed ? "justify-center px-2" : "px-4"}`}
             >
               <svg
                 className="w-5 h-5 flex-shrink-0"
@@ -615,15 +698,19 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                   d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
                 />
               </svg>
-              <span className="flex-1 text-left truncate">{username || "User"}</span>
-              <svg
-                className={`w-4 h-4 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
+              {!collapsed && (
+                <>
+                  <span className="flex-1 text-left truncate">{username || "User"}</span>
+                  <svg
+                    className={`w-4 h-4 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </>
+              )}
             </button>
             
             {userMenuOpen && (

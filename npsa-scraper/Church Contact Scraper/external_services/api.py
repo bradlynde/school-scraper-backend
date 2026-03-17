@@ -130,7 +130,8 @@ CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Volume: only the final state CSV is persisted here
-VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
+# Church service uses /data/church (set PERSISTENT_DATA_DIR in Railway)
+VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data/church"))
 VOLUME_DIR.mkdir(parents=True, exist_ok=True)
 
 # Automatic cleanup configuration
@@ -724,8 +725,26 @@ def load_run_metadata(run_id: str) -> dict:
         return None
 
 
+def _parse_run_from_csv_filename(name: str) -> dict | None:
+    """Parse run metadata from CSV filename: {state}_leads_{run_id}_{timestamp}.csv"""
+    m = re.match(r"^(.+?)_leads_([a-f0-9\-]{36})_(\d+_\d+)\.csv$", name, re.I)
+    if not m:
+        return None
+    state, run_id, ts = m.group(1), m.group(2), m.group(3)
+    return {
+        "run_id": run_id,
+        "state": state,
+        "status": "completed",
+        "created_at": ts.replace("_", ""),
+        "scraper_type": "church",
+        "archived": False,
+        "_from_volume": True,
+    }
+
+
 def list_all_runs() -> list:
     """List all runs from persistent storage, excluding deleted runs"""
+    seen_ids = set()
     runs = []
     try:
         # Get all metadata files
@@ -736,16 +755,27 @@ def list_all_runs() -> list:
                     # Skip deleted runs (filter them out from view)
                     if metadata.get("deleted", False):
                         continue
-                    
+
                     metadata["run_id"] = metadata_file.stem  # Add run_id from filename
+                    seen_ids.add(metadata["run_id"])
                     # Ensure archived field exists (default to False for backwards compatibility)
                     if "archived" not in metadata:
                         metadata["archived"] = False
+                    # Backfill scraper_type at read-time for legacy runs (this backend only stores church runs)
+                    if "scraper_type" not in metadata:
+                        metadata["scraper_type"] = "church"
                     runs.append(metadata)
             except Exception as e:
                 print(f"Error reading metadata file {metadata_file}: {e}")
                 continue
-        
+
+        # Fallback: include runs from volume CSVs when metadata is missing (e.g. after container restart)
+        for f in VOLUME_DIR.glob("*_leads_*.csv"):
+            parsed = _parse_run_from_csv_filename(f.name)
+            if parsed and parsed["run_id"] not in seen_ids:
+                seen_ids.add(parsed["run_id"])
+                runs.append(parsed)
+
         # Sort by created_at (newest first)
         runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return runs
@@ -1418,7 +1448,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "total_counties": total_counties,
                 "completed_counties": completed_counties,
                 "start_time": time.time(),
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now().isoformat(),
+                "scraper_type": "church",
             }
             save_run_metadata(run_id, initial_metadata)
             
@@ -1628,7 +1659,11 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "completed_counties": completed_counties,
                 "progress": 100,
                 "completed_at": datetime.now().isoformat(),
-                "completion_time": time.time()
+                "completion_time": time.time(),
+                "scraper_type": "church",
+                "churchesFound": pipeline_runs.get(run_id, {}).get("churchesFound", 0),
+                "churchesProcessed": pipeline_runs.get(run_id, {}).get("churchesProcessed", 0),
+                "countyChurches": pipeline_runs.get(run_id, {}).get("countyChurches", []),
             })
             save_run_metadata(run_id, final_metadata)
             
@@ -2636,38 +2671,38 @@ def download_run_csv(run_id: str):
             "status": "error",
             "error": "Invalid run ID format"
         }), 400
-    
+
     try:
-        # Load metadata to get CSV path
+        csv_path = None
+        download_name = f"run_{run_id}.csv"
         metadata = load_run_metadata(run_id)
-        if not metadata:
+        if metadata:
+            csv_path = metadata.get("final_csv_path")
+            if csv_path and os.path.exists(csv_path):
+                download_name = metadata.get("csv_filename", download_name)
+            else:
+                csv_path = None
+        # Fallback: search volume for CSV containing run_id (metadata may be lost on container restart)
+        if not csv_path or not os.path.exists(csv_path):
+            for pattern in (f"*_{run_id}_*.csv", f"*{run_id}*.csv"):
+                for f in VOLUME_DIR.glob(pattern):
+                    if run_id in f.stem:
+                        csv_path = str(f)
+                        download_name = f.name
+                        break
+                if csv_path:
+                    break
+        if not csv_path or not os.path.exists(csv_path):
             return jsonify({
                 "status": "error",
                 "error": "Run not found"
             }), 404
-        
-        # Get CSV path from metadata or construct it
-        csv_path = metadata.get("final_csv_path")
-        if not csv_path:
-            # Try to construct path
-            state = metadata.get("state", "").title()
-            run_dir = RUNS_DIR / run_id
-            csv_path = str(run_dir / f"{state}_leads_final.csv")
-        
-        # Check if file exists
-        if not os.path.exists(csv_path):
-            return jsonify({
-                "status": "error",
-                "error": "CSV file not found for this run"
-            }), 404
-        
-        # Read and return CSV
         from flask import send_file
         return send_file(
             csv_path,
             mimetype='text/csv',
             as_attachment=True,
-            download_name=metadata.get("csv_filename", f"run_{run_id}.csv")
+            download_name=download_name
         )
     except Exception as e:
         error_response = jsonify({
