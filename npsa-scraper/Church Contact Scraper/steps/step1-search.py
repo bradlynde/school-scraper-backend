@@ -208,48 +208,44 @@ class ChurchSearcher:
         Search for Christian/Catholic churches in a specific county.
         YIELDS Church objects one at a time (generator).
         
-        Uses 20 search terms - max discovery minus ultra-niche (Orthodox, Chapel, Worship center
-        cause statewide drift in small counties).
+        Uses 28 search terms (curated for yield).
         """
         if state is None:
             state = self.full_state_name
         
-        # Search terms - ordered by yield (best first). Default 3 for now.
+        # Search terms - 28 terms (ordered by yield)
         all_search_terms = [
-            f"churches in {county} County, {state}",
+            f"Churches in {county} County, {state}",
             f"Christian churches in {county} County, {state}",
             f"Baptist churches in {county} County, {state}",
+            f"Southern Baptist church in {county} County, {state}",
+            f"Non-denominational church in {county} County, {state}",
+            f"Community church in {county} County, {state}",
+            f"Assembly of God churches in {county} County, {state}",
+            f"Pentecostal churches in {county} County, {state}",
             f"Methodist churches in {county} County, {state}",
+            f"United Methodist church in {county} County, {state}",
             f"Church of Christ in {county} County, {state}",
+            f"Evangelical church in {county} County, {state}",
+            f"Bible church in {county} County, {state}",
             f"Catholic churches in {county} County, {state}",
             f"Lutheran churches in {county} County, {state}",
             f"Presbyterian churches in {county} County, {state}",
-            f"Cowboy church in {county} County, {state}",
-            f"Assembly of God churches in {county} County, {state}",
+            f"Evangelical Presbyterian church in {county} County, {state}",
             f"Episcopal churches in {county} County, {state}",
-            f"Pentecostal churches in {county} County, {state}",
-            f"Bible church in {county} County, {state}",
-            f"non-denominational church in {county} County, {state}",
-            f"Community church in {county} County, {state}",
-            f"Nazarene church in {county} County, {state}",
-            f"Church of God in {county} County, {state}",
-            f"Evangelical church in {county} County, {state}",
             f"Anglican church in {county} County, {state}",
-            f"Wesleyan church in {county} County, {state}",
-            # Extended terms (21-30) - ceiling test
-            f"Seventh-day Adventist church in {county} County, {state}",
-            f"Church of God in Christ in {county} County, {state}",
-            f"Southern Baptist church in {county} County, {state}",
-            f"Missionary Baptist church in {county} County, {state}",
-            f"Gospel church in {county} County, {state}",
-            f"Reformed church in {county} County, {state}",
-            f"Mennonite church in {county} County, {state}",
+            f"Church of the Nazarene in {county} County, {state}",
+            f"Church of God in {county} County, {state}",
+            f"Full Gospel church in {county} County, {state}",
+            f"Charismatic church in {county} County, {state}",
+            f"Calvary Chapel in {county} County, {state}",
+            f"Vineyard church in {county} County, {state}",
             f"Fellowship church in {county} County, {state}",
-            f"Chapel in {county} County, {state}",
             f"Worship center in {county} County, {state}",
+            f"Nazarene church in {county} County, {state}",
         ]
-        # Default to 6 terms when not specified
-        limit = max_search_terms if max_search_terms is not None else 6
+        # Default to all 28 terms when not specified
+        limit = max_search_terms if max_search_terms is not None else len(all_search_terms)
         search_terms = all_search_terms[:max(0, limit)]
 
         for query in search_terms:
