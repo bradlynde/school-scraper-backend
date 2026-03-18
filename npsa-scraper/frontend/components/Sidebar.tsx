@@ -20,11 +20,22 @@ type RunMetadata = {
 
 type SidebarProps = {
   activeTab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive';
-  onTabChange: (tab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive') => void;
+  onTabChange: (tab: 'loe' | 'loe-archive' | 'school' | 'church' | 'running' | 'finished' | 'archive', scraperContextOverride?: 'school' | 'church') => void;
   onRunSelect?: (runId: string) => void;
+  scraperContext?: 'school' | 'church';
 };
 
-const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
+const getApiUrl = (scraperContext: 'school' | 'church') => {
+  const isChurch = scraperContext === 'church';
+  let url = isChurch
+    ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
+    : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app");
+  url = url.replace(/\/+$/, '');
+  if (!url.match(/^https?:\/\//)) url = `https://${url}`;
+  return url;
+};
+
+const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school' }: SidebarProps) => {
   const { token, username, logout } = useAuth();
   const [runs, setRuns] = useState<RunMetadata[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,19 +47,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     // Refresh runs every 30 seconds
     const interval = setInterval(fetchRuns, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [scraperContext]);
 
   const fetchRuns = async () => {
     if (!token) return;
     
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl(scraperContext);
       const response = await fetch(`${apiUrl}/runs`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -116,13 +121,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
     if (!token) return;
     
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl(scraperContext);
       const response = await fetch(`${apiUrl}/runs/${runId}/download`, {
         headers: {
           "Authorization": `Bearer ${token}`,
@@ -196,7 +195,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
           <div className="border-t border-gray-200 my-2" />
 
           <button
-            onClick={() => onTabChange('school')}
+            onClick={() => onTabChange('school', 'school')}
             className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
               activeTab === 'school'
                 ? 'bg-[#1e3a5f] text-white shadow-md'
@@ -220,7 +219,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
           </button>
 
           <button
-            onClick={() => onTabChange('church')}
+            onClick={() => onTabChange('church', 'church')}
             className={`w-full flex items-center gap-4 px-4 py-3 rounded-lg font-medium transition-all duration-200 ${
               activeTab === 'church'
                 ? 'bg-[#1e3a5f] text-white shadow-md'
@@ -387,14 +386,8 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                                 onClick={async (e) => {
                                   e.stopPropagation();
                                   setDeleteConfirmRunId(null);
-                                  try {
-                                    // Ensure API URL includes protocol
-                                    let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-                                    apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-                                    if (!apiUrl.match(/^https?:\/\//)) {
-                                      // If no protocol, assume https
-                                      apiUrl = `https://${apiUrl}`;
-                                    }
+                                    try {
+                                    const apiUrl = getApiUrl(scraperContext);
                                     const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
                                       method: 'DELETE',
                                       headers: {
@@ -503,13 +496,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                  // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+                                  const apiUrl = getApiUrl(scraperContext);
                                   const response = await fetch(`${apiUrl}/runs/${run.run_id}/archive`, {
                                     method: 'POST',
                                     headers: {
@@ -543,13 +530,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect }: SidebarProps) => {
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                  // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+                                  const apiUrl = getApiUrl(scraperContext);
                                   const response = await fetch(`${apiUrl}/runs/${run.run_id}/unarchive`, {
                                     method: 'POST',
                                     headers: {

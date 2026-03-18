@@ -326,6 +326,7 @@ export default function Home() {
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
   const [selectedType, setSelectedType] = useState<"loe" | "loe-archive" | "school" | "church" | "running" | "finished" | "archive">("loe");
+  const [scraperContext, setScraperContext] = useState<"school" | "church">("school");
   const [status, setStatus] = useState("");
   const [summary, setSummary] = useState<PipelineSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -422,15 +423,19 @@ export default function Home() {
     return text.slice(0, maxLength) + "...";
   }
 
+  function getApiUrl(ctx: "school" | "church") {
+    const isChurch = ctx === "church";
+    let url = isChurch
+      ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
+      : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app");
+    url = url.replace(/\/+$/, "");
+    if (!url.match(/^https?:\/\//)) url = `https://${url}`;
+    return url;
+  }
+
   async function checkPipelineStatus(runId: string) {
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl(scraperContext);
       const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
         method: "GET",
         headers: {
@@ -630,13 +635,7 @@ export default function Home() {
     setEstimatedTime(null);
 
     try {
-      // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+      const apiUrl = getApiUrl(selectedType === "church" ? "church" : "school");
       console.log("Starting pipeline with API URL:", apiUrl);
       console.log("Request payload:", { state: selectedState.toLowerCase().replace(' ', '_'), type: selectedType });
 
@@ -767,13 +766,7 @@ export default function Home() {
         }
         // Check for network errors
         else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed")) {
-          // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+          const apiUrl = getApiUrl(selectedType === "church" ? "church" : "school");
           errorMessage = `Failed to connect to the backend API at ${apiUrl}. This could mean:\n\n1. The backend server is not running\n2. The API URL is incorrect\n3. There's a network connectivity issue\n\nPlease verify that NEXT_PUBLIC_API_URL is set correctly in your Vercel environment variables and that the Railway backend is running.`;
         }
       }
@@ -846,8 +839,10 @@ export default function Home() {
       } md:translate-x-0 md:relative md:z-auto md:h-full flex-shrink-0`}>
         <Sidebar 
           activeTab={selectedType} 
-          onTabChange={(tab) => {
+          scraperContext={scraperContext}
+          onTabChange={(tab, scraperContextOverride) => {
             setSelectedType(tab);
+            if (scraperContextOverride) setScraperContext(scraperContextOverride);
             setSidebarOpen(false); // Close mobile menu on tab change
             // Switch view based on tab
             if (tab === 'loe' || tab === 'loe-archive' || tab === 'school' || tab === 'church') {
@@ -861,14 +856,7 @@ export default function Home() {
           onRunSelect={async (runId) => {
             setSelectedRunId(runId);
             setSidebarOpen(false); // Close mobile menu on run select
-            // Fetch run status to determine if it's running or finished
-            // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
+            const apiUrl = getApiUrl(scraperContext);
             try {
               // First, try to get run from /runs endpoint to get metadata
               const runsResponse = await fetch(`${apiUrl}/runs`, {
@@ -1195,14 +1183,8 @@ export default function Home() {
                     <button
                       onClick={async () => {
                         if (selectedRunId) {
-                          // Ensure API URL includes protocol
-      let apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app";
-      apiUrl = apiUrl.replace(/\/+$/, ''); // Remove trailing slashes
-      if (!apiUrl.match(/^https?:\/\//)) {
-        // If no protocol, assume https
-        apiUrl = `https://${apiUrl}`;
-      }
                           try {
+                            const apiUrl = getApiUrl(scraperContext);
                             const response = await fetch(`${apiUrl}/runs/${selectedRunId}/download`, {
                               headers: {
                                 "Authorization": `Bearer ${token}`,
