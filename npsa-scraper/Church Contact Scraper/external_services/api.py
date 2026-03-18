@@ -1803,6 +1803,90 @@ def health():
     return response, 200
 
 
+@app.route("/debug/volume", methods=["GET", "OPTIONS"])
+@require_auth
+def debug_volume():
+    """List /data (persistent volume) contents - runs, CSVs, metadata. Auth required."""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return response, 200
+    try:
+        data_path = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
+        if not data_path.exists():
+            return jsonify({
+                "path": str(data_path),
+                "exists": False,
+                "error": "Path does not exist"
+            }), 200
+        entries = []
+        total_size = 0
+        file_count = 0
+        csv_files = []
+        for item in sorted(data_path.iterdir()):
+            try:
+                if item.is_dir():
+                    sub_count = 0
+                    sub_size = 0
+                    sub_csvs = []
+                    for sub in sorted(item.iterdir()):
+                        try:
+                            if sub.is_file():
+                                sub_count += 1
+                                sz = sub.stat().st_size
+                                sub_size += sz
+                                if sub.suffix.lower() == ".csv":
+                                    sub_csvs.append({"name": sub.name, "size": sz})
+                            elif sub.is_dir():
+                                sub_count += 1
+                                for f in sub.rglob("*"):
+                                    if f.is_file():
+                                        sub_count += 1
+                                        sz = f.stat().st_size
+                                        sub_size += sz
+                                        if f.suffix.lower() == ".csv":
+                                            sub_csvs.append({"name": f.name, "path": str(f.relative_to(data_path)), "size": sz})
+                        except OSError:
+                            pass
+                    entries.append({
+                        "name": item.name,
+                        "type": "dir",
+                        "entries": sub_count,
+                        "size_bytes": sub_size,
+                        "size_mb": round(sub_size / (1024 * 1024), 2),
+                        "csvs": sub_csvs[:20]
+                    })
+                    total_size += sub_size
+                    file_count += sub_count
+                else:
+                    sz = item.stat().st_size
+                    total_size += sz
+                    file_count += 1
+                    entries.append({
+                        "name": item.name,
+                        "type": "file",
+                        "size_bytes": sz,
+                        "size_mb": round(sz / (1024 * 1024), 2)
+                    })
+                    if item.suffix.lower() == ".csv":
+                        csv_files.append({"name": item.name, "size": sz})
+            except OSError as e:
+                entries.append({"name": item.name, "error": str(e)})
+        return jsonify({
+            "path": str(data_path),
+            "exists": True,
+            "entries": entries,
+            "total_size_bytes": total_size,
+            "total_size_mb": round(total_size / (1024 * 1024), 2),
+            "file_count": file_count,
+            "csv_files": csv_files[:50]
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # Rate limiting for login endpoint (simple in-memory implementation)
 login_attempts = {}
 LOGIN_RATE_LIMIT = 5  # Max attempts per IP
