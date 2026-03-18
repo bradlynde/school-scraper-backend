@@ -16,6 +16,7 @@ type RunMetadata = {
   completed_at?: string;
   csv_filename?: string;
   archived?: boolean;
+  scraper_type?: 'school' | 'church';
 };
 
 type SidebarProps = {
@@ -61,7 +62,13 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
       });
       if (response.ok) {
         const data = await response.json();
-        setRuns(data.runs || []);
+        const allRuns = data.runs || [];
+        // Filter by scraper_type so school runs don't appear in church section and vice versa
+        const filtered = allRuns.filter((r: RunMetadata) => {
+          const type = r.scraper_type || 'school';
+          return type === scraperContext;
+        });
+        setRuns(filtered);
       } else if (response.status === 401) {
         logout();
       }
