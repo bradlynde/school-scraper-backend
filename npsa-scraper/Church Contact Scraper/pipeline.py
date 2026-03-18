@@ -369,7 +369,7 @@ class StreamingPipeline:
                 raise ValueError("--state parameter is required for county-based search")
             counties = load_counties_from_state(self._state)
         
-        max_search_terms_per_county = 28
+        max_search_terms_per_county = 20
         
         church_generator = self.church_searcher.discover_churches(
             counties=counties,

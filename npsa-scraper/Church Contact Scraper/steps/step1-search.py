@@ -208,12 +208,12 @@ class ChurchSearcher:
         Search for Christian/Catholic churches in a specific county.
         YIELDS Church objects one at a time (generator).
         
-        Uses 28 search terms (curated for yield).
+        Uses 20 search terms for church discovery.
         """
         if state is None:
             state = self.full_state_name
         
-        # Search terms - 28 terms (ordered by yield)
+        # Search terms - 20 terms
         all_search_terms = [
             f"Churches in {county} County, {state}",
             f"Christian churches in {county} County, {state}",
@@ -231,20 +231,12 @@ class ChurchSearcher:
             f"Catholic churches in {county} County, {state}",
             f"Lutheran churches in {county} County, {state}",
             f"Presbyterian churches in {county} County, {state}",
-            f"Evangelical Presbyterian church in {county} County, {state}",
             f"Episcopal churches in {county} County, {state}",
             f"Anglican church in {county} County, {state}",
             f"Church of the Nazarene in {county} County, {state}",
             f"Church of God in {county} County, {state}",
-            f"Full Gospel church in {county} County, {state}",
-            f"Charismatic church in {county} County, {state}",
-            f"Calvary Chapel in {county} County, {state}",
-            f"Vineyard church in {county} County, {state}",
-            f"Fellowship church in {county} County, {state}",
-            f"Worship center in {county} County, {state}",
-            f"Nazarene church in {county} County, {state}",
         ]
-        # Default to all 28 terms when not specified
+        # Default to all 20 terms when not specified
         limit = max_search_terms if max_search_terms is not None else len(all_search_terms)
         search_terms = all_search_terms[:max(0, limit)]
 
