@@ -322,7 +322,7 @@ function createLineGraph(data: number[], width: number = 200, height: number = 8
 }
 
 export default function Home() {
-  const { isAuthenticated, token, loading, logout } = useAuth();
+  const { isAuthenticated, token, loading, logout, username } = useAuth();
   const [viewState, setViewState] = useState<ViewState>("start");
   const [selectedState, setSelectedState] = useState<string>("");
   const [selectedType, setSelectedType] = useState<"loe" | "loe-archive" | "school" | "church" | "running" | "finished" | "archive">("loe");
@@ -613,8 +613,8 @@ export default function Home() {
       return;
     }
 
-    if (selectedType === "church") {
-      setError("Church scraping is not yet available");
+    if (selectedType === "church" && username !== "Koen" && username !== "Stuart") {
+      setError("Church scraping is not yet available for your account.");
       return;
     }
 
@@ -1006,8 +1006,8 @@ export default function Home() {
           <div className="animate-fade-in">
             <div className="flex items-center justify-center p-12 min-h-screen">
             <div className="w-full max-w-2xl relative">
-              {/* In Development Overlay for Church Scraper */}
-              {selectedType === "church" && (
+              {/* In Development Overlay for Church Scraper - only for users without church access */}
+              {selectedType === "church" && username !== "Koen" && username !== "Stuart" && (
                 <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 rounded-xl flex items-center justify-center">
                   <div className="text-center">
                     <h2 className="text-4xl font-bold text-white mb-3">In Development</h2>
@@ -1077,9 +1077,9 @@ export default function Home() {
                   {/* Enhanced primary CTA button (dashboard-18) */}
                   <button
                     onClick={runPipeline}
-                    disabled={!selectedState || selectedType === "church" || isFinalizing}
+                    disabled={!selectedState || isFinalizing || (selectedType === "church" && username !== "Koen" && username !== "Stuart")}
                     className={`w-full px-8 py-5 rounded-xl text-lg font-semibold text-white transition-all duration-200 shadow-lg flex items-center justify-center gap-3 ${
-                      !selectedState || selectedType === "church" || isFinalizing
+                      !selectedState || isFinalizing || (selectedType === "church" && username !== "Koen" && username !== "Stuart")
                         ? "bg-gray-400 cursor-not-allowed opacity-60"
                         : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-xl transform hover:-translate-y-1"
                     }`}

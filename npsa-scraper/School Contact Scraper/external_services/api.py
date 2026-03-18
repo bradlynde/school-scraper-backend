@@ -274,15 +274,19 @@ def bold(text: str) -> str:
 
 # Security: Validate run_id to prevent path traversal attacks
 UUID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+# Also allow timestamp-style IDs (e.g. 20260315211349) from /data - alphanumeric, no path chars
+SAFE_RUN_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{8,64}$')
 
 def validate_run_id(run_id: str) -> bool:
     """
-    Validate that run_id is a valid UUID format.
-    This prevents path traversal attacks (e.g., '../../../etc/passwd').
+    Validate that run_id is safe (UUID or alphanumeric).
+    Prevents path traversal attacks (e.g., '../../../etc/passwd').
+    Accepts UUID format or timestamp-style IDs from /data.
     """
     if not run_id or not isinstance(run_id, str):
         return False
-    return bool(UUID_PATTERN.match(run_id.strip()))
+    s = run_id.strip()
+    return bool(UUID_PATTERN.match(s) or SAFE_RUN_ID_PATTERN.match(s))
 
 
 def list_chrome_processes():
