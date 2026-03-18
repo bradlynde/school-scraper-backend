@@ -55,7 +55,8 @@ class FinalCompiler:
         # Generic/invalid emails to filter
         self.invalid_emails = [
             'info@', 'contact@', 'admin@', 'office@', 'webmaster@',
-            'noreply@', 'no-reply@', 'hello@', 'support@'
+            'noreply@', 'no-reply@', 'hello@', 'support@',
+            '@example'  # example.com, example.org, example.net, etc.
         ]
         
         # Generic text patterns that should NOT be names (per meeting notes)

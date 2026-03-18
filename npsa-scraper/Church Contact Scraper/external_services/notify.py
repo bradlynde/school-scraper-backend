@@ -1,6 +1,12 @@
 """
 Lightweight run-completion email notifications via SMTP (stdlib only).
 Set SMTP_* and NOTIFY_EMAIL to enable. Optional: NOTIFY_ON_RUN_COMPLETE=false to disable.
+
+Troubleshooting:
+- [Errno 101] Network is unreachable: Container (e.g. Railway) cannot reach SMTP host.
+  Fix: Use an SMTP relay that allows connections from your host (e.g. SendGrid, Mailgun,
+  Resend) or ensure SMTP_HOST is reachable from the container network. Some platforms
+  block outbound SMTP on port 25/587.
 """
 
 import os

@@ -966,7 +966,10 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
           activeTab={selectedType}
           scraperContext={scraperContext}
           onCollapsedChange={setSidebarCollapsed}
-          onTabChange={(tab) => {
+          onTabChange={(tab, scraperContextOverride) => {
+            if (scraperContextOverride) setScraperContext(scraperContextOverride);
+            else if (tab === "school") setScraperContext("school");
+            else if (tab === "church") setScraperContext("church");
             setSelectedType(tab);
             setSidebarOpen(false); // Close mobile menu on tab change
             if (tab === "home") {

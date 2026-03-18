@@ -22,7 +22,7 @@ export type TabType = 'home' | 'loe' | 'loe-archive' | 'loe-finished' | 'school'
 
 type SidebarProps = {
   activeTab: TabType;
-  onTabChange: (tab: TabType) => void;
+  onTabChange: (tab: TabType, scraperContextOverride?: 'school' | 'church') => void;
   onRunSelect?: (runId: string) => void;
   onCollapsedChange?: (collapsed: boolean) => void;
   scraperContext?: 'school' | 'church';
@@ -228,7 +228,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
       : activeTab === tab && scraperContext === parent;
     return (
       <button
-        onClick={() => onTabChange(tab)}
+        onClick={() => onTabChange(tab, parent === 'loe' ? undefined : parent)}
         title={label}
         className={`w-full flex items-center gap-3 py-2.5 rounded-lg font-medium transition-all duration-200 pl-4 pr-4 ${
           active ? "bg-[#1e3a5f]/10 text-[#1e3a5f]" : "text-gray-600 hover:bg-gray-100"
@@ -300,7 +300,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
           {/* School Scraper */}
           <div>
             <button
-              onClick={() => onTabChange("school")}
+              onClick={() => onTabChange("school", "school")}
               title="School Scraper"
               className={`w-full flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
                 collapsed ? "justify-center px-2" : "px-4"
@@ -337,7 +337,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, onCollapsedChange, scrap
           {/* Church Scraper */}
           <div>
             <button
-              onClick={() => canAccessTab(username, "church") && onTabChange("church")}
+              onClick={() => canAccessTab(username, "church") && onTabChange("church", "church")}
               disabled={!canAccessTab(username, "church")}
               title="Church Scraper"
               className={`w-full flex items-center gap-4 py-3 rounded-lg font-medium transition-all duration-200 ${
