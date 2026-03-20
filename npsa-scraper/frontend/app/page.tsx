@@ -358,6 +358,11 @@ export default function Home() {
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
   const [queueJobs, setQueueJobs] = useState<QueueJobRow[]>([]);
+  const [selectedQueueDetail, setSelectedQueueDetail] = useState<{
+    job: QueueJobRow;
+    position: number;
+    total: number;
+  } | null>(null);
   const [pipelineSubmitting, setPipelineSubmitting] = useState(false);
 
   // Server-side elapsed time tracking - no client-side tracking needed
@@ -370,19 +375,6 @@ export default function Home() {
       }
     };
   }, [pollingInterval]);
-
-  // Show login form if not authenticated (after all hooks are called)
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
-        <div className="text-gray-600">Loading...</div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <LoginForm />;
-  }
 
   function downloadCSV(csvContent: string, filename: string) {
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -468,6 +460,45 @@ export default function Home() {
     const interval = setInterval(refreshQueueJobs, 30000);
     return () => clearInterval(interval);
   }, [viewState, selectedType, refreshQueueJobs]);
+
+  useEffect(() => {
+    if (selectedType !== "running" || !selectedRunId?.startsWith("queue:") || !token) {
+      setSelectedQueueDetail(null);
+      return;
+    }
+    const jobIdStr = selectedRunId.slice("queue:".length);
+    let cancelled = false;
+    async function load() {
+      const apiUrl = getApiUrl(scraperContext);
+      try {
+        const r = await fetch(`${apiUrl}/queue`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) {
+          if (!cancelled) setSelectedQueueDetail(null);
+          return;
+        }
+        const j = await r.json();
+        const jobs = (j.jobs || []).filter((x: { status: string }) => x.status === "queued");
+        const job = jobs.find((x: { id: number }) => String(x.id) === jobIdStr);
+        if (!job) {
+          if (!cancelled) setSelectedQueueDetail(null);
+          return;
+        }
+        const sorted = [...jobs].sort((a: { id: number }, b: { id: number }) => a.id - b.id);
+        const position = sorted.findIndex((x: { id: number }) => String(x.id) === jobIdStr) + 1;
+        if (!cancelled) setSelectedQueueDetail({ job, position, total: jobs.length });
+      } catch {
+        if (!cancelled) setSelectedQueueDetail(null);
+      }
+    }
+    load();
+    const iv = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [selectedType, selectedRunId, scraperContext, token]);
 
   async function cancelQueueJob(jobId: number) {
     if (!token) return;
@@ -890,6 +921,18 @@ export default function Home() {
   // Derive runProgress from summary and state
   const runProgress = deriveRunProgress(summary, elapsedTimeDisplay, estimatedTime, startTime);
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: "#f5f5f5" }}>
+        <div className="text-gray-600">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginForm />;
+  }
+
   // Render views with fade-in transitions
   return (
     <div className="min-h-screen h-screen flex" style={{ backgroundColor: '#f5f5f5' }}>
@@ -933,6 +976,17 @@ export default function Home() {
           onRunSelect={async (runId) => {
             setSelectedRunId(runId);
             setSidebarOpen(false); // Close mobile menu on run select
+            if (runId.startsWith("queue:")) {
+              if (pollingInterval) {
+                clearInterval(pollingInterval);
+                setPollingInterval(null);
+              }
+              setViewState("running");
+              setIsRunning(false);
+              setSummary(null);
+              setError(null);
+              return;
+            }
             const apiUrl = getApiUrl(scraperContext);
             try {
               // First, try to get run from /runs endpoint to get metadata
@@ -1364,6 +1418,44 @@ export default function Home() {
                   >
                     Run Another Search
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* RUNNING TAB VIEW - Queued job (no pipeline-status yet) */}
+        {selectedType === "running" && selectedRunId?.startsWith("queue:") && (
+          <div className="animate-fade-in">
+            <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
+              <div className="w-full max-w-2xl">
+                <div className="mb-8">
+                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">In Progress</h1>
+                  <p className="text-base sm:text-lg text-gray-600 mt-2">This scrape is waiting in the queue</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 md:p-10">
+                  <div className="flex items-center gap-3 mb-6">
+                    <span className="px-3 py-1 rounded-full text-xs font-semibold text-amber-800 bg-amber-50">
+                      Queued
+                    </span>
+                    {selectedQueueDetail && (
+                      <span className="text-sm text-gray-600">
+                        Position {selectedQueueDetail.position} of {selectedQueueDetail.total} in queue
+                      </span>
+                    )}
+                  </div>
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    {selectedQueueDetail?.job.display_name?.trim() ||
+                      selectedQueueDetail?.job.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) ||
+                      "Queued scrape"}
+                  </h2>
+                  <p className="text-gray-600 mt-4">
+                    It will start automatically when a worker slot opens. You can remove it from the queue using the trash
+                    icon in the sidebar.
+                  </p>
+                  {!selectedQueueDetail && (
+                    <p className="text-sm text-gray-500 mt-4">Loading queue status…</p>
+                  )}
                 </div>
               </div>
             </div>

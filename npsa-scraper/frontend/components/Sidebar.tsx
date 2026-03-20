@@ -70,26 +70,52 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
 
   const fetchRuns = async () => {
     if (!token) return;
-    
+
+    let merged: RunMetadata[] = [];
+
     try {
       const apiUrl = getApiUrl(scraperContext);
       const response = await fetch(`${apiUrl}/runs`, {
         headers: {
-          "Authorization": `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
       });
       if (response.ok) {
         const data = await response.json();
         const allRuns = data.runs || [];
-        // Filter by scraper_type; default missing type to current tab (not always 'school')
-        const filtered = allRuns.filter((r: RunMetadata) => {
+        merged = allRuns.filter((r: RunMetadata) => {
           const type = r.scraper_type ?? scraperContext;
           return type === scraperContext;
         });
-        setRuns(filtered);
       } else if (response.status === 401) {
         logout();
+        setLoading(false);
+        return;
       }
+
+      try {
+        const qr = await fetch(`${apiUrl}/queue`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (qr.ok) {
+          const qd = await qr.json();
+          const qjobs = (qd.jobs || []).filter((j: { status: string }) => j.status === "queued");
+          for (const job of qjobs) {
+            merged.push({
+              run_id: `queue:${job.id}`,
+              state: job.state || "",
+              status: "queued",
+              display_name: job.display_name ?? undefined,
+              created_at: job.created_at ?? undefined,
+              scraper_type: scraperContext,
+            });
+          }
+        }
+      } catch {
+        /* queue optional when SQLITE_PATH unset */
+      }
+
+      setRuns(merged);
     } catch (error) {
       console.error("Error fetching runs:", error);
     } finally {
@@ -135,12 +161,18 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
         return "text-green-600 bg-green-50";
       case "running":
         return "text-blue-600 bg-blue-50";
+      case "queued":
+        return "text-amber-800 bg-amber-50";
       case "error":
         return "text-red-600 bg-red-50";
       default:
         return "text-gray-600 bg-gray-50";
     }
   };
+
+  const isQueueRunId = (runId: string) => runId.startsWith("queue:");
+  const queueJobNumericId = (runId: string) =>
+    isQueueRunId(runId) ? parseInt(runId.slice("queue:".length), 10) : NaN;
 
   const downloadCSV = async (runId: string, filename?: string) => {
     if (!token) return;
@@ -366,16 +398,25 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
               <div className="text-center text-gray-500 py-4">Loading...</div>
             ) : (
               (() => {
-                const filteredRuns = runs.filter(run => {
+                const filteredRuns = runs
+                  .filter((run) => {
                   if (activeTab === 'running') {
-                    return run.status === 'running' && !run.archived;
+                    return (run.status === 'running' || run.status === 'queued') && !run.archived;
                   } else if (activeTab === 'archive') {
                     return run.archived === true;
                   } else {
                     return (run.status === 'completed' || run.status === 'error') && !run.archived;
                   }
-                });
-                
+                })
+                  .sort((a, b) => {
+                    const rank = (s: string) => (s === "running" ? 0 : s === "queued" ? 1 : 2);
+                    const dr = rank(a.status) - rank(b.status);
+                    if (dr !== 0) return dr;
+                    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+                    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+                    return tb - ta;
+                  });
+
                 if (filteredRuns.length === 0) {
                   return (
                     <div className="text-center text-gray-500 py-4 text-sm">
@@ -400,7 +441,9 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
                         {deleteConfirmRunId === run.run_id ? (
                           /* Delete Confirmation - replaces card content */
                           <div className="flex flex-col items-center justify-center py-6">
-                            <p className="text-sm font-semibold text-gray-900 mb-4 text-center">Delete Permanently?</p>
+                            <p className="text-sm font-semibold text-gray-900 mb-4 text-center">
+                              {isQueueRunId(run.run_id) ? "Remove this job from the queue?" : "Delete Permanently?"}
+                            </p>
                             <div className="flex items-center justify-center gap-3">
                               {/* Deny button */}
                               <button
@@ -422,10 +465,14 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
                                   setDeleteConfirmRunId(null);
                                     try {
                                     const apiUrl = getApiUrl(scraperContext);
-                                    const response = await fetch(`${apiUrl}/runs/${run.run_id}/delete`, {
+                                    const qid = queueJobNumericId(run.run_id);
+                                    const url = !Number.isNaN(qid)
+                                      ? `${apiUrl}/queue/${qid}`
+                                      : `${apiUrl}/runs/${run.run_id}/delete`;
+                                    const response = await fetch(url, {
                                       method: 'DELETE',
                                       headers: {
-                                        "Authorization": `Bearer ${token}`,
+                                        Authorization: `Bearer ${token}`,
                                       },
                                     });
                                     if (response.ok) {
@@ -452,7 +499,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                 </svg>
-                                <span className="text-sm font-medium">Delete</span>
+                                <span className="text-sm font-medium">{isQueueRunId(run.run_id) ? "Remove" : "Delete"}</span>
                               </button>
                             </div>
                           </div>
@@ -480,7 +527,17 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
                                     </div>
                                   )}
                                   <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusColor(run.status)}`}>
-                                    {run.status === "running" ? "Running" : run.status === "completed" ? "Finished" : run.status === "error" ? "Error" : run.status === "finalizing" ? "Finalizing" : run.status}
+                                    {run.status === "running"
+                                      ? "Running"
+                                      : run.status === "queued"
+                                        ? "Queued"
+                                        : run.status === "completed"
+                                          ? "Finished"
+                                          : run.status === "error"
+                                            ? "Error"
+                                            : run.status === "finalizing"
+                                              ? "Finalizing"
+                                              : run.status}
                                   </span>
                                 </div>
                               </div>
@@ -517,7 +574,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
                                   setDeleteConfirmRunId(run.run_id);
                                 }}
                                 className="p-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                                title="Delete run"
+                                title={isQueueRunId(run.run_id) ? "Remove from queue" : "Delete run"}
                               >
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />

@@ -41,6 +41,15 @@ type PipelineSummary = {
   countySchools?: number[];
 };
 
+type QueueJobRow = {
+  id: number;
+  state: string;
+  display_name?: string | null;
+  status: string;
+  run_id?: string | null;
+  created_at?: string | null;
+};
+
 type ViewState = "start" | "progress" | "summary" | "running" | "finished" | "archive";
 
 // Single source of truth for run progress/state
@@ -350,6 +359,11 @@ export default function Home() {
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
   const [pipelineSubmitting, setPipelineSubmitting] = useState(false);
   const [scraperContext, setScraperContext] = useState<'school' | 'church'>('school');
+  const [selectedQueueDetail, setSelectedQueueDetail] = useState<{
+    job: QueueJobRow;
+    position: number;
+    total: number;
+  } | null>(null);
 
   // Keep scraperContext in sync when user switches between school/church tabs
   useEffect(() => {
@@ -368,6 +382,45 @@ export default function Home() {
     if (!url.match(/^https?:\/\//)) url = `https://${url}`;
     return url;
   };
+
+  useEffect(() => {
+    if (selectedType !== "running" || !selectedRunId?.startsWith("queue:") || !token) {
+      setSelectedQueueDetail(null);
+      return;
+    }
+    const jobIdStr = selectedRunId.slice("queue:".length);
+    let cancelled = false;
+    async function load() {
+      const apiUrl = getApiUrl();
+      try {
+        const r = await fetch(`${apiUrl}/queue`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) {
+          if (!cancelled) setSelectedQueueDetail(null);
+          return;
+        }
+        const j = await r.json();
+        const jobs = (j.jobs || []).filter((x: { status: string }) => x.status === "queued");
+        const job = jobs.find((x: { id: number }) => String(x.id) === jobIdStr);
+        if (!job) {
+          if (!cancelled) setSelectedQueueDetail(null);
+          return;
+        }
+        const sorted = [...jobs].sort((a: { id: number }, b: { id: number }) => a.id - b.id);
+        const position = sorted.findIndex((x: { id: number }) => String(x.id) === jobIdStr) + 1;
+        if (!cancelled) setSelectedQueueDetail({ job, position, total: jobs.length });
+      } catch {
+        if (!cancelled) setSelectedQueueDetail(null);
+      }
+    }
+    load();
+    const iv = setInterval(load, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [selectedType, selectedRunId, scraperContext, token]);
 
   // Server-side elapsed time tracking - no client-side tracking needed
   // Elapsed time is now calculated server-side and included in API response
@@ -468,6 +521,17 @@ export default function Home() {
     }
     setSelectedRunId(runId);
     setSidebarOpen(false);
+    if (runId.startsWith("queue:")) {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        setPollingInterval(null);
+      }
+      setViewState("running");
+      setIsRunning(false);
+      setSummary(null);
+      setError(null);
+      return;
+    }
     const apiUrl = getApiUrl(sourceOverride);
     try {
       const runsResponse = await fetch(`${apiUrl}/runs`, {
@@ -1295,6 +1359,44 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
                   >
                     Run Another Search
                   </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* RUNNING TAB VIEW - Queued job */}
+        {selectedType === "running" && selectedRunId?.startsWith("queue:") && (
+          <div className="animate-fade-in">
+            <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
+              <div className="w-full max-w-2xl">
+                <div className="mb-8">
+                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">In Progress</h1>
+                  <p className="text-base sm:text-lg text-gray-600 mt-2">This scrape is waiting in the queue</p>
+                </div>
+                <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 md:p-10">
+                  <div className="flex items-center gap-3 mb-6">
+                    <span className="px-3 py-1 rounded-full text-xs font-semibold text-amber-800 bg-amber-50">
+                      Queued
+                    </span>
+                    {selectedQueueDetail && (
+                      <span className="text-sm text-gray-600">
+                        Position {selectedQueueDetail.position} of {selectedQueueDetail.total} in queue
+                      </span>
+                    )}
+                  </div>
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    {selectedQueueDetail?.job.display_name?.trim() ||
+                      selectedQueueDetail?.job.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) ||
+                      "Queued scrape"}
+                  </h2>
+                  <p className="text-gray-600 mt-4">
+                    It will start automatically when a worker slot opens. You can remove it from the queue using the trash
+                    icon in the sidebar.
+                  </p>
+                  {!selectedQueueDetail && (
+                    <p className="text-sm text-gray-500 mt-4">Loading queue status…</p>
+                  )}
                 </div>
               </div>
             </div>
