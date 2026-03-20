@@ -353,6 +353,13 @@ CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "1"))
 # Default to 4 for parallel processing
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
 
+# Estimated seconds per "parallel slot" for ETA math: (counties / MAX_WORKERS) * this value.
+# Calibrated from Alabama full-state run ≈ 42h wall-clock, 67 counties, MAX_WORKERS=4:
+#   42 * 3600 / (67 / 4) ≈ 9024. Override with CHURCH_AVG_SECONDS_PER_COUNTY_SLOT if needed.
+CHURCH_AVG_SECONDS_PER_COUNTY_SLOT = int(
+    os.getenv("CHURCH_AVG_SECONDS_PER_COUNTY_SLOT", "9024")
+)
+
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
@@ -1596,10 +1603,9 @@ def run_streaming_pipeline(
             pipeline_runs[run_id]["countiesProcessed"] = len(completed_counties)
             
             # Calculate static initial estimated time remaining (only if not already set)
-            # Average county time: 871 seconds (~14.5 minutes) based on Arkansas run analysis
             if pipeline_runs[run_id].get("initialEstimatedTimeRemaining") is None:
                 remaining_counties = total_counties - len(completed_counties)
-                avg_time_per_county = 871  # 14.5 minutes average from log analysis
+                avg_time_per_county = CHURCH_AVG_SECONDS_PER_COUNTY_SLOT
                 # Account for parallel processing (MAX_WORKERS)
                 effective_remaining = max(1, remaining_counties / MAX_WORKERS)
                 initial_estimate = effective_remaining * avg_time_per_county
@@ -2412,7 +2418,7 @@ def pipeline_status(run_id):
             
             if total_counties > 0:
                 remaining_counties = max(0, total_counties - counties_processed)
-                avg_time_per_county = 871  # 14.5 minutes average from log analysis
+                avg_time_per_county = CHURCH_AVG_SECONDS_PER_COUNTY_SLOT
                 effective_remaining = max(1, remaining_counties / MAX_WORKERS)
                 estimated_remaining = effective_remaining * avg_time_per_county
                 # Round to minutes

@@ -181,8 +181,10 @@ const STATE_COUNTY_COUNTS: Record<string, number> = {
   "wyoming": 23,
 };
 
-// Average time per county: 871 seconds (~14.5 minutes) - updated from Arkansas run analysis
-const SECONDS_PER_COUNTY = 871;
+// School: ~871s/county (Arkansas baseline). Church: wall-clock avg for UI = backend slot / default workers;
+// Alabama ~42h / 67 counties ≈ 2256s/county (matches api CHURCH_AVG_SECONDS_PER_COUNTY_SLOT / MAX_WORKERS=4).
+const SECONDS_PER_COUNTY_SCHOOL = 871;
+const SECONDS_PER_COUNTY_CHURCH = 2256;
 
 // Helper function to format estimated time (minutes only, no seconds)
 function formatEstimatedTime(seconds: number): string {
@@ -1111,7 +1113,9 @@ export default function Home() {
                   {/* Preview row after state selection */}
                   {selectedState && (() => {
                     const countyCount = STATE_COUNTY_COUNTS[selectedState] || 0;
-                    const estimatedSeconds = countyCount * SECONDS_PER_COUNTY;
+                    const secPerCounty =
+                      selectedType === "church" ? SECONDS_PER_COUNTY_CHURCH : SECONDS_PER_COUNTY_SCHOOL;
+                    const estimatedSeconds = countyCount * secPerCounty;
                     const estimatedTime = formatEstimatedTime(estimatedSeconds);
                     
                     return (

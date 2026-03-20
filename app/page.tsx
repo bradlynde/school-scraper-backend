@@ -172,9 +172,9 @@ const STATE_COUNTY_COUNTS: Record<string, number> = {
   "wyoming": 23,
 };
 
-// Average time per county: school 871s (~14.5 min), church 2400s (~40 min)
+// School 871s/county baseline. Church: ~42h Alabama / 67 co. wall-clock ≈ 2256s/county (4 workers).
 const SECONDS_PER_COUNTY_SCHOOL = 871;
-const SECONDS_PER_COUNTY_CHURCH = 2400;
+const SECONDS_PER_COUNTY_CHURCH = 2256;
 
 // Helper function to format estimated time (minutes only, no seconds)
 function formatEstimatedTime(seconds: number): string {
