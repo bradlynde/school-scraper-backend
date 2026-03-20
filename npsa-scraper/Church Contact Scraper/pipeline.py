@@ -19,6 +19,11 @@ from pathlib import Path
 import traceback
 import importlib.util
 
+
+def _maybe_traceback():
+    if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in ("1", "true", "yes"):
+        traceback.print_exc()
+
 # Import shared models
 from assets.shared.models import Church, Page, PageContent, Contact
 from church_run_log import (
@@ -208,7 +213,7 @@ class StreamingPipeline:
                 return []
         except Exception as e:
             log_err(f"Page discovery: {church.name}: {e}")
-            traceback.print_exc()
+            _maybe_traceback()
             return []
         
         page_contents = []
@@ -268,7 +273,7 @@ class StreamingPipeline:
                 ))
         except Exception as e:
             log_err(f"Page discovery inner: {e}")
-            traceback.print_exc()
+            _maybe_traceback()
         
         return pages
     
@@ -294,7 +299,7 @@ class StreamingPipeline:
             )
         except Exception as e:
             log_err(f"Content collection: {e}")
-            traceback.print_exc()
+            _maybe_traceback()
             return None
     
     def _parse_content_with_llm(self, page_content: PageContent, church: Church) -> List[Contact]:
@@ -359,7 +364,7 @@ class StreamingPipeline:
             return filtered_contacts
         except Exception as e:
             log_err(f"LLM parsing: {e}")
-            traceback.print_exc()
+            _maybe_traceback()
             return []
     
     def run(
@@ -534,5 +539,5 @@ if __name__ == "__main__":
             )
     except Exception as e:
         print(f"\n\nPipeline failed: {e}")
-        traceback.print_exc()
+        _maybe_traceback()
         sys.exit(1)

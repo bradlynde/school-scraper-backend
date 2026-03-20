@@ -43,6 +43,16 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from pipeline import StreamingPipeline
 from assets.shared.models import Contact
+from church_run_log import (
+    log_aggregation,
+    log_cost_estimate,
+    log_county_header,
+    log_err,
+    log_progress_counties,
+    log_startup,
+    log_state_complete,
+    log_warn,
+)
 
 # Import authentication module
 from external_services.auth import require_auth, verify_password, generate_token
@@ -69,23 +79,11 @@ step13_final_compiler = load_module_with_hyphen('step13-compiler.py', 'step13_co
 
 app = Flask(__name__)
 
-# Verify dumb-init is PID 1 on startup (will only log once when app initializes)
-# Only log success, not warnings (warnings are handled in __main__ block)
-if HAS_PSUTIL:
-    try:
-        pid1 = psutil.Process(1)
-        pid1_name = pid1.name().lower()
-        if 'dumb-init' in pid1_name or 'init' in pid1_name:
-            print(f"[INIT] Verified: dumb-init is PID 1 - process reaping enabled")
-    except:
-        pass  # Can't verify, but continue
-
 # CORS configuration - restrict to allowed origin (REQUIRED in production)
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN")
 if ALLOWED_ORIGIN:
     # Normalize origin - remove trailing slashes to prevent CORS mismatch
-    ALLOWED_ORIGIN = ALLOWED_ORIGIN.rstrip('/')
-    print(f"CORS: Using ALLOWED_ORIGIN = {ALLOWED_ORIGIN}")
+    ALLOWED_ORIGIN = ALLOWED_ORIGIN.rstrip("/")
 else:
     # Allow wildcard only if explicitly set to "*" for development
     # In production, ALLOWED_ORIGIN must be set to your frontend URL
@@ -116,6 +114,10 @@ running_threads = {}
 
 # Single gate for starting runs (HTTP + queue worker) — prevents concurrent "start" races
 _run_start_lock = threading.Lock()
+
+# Run cleanup + queue thread exactly once (avoids duplicate lines if app module loads twice)
+_bootstrap_lock = threading.Lock()
+_bootstrap_done = False
 
 
 def _cleanup_stale_pipeline_runs() -> None:
@@ -268,7 +270,7 @@ VOLUME_DIR.mkdir(parents=True, exist_ok=True)
 # Delete runs older than this many days (default: 7 days)
 CLEANUP_DAYS = int(os.getenv("CLEANUP_DAYS", "7"))
 
-def cleanup_old_runs():
+def cleanup_old_runs(*, silent_success: bool = False):
     """
     Clean up old completed runs to prevent storage exhaustion.
     Deletes runs older than CLEANUP_DAYS that are completed or cancelled.
@@ -345,16 +347,18 @@ def cleanup_old_runs():
                     save_run_metadata(run_id, metadata)
 
                     deleted_count += 1
-                    print(f"[CLEANUP] Auto-deleted old run {run_id} (created: {created_at_str})")
+                    if not silent_success:
+                        print(f"[CLEANUP] Auto-deleted old run {run_id} (created: {created_at_str})")
             except Exception as e:
                 print(f"[CLEANUP] Error processing metadata file {metadata_file}: {e}")
                 continue
 
-        if deleted_count > 0:
-            freed_mb = freed_space / (1024 * 1024)
-            print(f"[CLEANUP] Cleaned up {deleted_count} old runs, freed ~{freed_mb:.2f} MB")
-        else:
-            print(f"[CLEANUP] No old runs to clean up (cutoff: {cutoff_date.isoformat()})")
+        if not silent_success:
+            if deleted_count > 0:
+                freed_mb = freed_space / (1024 * 1024)
+                print(f"[CLEANUP] Cleaned up {deleted_count} old runs, freed ~{freed_mb:.2f} MB")
+            else:
+                print(f"[CLEANUP] No old runs to clean up (cutoff: {cutoff_date.isoformat()})")
     except Exception as e:
         print(f"[CLEANUP] Error during cleanup: {e}")
         import traceback
@@ -371,7 +375,6 @@ def cleanup_ephemeral_run(run_id: str):
         checkpoint_file = CHECKPOINTS_DIR / f"{run_id}.json"
         if run_dir.exists():
             shutil.rmtree(run_dir, ignore_errors=True)
-            print(f"[{run_id}] Cleaned up ephemeral run data")
         if checkpoint_file.exists():
             try:
                 checkpoint_file.unlink()
@@ -538,10 +541,6 @@ def kill_chrome_processes_bottom_up(current_pid: int = None):
     if current_pid is None:
         current_pid = os.getpid()
     
-    # Monitor processes before cleanup
-    before_zombies, before_orphaned, before_active = get_chrome_process_counts()
-    print(f"{bold('[CLEANUP]')} BEFORE kill_chrome_processes_bottom_up: Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
-    
     killed_count = 0
     try:
         current_process = psutil.Process(current_pid)
@@ -640,15 +639,8 @@ def kill_chrome_processes_bottom_up(current_pid: int = None):
                 except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                     continue
         
-        if killed_count > 0:
-            print(f"{bold('[CLEANUP]')} Killed {killed_count} Chrome processes (bottom-up)")
-        
-        # Monitor processes after cleanup
-        after_zombies, after_orphaned, after_active = get_chrome_process_counts()
-        print(f"{bold('[CLEANUP]')} AFTER kill_chrome_processes_bottom_up: Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}, Killed: {killed_count}")
-        
     except Exception as e:
-        print(f"{bold('[CLEANUP]')} Error in bottom-up Chrome cleanup: {e}")
+        log_err(f"Chrome cleanup (bottom-up): {e}")
     
     return killed_count
 
@@ -775,14 +767,16 @@ def check_health():
 
 
 def log_resource_usage():
-    """Log resource usage for monitoring"""
+    """Resource monitoring (quiet by default; set CHURCH_LOG_RESOURCE=1 to print)."""
+    if os.environ.get("CHURCH_LOG_RESOURCE", "").strip() not in ("1", "true", "yes"):
+        return
     try:
         rusage = resource.getrusage(resource.RUSAGE_SELF)
-        memory_mb = rusage.ru_maxrss / 1024  # Convert KB to MB (on Linux)
-        logging.info(f"Memory: {memory_mb:.1f}MB")
-        print(f"{bold('[RESOURCE]')} Memory: {memory_mb:.1f}MB")
+        memory_mb = rusage.ru_maxrss / 1024
+        logging.info("Memory: %.1fMB", memory_mb)
+        log_warn(f"Memory: {memory_mb:.1f}MB")
     except Exception as e:
-        print(f"{bold('[RESOURCE]')} Error logging resource usage: {e}")
+        log_warn(f"Resource probe: {e}")
 
 
 
@@ -957,7 +951,6 @@ def load_counties_from_state(state: str) -> list:
     if state_normalized == 'texas':
         top50_file = repo_root / 'assets' / 'data' / 'state_counties' / 'texas_top50.txt'
         if top50_file.exists():
-            print(f"Using top 50 counties file for faster processing")
             state_file = top50_file
         else:
             state_file = repo_root / 'assets' / 'data' / 'state_counties' / f'{state_normalized}.txt'
@@ -991,9 +984,8 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         result_file: Path to JSON file to write results to
     """
     try:
-        # Update progress for this county
-        print(f"[{run_id}] {county} County ({county_index + 1}/{total_counties})")
-        
+        log_county_header(county, county_index + 1, total_counties)
+
         # Create persistent output directory for this run
         run_dir = RUNS_DIR / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -1027,12 +1019,11 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         # Pipeline.run() already handles all compilation and writes to output_csv
         # Just verify the file was created
         all_contacts = pipeline.all_contacts
-        print(f"[{run_id}] SUCCESS {county}: {len(all_contacts)} contacts")
-        
+
         # Count contacts with and without emails
         contacts_with_emails = [c for c in all_contacts if c.has_email()]
         contacts_without_emails = [c for c in all_contacts if not c.has_email()]
-        
+
         # Read results
         results = {
             'success': True,
@@ -1040,7 +1031,15 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
             'contacts': len(all_contacts),
             'contacts_with_emails': len(contacts_with_emails),
             'contacts_without_emails': len(contacts_without_emails),
-            'csv_path': output_csv if os.path.exists(output_csv) else None
+            'csv_path': output_csv if os.path.exists(output_csv) else None,
+            'places_api_calls': int(pipeline.stats.get('places_api_calls', 0) or 0),
+            'openai_calls': int(pipeline.stats.get('openai_calls', 0) or 0),
+            'openai_prompt_tokens': int(
+                pipeline.stats.get('openai_prompt_tokens', 0) or 0
+            ),
+            'openai_completion_tokens': int(
+                pipeline.stats.get('openai_completion_tokens', 0) or 0
+            ),
         }
         
         # Write results to file for main process to read
@@ -1050,11 +1049,13 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         return results
             
     except Exception as e:
-        import traceback
         error_msg = str(e)[:500]
-        print(f"Error processing {county}: {error_msg}")
-        traceback.print_exc()
-        
+        log_err(f"{county} County: {error_msg}")
+        if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in ("1", "true", "yes"):
+            import traceback
+
+            traceback.print_exc()
+
         results = {'success': False, 'error': error_msg}
         # Write error results to file
         try:
@@ -1065,13 +1066,6 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         return results
     finally:
         # CRITICAL: Cleanup Chrome processes BOTTOM-UP (children first, then parents)
-        # This prevents zombie processes by ensuring children are killed before parents.
-        # Only targets worker's process tree (not system-wide) to protect main container.
-        
-        # Monitor processes before cleanup
-        before_zombies, before_orphaned, before_active = get_chrome_process_counts()
-        print(f"[{run_id}] [{county}] CLEANUP BEFORE: Chrome processes - Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
-        
         try:
             # First, try to quit the driver properly
             if 'pipeline' in locals() and pipeline and hasattr(pipeline, 'content_collector') and pipeline.content_collector:
@@ -1099,10 +1093,6 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         
         # Brief delay after cleanup to provide buffer
         time.sleep(1.0)
-        
-        # Monitor processes after cleanup
-        after_zombies, after_orphaned, after_active = get_chrome_process_counts()
-        print(f"[{run_id}] [{county}] CLEANUP AFTER: Chrome processes - Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}")
 
 
 def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int):
@@ -1196,14 +1186,16 @@ def process_county_worker_multiprocessing(args):
         processing_time = time.time() - start_time
         
         if not result.get('success'):
-            print(f"[{run_id}] ERROR {county}: {result.get('error', 'Unknown error')}")
-        
+            log_err(f"{county} County: {result.get('error', 'Unknown error')}")
+
         return (idx, county, result, processing_time)
     except Exception as e:
         processing_time = time.time() - start_time
-        print(f"[{run_id}] County {county} generated an exception: {e}")
-        import traceback
-        traceback.print_exc()
+        log_err(f"{county} County (pool): {e}")
+        if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in ("1", "true", "yes"):
+            import traceback
+
+            traceback.print_exc()
         return (idx, county, {'success': False, 'error': str(e)}, processing_time)
 
 
@@ -1245,20 +1237,22 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                         # Skip empty files - they'll be handled during aggregation
                 
                 if all_complete:
-                    print(f"[{run_id}] All {len(counties)} counties completed, proceeding with aggregation...")
                     break
-                
-                if elapsed_time % 30 == 0:  # Log every 30 seconds
-                    print(f"[{run_id}] Waiting for {len(missing_counties)} counties to complete: {', '.join(missing_counties[:3])}...")
+
+                if elapsed_time % 30 == 0 and missing_counties:
+                    log_warn(
+                        f"Waiting for {len(missing_counties)} counties (e.g. {', '.join(missing_counties[:3])})"
+                    )
                 
                 time.sleep(wait_interval)
                 elapsed_time += wait_interval
             
             if not all_complete:
-                print(f"[{run_id}] WARNING: Some counties did not complete within timeout. Proceeding with available data...")
+                log_warn(
+                    "Some counties did not complete within timeout; aggregating available data"
+                )
         else:
-            # Skip wait - proceed immediately with available data
-            print(f"[{run_id}] Skipping wait - proceeding with available county data...")
+            log_warn("Skipping county wait; aggregating available data")
         
         pipeline_runs[run_id]["statusMessage"] = "Aggregating results from all counties..."
         
@@ -1293,14 +1287,11 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                                 source_url=sval(row.get('source_url', '') or row.get('Source URL', ''))
                             )
                             all_contacts.append(contact)
-                        print(f"[{run_id}] Loaded {len(df)} contacts from {county} County")
                 except Exception as e:
-                    print(f"[{run_id}] Error reading {county_csv}: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    log_err(f"Reading {county_csv}: {e}")
         
         if not all_contacts:
-            print(f"[{run_id}] No contacts found in any county")
+            log_warn("No contacts found in any county")
             # Set to finalizing for 2-minute cooldown
             pipeline_runs[run_id]["status"] = "finalizing"
             pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found. Finalizing..."
@@ -1334,22 +1325,17 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             pipeline_runs[run_id]["totalContacts"] = 0
             pipeline_runs[run_id]["completedAt"] = time.time()
             return
-        
-        print(f"[{run_id}] Total contacts collected: {len(all_contacts)}")
-        
+
         # STEP 11: Split contacts into with/without emails
         pipeline_runs[run_id]["statusMessage"] = "Step 11: Splitting contacts..."
         splitter = step11_contact_splitter.ContactSplitter()
         contacts_with_emails, contacts_without_emails = splitter.split_contacts(all_contacts)
-        
-        print(f"[{run_id}] Step 11 complete: {len(contacts_with_emails)} with emails, {len(contacts_without_emails)} without emails")
         
         # Deduplicate BEFORE enrichment (saves Hunter credits)
         compiler = step13_final_compiler.FinalCompiler()
         deduplicated = compiler.deduplicate_contacts_only(contacts_with_emails, contacts_without_emails)
         contacts_with_emails_deduped = [c for c in deduplicated if c.has_email()]
         contacts_without_emails_deduped = [c for c in deduplicated if not c.has_email()]
-        print(f"[{run_id}] Deduplication: {len(contacts_with_emails) + len(contacts_without_emails)} -> {len(deduplicated)} (before Hunter)")
         
         # STEP 12: Email Enrichment with Hunter.io (optional, on deduplicated contacts only)
         contacts_enriched = []
@@ -1368,16 +1354,20 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                     batch_size=10,
                     delay_between_batches=1.0
                 )
-                print(f"[{run_id}] Step 12 complete: Enriched {len(contacts_enriched)} contacts with emails")
             except Exception as e:
-                print(f"[{run_id}] WARNING Email enrichment failed: {e}")
-                print(f"[{run_id}]    Continuing without enriched contacts...")
-                import traceback
-                traceback.print_exc()
+                log_warn(f"Email enrichment failed: {e}")
+                if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    import traceback
+
+                    traceback.print_exc()
         elif not hunter_io_enabled:
-            print(f"[{run_id}] Step 12 skipped: HUNTER_IO_API_KEY not set")
+            pass
         elif not contacts_without_emails_deduped:
-            print(f"[{run_id}] Step 12 skipped: No contacts without emails to enrich")
+            pass
         
         # STEP 13: Compile final CSV (already deduplicated)
         pipeline_runs[run_id]["statusMessage"] = "Step 13: Compiling final CSV..."
@@ -1390,8 +1380,6 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             state=state,
             already_deduplicated=True
         )
-        
-        print(f"[{run_id}] Step 13 complete: Final CSV saved to {final_csv_path}")
         
         # Read final CSV and copy to volume (only persistent storage)
         final_data_saved_to_volume = False
@@ -1410,9 +1398,8 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 shutil.copy2(final_csv_path, volume_csv_path)
                 volume_saved = True
                 final_data_saved_to_volume = True
-                print(f"[{run_id}] Final CSV saved to volume: {volume_csv_path}")
             except Exception as e:
-                print(f"[{run_id}] WARNING: Could not copy final CSV to volume: {e}")
+                log_warn(f"Could not copy final CSV to volume: {e}")
         
             # Count final contacts
             final_df = pd.read_csv(final_csv_path)
@@ -1441,8 +1428,34 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             if not metadata.get("display_name"):
                 metadata["display_name"] = _run_display_name(state, "church")
             save_run_metadata(run_id, metadata)
+
+            scraped_with_email = len(
+                [c for c in all_contacts if c.has_email()]
+            )
+            log_aggregation(
+                len(all_contacts),
+                scraped_with_email,
+                len(contacts_enriched),
+                len(contacts_without_emails_deduped),
+                len(final_df),
+                Path(final_csv_path).name,
+            )
+            elapsed_h = (
+                time.time() - pipeline_runs[run_id].get("startTime", time.time())
+            ) / 3600.0
+            pr = pipeline_runs[run_id]
+            log_cost_estimate(
+                int(pr.get("places_api_calls_total", 0)),
+                len(contacts_enriched),
+                int(pr.get("openai_calls_total", 0)),
+                int(pr.get("openai_prompt_tokens_total", 0)),
+                int(pr.get("openai_completion_tokens_total", 0)),
+                elapsed_h,
+                int(pr.get("totalContacts", len(final_df))),
+            )
+            log_state_complete(state, len(counties), len(counties), elapsed_h)
         else:
-            print(f"[{run_id}] ERROR: Final CSV not created at {final_csv_path}")
+            log_err(f"Final CSV not created at {final_csv_path}")
             pipeline_runs[run_id]["totalContacts"] = len(deduplicated)
             pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails_deduped) + len(contacts_enriched)
             pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails_deduped) - len(contacts_enriched)
@@ -1504,8 +1517,11 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         pipeline_runs[run_id]["status"] = "error"
         pipeline_runs[run_id]["error"] = str(e)
         pipeline_runs[run_id]["statusMessage"] = f"Failed to aggregate results: {str(e)}"
-        import traceback
-        traceback.print_exc()
+        log_err(f"Aggregate results: {e}")
+        if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in ("1", "true", "yes"):
+            import traceback
+
+            traceback.print_exc()
 
 
 def run_streaming_pipeline(
@@ -1561,6 +1577,10 @@ def run_streaming_pipeline(
         "startTime": time.time(),  # Track overall start time
         "initialEstimatedTimeRemaining": None,  # Static estimate calculated once at start (in seconds)
         "queue_job_id": queue_job_id,  # SQLite queue_jobs.id if started from queue
+        "places_api_calls_total": 0,
+        "openai_calls_total": 0,
+        "openai_prompt_tokens_total": 0,
+        "openai_completion_tokens_total": 0,
     }
     
     def process_all_counties():
@@ -1578,7 +1598,8 @@ def run_streaming_pipeline(
             # Load counties for state
             counties = load_counties_from_state(state)
             total_counties = len(counties)
-            
+            log_startup(run_id, state, total_counties, MAX_WORKERS)
+
             # Check if resuming from checkpoint
             completed_counties = []
             start_index = 0
@@ -1589,7 +1610,6 @@ def run_streaming_pipeline(
                 if checkpoint:
                     completed_counties = checkpoint.get('completed_counties', [])
                     start_index = checkpoint.get('next_county_index', 0)
-                    print(f"[{run_id}] Resuming from checkpoint: {len(completed_counties)}/{total_counties} counties already completed")
                 
                 # Also check data files to catch counties that completed but didn't checkpoint
                 # (e.g., Prince George's that completed but hung during cleanup)
@@ -1599,7 +1619,6 @@ def run_streaming_pipeline(
                         county_dir = run_dir / county.replace(' ', '_')
                         county_csv = county_dir / "final_contacts.csv"
                         if county_csv.exists() and county not in completed_counties:
-                            print(f"[{run_id}] Found completed county (data file exists): {county}")
                             completed_counties.append(county)
                     
                     # Recalculate start_index based on actual completed counties
@@ -1610,8 +1629,6 @@ def run_streaming_pipeline(
                         else:
                             break
                     
-                    if completed_counties:
-                        print(f"[{run_id}] Resuming: {len(completed_counties)}/{total_counties} counties completed, starting from index {start_index}")
             
             # Save initial metadata for new run or resume
             initial_metadata = {
@@ -1626,11 +1643,6 @@ def run_streaming_pipeline(
                 "display_name": _run_display_name(state, "church"),
             }
             save_run_metadata(run_id, initial_metadata)
-            
-            if resume_from_checkpoint and completed_counties:
-                print(f"[{run_id}] Resuming run: {len(completed_counties)}/{total_counties} counties already completed")
-            else:
-                print(f"[{run_id}] New run started: {total_counties} counties to process")
             
             # Update progress tracking with county info
             pipeline_runs[run_id]["totalCounties"] = total_counties
@@ -1647,18 +1659,10 @@ def run_streaming_pipeline(
                 initial_estimate = effective_remaining * avg_time_per_county
                 pipeline_runs[run_id]["initialEstimatedTimeRemaining"] = int(initial_estimate)
             
-            # Determine processing mode message
-            remaining_count = total_counties - len(completed_counties)
-            if MAX_WORKERS == 1:
-                print(f"[{run_id}] Processing {remaining_count} remaining counties sequentially...")
-            else:
-                print(f"[{run_id}] Processing {remaining_count} remaining counties with {MAX_WORKERS} parallel workers...")
-            
             # Process remaining counties (skip completed ones if resuming)
             remaining_counties = [(idx, county) for idx, county in enumerate(counties) if county not in completed_counties]
             
             if not remaining_counties:
-                print(f"[{run_id}] All counties already completed!")
                 # Update progress to show all complete
                 pipeline_runs[run_id]["progress"] = 100
                 pipeline_runs[run_id]["countiesProcessed"] = total_counties
@@ -1683,18 +1687,25 @@ def run_streaming_pipeline(
                                 pool.join()
                                 pipeline_runs[run_id]["status"] = "cancelled"
                                 pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
-                                print(f"[{run_id}] Pipeline cancelled during processing")
+                                log_warn("Pipeline cancelled during processing")
                                 return
                             
                             # Handle worker failures gracefully - continue processing other counties
                             if not result.get('success', False):
                                 error_msg = result.get('error', 'Unknown error')
-                                print(f"[{run_id}] WARNING: {county} County failed: {error_msg}")
+                                log_warn(f"{county} County failed: {error_msg}")
                                 failed_counties.append(county)
                                 # Still mark as completed to avoid infinite retry, but log the failure
                                 with checkpoint_lock:
                                     if county not in completed_counties:
                                         completed_counties.append(county)
+                                completed_fail = len(completed_counties)
+                                tc_fail = sum(
+                                    pipeline_runs[run_id].get("countyContacts") or []
+                                )
+                                log_progress_counties(
+                                    completed_fail, total_counties, tc_fail
+                                )
                                 continue
                             
                             # Update progress in main process (thread-safe)
@@ -1732,10 +1743,30 @@ def run_streaming_pipeline(
                                 
                                 pipeline_runs[run_id]["countyContacts"].append(result.get('contacts', 0))
                                 pipeline_runs[run_id]["countyChurches"].append(result.get('churches', 0))
-                            
-                            print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
-                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                            
+                                pipeline_runs[run_id]["places_api_calls_total"] = (
+                                    pipeline_runs[run_id].get("places_api_calls_total", 0)
+                                    + int(result.get("places_api_calls") or 0)
+                                )
+                                pipeline_runs[run_id]["openai_calls_total"] = (
+                                    pipeline_runs[run_id].get("openai_calls_total", 0)
+                                    + int(result.get("openai_calls") or 0)
+                                )
+                                pipeline_runs[run_id]["openai_prompt_tokens_total"] = (
+                                    pipeline_runs[run_id].get(
+                                        "openai_prompt_tokens_total", 0
+                                    )
+                                    + int(result.get("openai_prompt_tokens") or 0)
+                                )
+                                pipeline_runs[run_id]["openai_completion_tokens_total"] = (
+                                    pipeline_runs[run_id].get(
+                                        "openai_completion_tokens_total", 0
+                                    )
+                                    + int(result.get("openai_completion_tokens") or 0)
+                                )
+
+                            tc = sum(pipeline_runs[run_id].get("countyContacts") or [])
+                            log_progress_counties(completed, total_counties, tc)
+
                             # Save checkpoint after every county (CHECKPOINT_BATCH_SIZE=1) or at completion
                             # This is for progress tracking only - runs always start fresh, no resume logic
                             is_checkpoint = completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties
@@ -1763,9 +1794,7 @@ def run_streaming_pipeline(
                                 if not metadata.get("display_name"):
                                     metadata["display_name"] = _run_display_name(state, "church")
                                 save_run_metadata(run_id, metadata)
-                                
-                                print(f"[{run_id}] Checkpoint saved after {completed} counties")
-                            
+
                             # Health check after each county (lists remaining processes)
                             check_health()
                             
@@ -1780,7 +1809,7 @@ def run_streaming_pipeline(
                                 time.sleep(2.0)
                     
                     except KeyboardInterrupt:
-                        print(f"[{run_id}] Interrupted by user, cleaning up...")
+                        log_warn("Interrupted by user, cleaning up...")
                         pool.terminate()
                         pool.join()
                         # Save checkpoint before exiting
@@ -1789,16 +1818,24 @@ def run_streaming_pipeline(
                         pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
                         return
                     except Exception as e:
-                        print(f"[{run_id}] Error in pool processing: {e}")
-                        import traceback
-                        traceback.print_exc()
+                        log_err(f"Pool processing: {e}")
+                        if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in (
+                            "1",
+                            "true",
+                            "yes",
+                        ):
+                            import traceback
+
+                            traceback.print_exc()
                         # Save checkpoint before terminating
                         save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
                         pool.terminate()
                         pool.join()
                         # Don't crash - try to continue to aggregation if we have some results
                         if len(completed_counties) > 0:
-                            print(f"[{run_id}] Continuing to aggregation with {len(completed_counties)} completed counties despite error")
+                            log_warn(
+                                f"Continuing to aggregation with {len(completed_counties)} counties despite error"
+                            )
                         else:
                             # No progress made, mark as error
                             if run_id in pipeline_runs:
@@ -1808,19 +1845,27 @@ def run_streaming_pipeline(
                     
                     # Log any failed counties after all processing completes
                     if failed_counties:
-                        print(f"[{run_id}] WARNING: {len(failed_counties)} counties failed: {', '.join(failed_counties)}")
+                        log_warn(
+                            f"{len(failed_counties)} counties failed: {', '.join(failed_counties[:20])}"
+                            + (" ..." if len(failed_counties) > 20 else "")
+                        )
                         if run_id in pipeline_runs:
                             pipeline_runs[run_id]["statusMessage"] = f"Completed with {len(failed_counties)} failures"
                             return
             
             # All counties completed, aggregate results
-            print(f"[{run_id}] All counties completed ({len(completed_counties)}/{total_counties}), starting aggregation...")
             try:
                 aggregate_final_results(run_id, state)
             except Exception as e:
-                print(f"[{run_id}] Error during aggregation: {e}")
-                import traceback
-                traceback.print_exc()
+                log_err(f"Aggregation: {e}")
+                if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    import traceback
+
+                    traceback.print_exc()
                 # Still mark as completed if we have results
                 if run_id in pipeline_runs:
                     pipeline_runs[run_id]["status"] = "error"
@@ -1884,11 +1929,9 @@ def run_streaming_pipeline(
                     # Pipeline completed successfully - no container reset needed
                     # The backup branch doesn't force container restarts, allowing the container to stay running
                     # This prevents Railway from logging crashes and allows the container to handle multiple runs
-                    print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
-                    print(f"[{run_id}] Container will remain running and ready for next run")
                     pipeline_runs[run_id]["progress"] = 100
             else:
-                print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
+                pass
         
         except FileNotFoundError as e:
             # State file not found
@@ -1903,9 +1946,15 @@ def run_streaming_pipeline(
         except Exception as e:
             # Any other error - save checkpoint before exiting
             error_msg = str(e)[:500]  # Limit error message length
-            print(f"[{run_id}] Fatal error in pipeline: {error_msg}")
-            import traceback
-            traceback.print_exc()
+            log_err(f"Fatal pipeline error: {error_msg}")
+            if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                import traceback
+
+                traceback.print_exc()
             
             # Try to save checkpoint with current progress
             try:
@@ -1915,9 +1964,11 @@ def run_streaming_pipeline(
                     total_counties = checkpoint.get("total_counties", 0)
                     if len(completed_counties) > 0:
                         save_checkpoint(run_id, state, completed_counties, len(completed_counties), total_counties)
-                        print(f"[{run_id}] Checkpoint saved after fatal error: {len(completed_counties)}/{total_counties} counties")
+                        log_warn(
+                            f"Checkpoint saved after fatal error: {len(completed_counties)}/{total_counties} counties"
+                        )
             except Exception as checkpoint_error:
-                print(f"[{run_id}] Failed to save checkpoint after error: {checkpoint_error}")
+                log_warn(f"Failed to save checkpoint after error: {checkpoint_error}")
             
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
@@ -1930,9 +1981,15 @@ def run_streaming_pipeline(
         try:
             process_all_counties()
         except Exception as e:
-            print(f"[{run_id}] Unhandled exception in process_all_counties: {e}")
-            import traceback
-            traceback.print_exc()
+            log_err(f"Unhandled exception in process_all_counties: {e}")
+            if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                import traceback
+
+                traceback.print_exc()
             # Ensure status is updated even on unhandled exceptions
             if run_id in pipeline_runs:
                 pipeline_runs[run_id]["status"] = "error"
@@ -1946,12 +2003,11 @@ def run_streaming_pipeline(
                 try:
                     queue_store.finalize_job_for_run_id(run_id, SCRAPER_TYPE, str(pst), perr)
                 except Exception as qe:
-                    print(f"[{run_id}] queue finalize error: {qe}")
+                    log_warn(f"queue finalize error: {qe}")
             # Always clean up thread tracking
             if run_id in running_threads:
                 # Don't remove, just mark as not running
                 running_threads[run_id]['cancelled'] = True
-            print(f"[{run_id}] Pipeline thread completed")
     
     # Start processing in a background thread
     # Note: daemon=True means thread dies if main process exits, but we save checkpoints
@@ -3034,14 +3090,19 @@ def not_found(e):
         "available_endpoints": ["/", "/health", "/notify/test-email", "/run-pipeline", "/queue", "/queue/<job_id>", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/archive", "/runs/<run_id>/unarchive"]
     }), 404
 
-# Cleanup old runs on startup to prevent storage exhaustion
-print("[STARTUP] Running cleanup of old runs...")
-cleanup_old_runs()
+def _ensure_api_bootstrap() -> None:
+    """Run once per process: silent cleanup + queue worker (avoids duplicate startup logs)."""
+    global _bootstrap_done  # noqa: PLW0603
+    with _bootstrap_lock:
+        if _bootstrap_done:
+            return
+        _bootstrap_done = True
+        cleanup_old_runs(silent_success=True)
+        if queue_store.init_db(log_ready=False):
+            threading.Thread(target=_church_queue_worker_loop, daemon=True).start()
 
-if queue_store.init_db():
-    _church_q_thread = threading.Thread(target=_church_queue_worker_loop, daemon=True)
-    _church_q_thread.start()
-    print("[STARTUP] Queue worker thread started")
+
+_ensure_api_bootstrap()
 
 # Production: Use Waitress server
 # NOTE: If Railway runs this file directly (bypassing Dockerfile ENTRYPOINT),

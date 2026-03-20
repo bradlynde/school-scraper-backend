@@ -39,9 +39,10 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def init_db() -> bool:
+def init_db(*, log_ready: bool = True) -> bool:
     if not is_enabled():
-        print("[QUEUE] SQLITE_PATH not set — queue disabled")
+        if log_ready:
+            print("[QUEUE] SQLITE_PATH not set — queue disabled")
         return False
     with _lock:
         conn = _connect()
@@ -72,7 +73,8 @@ def init_db() -> bool:
             conn.commit()
         finally:
             conn.close()
-    print(f"[QUEUE] SQLite queue ready at {db_path()}")
+    if log_ready:
+        print(f"[QUEUE] SQLite queue ready at {db_path()}")
     return True
 
 
