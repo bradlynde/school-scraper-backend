@@ -348,6 +348,7 @@ export default function Home() {
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+  const [pipelineSubmitting, setPipelineSubmitting] = useState(false);
   const [scraperContext, setScraperContext] = useState<'school' | 'church'>('school');
 
   // Keep scraperContext in sync when user switches between school/church tabs
@@ -732,17 +733,15 @@ export default function Home() {
       return;
     }
 
-    setViewState("progress");
     setStatus("Starting pipeline...");
     setSummary(null);
     setError(null);
-    setIsRunning(true);
     setCurrentStep(0);
     setProgress(0);
-    setStartTime(Date.now());
     setEstimatedTime(null);
 
     try {
+      setPipelineSubmitting(true);
       const apiUrl = getApiUrl();
       console.log("Starting pipeline with API URL:", apiUrl);
       console.log("Request payload:", { state: selectedState.toLowerCase().replace(' ', '_'), type: selectedType });
@@ -840,27 +839,47 @@ export default function Home() {
 
       const data = await response.json();
       console.log("Pipeline response:", data);
-      
+
+      const isQueued =
+        response.status === 202 ||
+        data.status === "queued" ||
+        (data.jobId != null && data.runId == null);
+
+      if (isQueued) {
+        setViewState("start");
+        setIsRunning(false);
+        setStartTime(null);
+        setStatus(
+          data.message ||
+            `Queued — job #${data.jobId} (position ${data.position ?? "?"})`
+        );
+        return;
+      }
+
       if (data.runId) {
+        setViewState("progress");
+        setIsRunning(true);
         const now = Date.now();
         setStartTime(now);
-        // Store start time in localStorage for persistence across page reloads
-        if (typeof window !== 'undefined') {
+        if (typeof window !== "undefined") {
           localStorage.setItem(`run_startTime_${data.runId}`, now.toString());
         }
         const interval = setInterval(() => {
           checkPipelineStatus(data.runId);
-        }, 60000); // Poll every 1 minute
+        }, 60000);
         setPollingInterval(interval);
         checkPipelineStatus(data.runId);
-      } else {
-        setSummary(data);
-        setStatus("Pipeline completed successfully!");
-        setProgress(100);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        setViewState("summary");
-        setIsRunning(false);
+        return;
       }
+
+      console.warn("Unexpected run-pipeline response:", response.status, data);
+      setError(
+        data.error ||
+          data.message ||
+          "Unexpected response from the server. If you were at capacity, check the Running tab or try again."
+      );
+      setViewState("start");
+      setIsRunning(false);
     } catch (err) {
       console.error("Pipeline error:", err);
       let errorMessage = "Unknown error occurred";
@@ -900,6 +919,8 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
         clearInterval(pollingInterval);
         setPollingInterval(null);
       }
+    } finally {
+      setPipelineSubmitting(false);
     }
   }
 
@@ -1121,9 +1142,9 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
                   {/* Enhanced primary CTA button (dashboard-18) */}
                   <button
                     onClick={runPipeline}
-                    disabled={!selectedState || isFinalizing}
+                    disabled={!selectedState || isFinalizing || pipelineSubmitting}
                     className={`w-full px-8 py-5 rounded-xl text-lg font-semibold text-white transition-all duration-200 shadow-lg flex items-center justify-center gap-3 ${
-                      !selectedState || isFinalizing
+                      !selectedState || isFinalizing || pipelineSubmitting
                         ? "bg-gray-400 cursor-not-allowed opacity-60"
                         : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-xl transform hover:-translate-y-1"
                     }`}
@@ -1131,7 +1152,7 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
-                    Start Scan
+                    {pipelineSubmitting ? "Starting…" : "Start Scan"}
                   </button>
 
                 </div>
@@ -1261,7 +1282,9 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
                   ) : (
                     <div className="w-full px-8 py-5 bg-yellow-50 border border-yellow-200 rounded-xl text-center shadow-sm">
                       <p className="text-yellow-800 text-base font-medium">
-                        No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
+                        {selectedType === "church"
+                          ? "No contacts were found. This may be normal if no churches were discovered or no contacts were extracted."
+                          : "No contacts were found. This may be normal if no schools were discovered or no contacts were extracted."}
                       </p>
                     </div>
                   )}

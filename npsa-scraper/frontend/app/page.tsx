@@ -785,7 +785,13 @@ export default function Home() {
       const data = await response.json();
       console.log("Pipeline response:", data);
 
-      if (data.status === "queued") {
+      // 202 + jobId from /run-pipeline — must not fall through to "complete" (no runId yet)
+      const isQueued =
+        response.status === 202 ||
+        data.status === "queued" ||
+        (data.jobId != null && data.runId == null);
+
+      if (isQueued) {
         setViewState("start");
         setIsRunning(false);
         setStartTime(null);
@@ -796,7 +802,7 @@ export default function Home() {
         await refreshQueueJobs();
         return;
       }
-      
+
       if (data.runId) {
         setViewState("progress");
         setIsRunning(true);
@@ -811,14 +817,17 @@ export default function Home() {
         }, 60000); // Poll every 1 minute
         setPollingInterval(interval);
         checkPipelineStatus(data.runId);
-      } else {
-        setSummary(data);
-        setStatus("Pipeline completed successfully!");
-        setProgress(100);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        setViewState("summary");
-        setIsRunning(false);
+        return;
       }
+
+      console.warn("Unexpected run-pipeline response:", response.status, data);
+      setError(
+        data.error ||
+          data.message ||
+          "Unexpected response from the server. If you were at capacity, check the queue or Running tab."
+      );
+      setViewState("start");
+      setIsRunning(false);
     } catch (err) {
       console.error("Pipeline error:", err);
       let errorMessage = "Unknown error occurred";
@@ -1342,7 +1351,9 @@ export default function Home() {
                   ) : (
                     <div className="w-full px-8 py-5 bg-yellow-50 border border-yellow-200 rounded-xl text-center shadow-sm">
                       <p className="text-yellow-800 text-base font-medium">
-                        No contacts were found. This may be normal if no schools were discovered or no contacts were extracted.
+                        {selectedType === "church"
+                          ? "No contacts were found. This may be normal if no churches were discovered or no contacts were extracted."
+                          : "No contacts were found. This may be normal if no schools were discovered or no contacts were extracted."}
                       </p>
                     </div>
                   )}
