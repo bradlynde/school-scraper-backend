@@ -1,10 +1,11 @@
 "use client";
 // Force Vercel redeploy - 2025-12-13
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Sidebar from "../components/Sidebar";
 import LoginForm from "../components/LoginForm";
 import { useAuth } from "../contexts/AuthContext";
+import { getApiUrlForScraperContext } from "../lib/scraperApiUrl";
 
 type StepSummary = {
   name: string;
@@ -40,6 +41,16 @@ type PipelineSummary = {
 };
 
 type ViewState = "start" | "progress" | "summary" | "running" | "finished" | "archive";
+
+type QueueJobRow = {
+  id: number;
+  state: string;
+  display_name?: string | null;
+  status: string;
+  run_id?: string | null;
+  created_at?: string | null;
+  position?: number;
+};
 
 // Single source of truth for run progress/state
 type RunProgress = {
@@ -344,6 +355,8 @@ export default function Home() {
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+  const [queueJobs, setQueueJobs] = useState<QueueJobRow[]>([]);
+  const [pipelineSubmitting, setPipelineSubmitting] = useState(false);
 
   // Server-side elapsed time tracking - no client-side tracking needed
   // Elapsed time is now calculated server-side and included in API response
@@ -424,13 +437,52 @@ export default function Home() {
   }
 
   function getApiUrl(ctx: "school" | "church") {
-    const isChurch = ctx === "church";
-    let url = isChurch
-      ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
-      : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app");
-    url = url.replace(/\/+$/, "");
-    if (!url.match(/^https?:\/\//)) url = `https://${url}`;
-    return url;
+    return getApiUrlForScraperContext(ctx);
+  }
+
+  const refreshQueueJobs = useCallback(async () => {
+    if (selectedType !== "school" && selectedType !== "church") return;
+    if (!token) return;
+    const apiUrl = getApiUrl(selectedType === "church" ? "church" : "school");
+    try {
+      const r = await fetch(`${apiUrl}/queue`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (r.status === 503) {
+        setQueueJobs([]);
+        return;
+      }
+      if (!r.ok) return;
+      const j = await r.json();
+      setQueueJobs(Array.isArray(j.jobs) ? j.jobs : []);
+    } catch {
+      setQueueJobs([]);
+    }
+  }, [selectedType, token]);
+
+  useEffect(() => {
+    if (viewState !== "start" || (selectedType !== "school" && selectedType !== "church")) return;
+    refreshQueueJobs();
+    const interval = setInterval(refreshQueueJobs, 30000);
+    return () => clearInterval(interval);
+  }, [viewState, selectedType, refreshQueueJobs]);
+
+  async function cancelQueueJob(jobId: number) {
+    if (!token) return;
+    const apiUrl = getApiUrl(selectedType === "church" ? "church" : "school");
+    try {
+      const r = await fetch(`${apiUrl}/queue/${jobId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (r.status === 401) {
+        logout();
+        return;
+      }
+      await refreshQueueJobs();
+    } catch (e) {
+      console.error("Cancel queue job failed:", e);
+    }
   }
 
   async function checkPipelineStatus(runId: string) {
@@ -624,15 +676,13 @@ export default function Home() {
       return;
     }
 
-    setViewState("progress");
     setStatus("Starting pipeline...");
     setSummary(null);
     setError(null);
-    setIsRunning(true);
     setCurrentStep(0);
     setProgress(0);
-    setStartTime(Date.now());
     setEstimatedTime(null);
+    setPipelineSubmitting(true);
 
     try {
       const apiUrl = getApiUrl(selectedType === "church" ? "church" : "school");
@@ -732,8 +782,22 @@ export default function Home() {
 
       const data = await response.json();
       console.log("Pipeline response:", data);
+
+      if (data.status === "queued") {
+        setViewState("start");
+        setIsRunning(false);
+        setStartTime(null);
+        setStatus(
+          data.message ||
+            `Queued — job #${data.jobId} (position ${data.position ?? "?"})`
+        );
+        await refreshQueueJobs();
+        return;
+      }
       
       if (data.runId) {
+        setViewState("progress");
+        setIsRunning(true);
         const now = Date.now();
         setStartTime(now);
         // Store start time in localStorage for persistence across page reloads
@@ -780,6 +844,8 @@ export default function Home() {
         clearInterval(pollingInterval);
         setPollingInterval(null);
       }
+    } finally {
+      setPipelineSubmitting(false);
     }
   }
 
@@ -1073,13 +1139,67 @@ export default function Home() {
                       <p className="text-yellow-800 text-base font-medium">{finalizingMessage}</p>
                     </div>
                   )}
+
+                  {(selectedType === "school" || selectedType === "church") && (
+                    <div className="border border-gray-200 rounded-xl p-5 bg-gray-50/80">
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <h3 className="text-sm font-semibold text-gray-800 uppercase tracking-wide">
+                          Pipeline queue
+                        </h3>
+                        <button
+                          type="button"
+                          onClick={() => refreshQueueJobs()}
+                          className="text-sm font-medium text-[#1e3a5f] hover:underline"
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                      {queueJobs.filter((j) => j.status === "queued").length === 0 ? (
+                        <p className="text-sm text-gray-500">
+                          No queued jobs (or queue not enabled on this backend).
+                        </p>
+                      ) : (
+                        <ul className="space-y-2">
+                          {queueJobs
+                            .filter((j) => j.status === "queued")
+                            .sort((a, b) => a.id - b.id)
+                            .map((j, idx) => (
+                              <li
+                                key={j.id}
+                                className="flex flex-wrap items-center justify-between gap-2 text-sm bg-white border border-gray-200 rounded-lg px-3 py-2"
+                              >
+                                <span className="text-gray-800">
+                                  <span className="text-gray-500 mr-2">#{idx + 1}</span>
+                                  {j.display_name || j.state.replace(/_/g, " ")}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => cancelQueueJob(j.id)}
+                                  className="text-red-600 hover:text-red-800 font-medium text-xs uppercase"
+                                >
+                                  Cancel
+                                </button>
+                              </li>
+                            ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
                   
                   {/* Enhanced primary CTA button (dashboard-18) */}
                   <button
                     onClick={runPipeline}
-                    disabled={!selectedState || isFinalizing || (selectedType === "church" && username !== "Koen" && username !== "Stuart")}
+                    disabled={
+                      !selectedState ||
+                      isFinalizing ||
+                      pipelineSubmitting ||
+                      (selectedType === "church" && username !== "Koen" && username !== "Stuart")
+                    }
                     className={`w-full px-8 py-5 rounded-xl text-lg font-semibold text-white transition-all duration-200 shadow-lg flex items-center justify-center gap-3 ${
-                      !selectedState || isFinalizing || (selectedType === "church" && username !== "Koen" && username !== "Stuart")
+                      !selectedState ||
+                      isFinalizing ||
+                      pipelineSubmitting ||
+                      (selectedType === "church" && username !== "Koen" && username !== "Stuart")
                         ? "bg-gray-400 cursor-not-allowed opacity-60"
                         : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-xl transform hover:-translate-y-1"
                     }`}
@@ -1087,7 +1207,7 @@ export default function Home() {
                     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
-                    Start Scan
+                    {pipelineSubmitting ? "Starting…" : "Start Scan"}
                   </button>
 
                 </div>

@@ -3,6 +3,10 @@
 import Image from "next/image";
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import {
+  getApiUrlForScraperContext,
+  scraperSchoolAndChurchUrlsCollide,
+} from "../lib/scraperApiUrl";
 
 type RunMetadata = {
   run_id: string;
@@ -17,6 +21,8 @@ type RunMetadata = {
   csv_filename?: string;
   archived?: boolean;
   scraper_type?: 'school' | 'church';
+  /** e.g. "Alabama churches" — from API; fallback computed client-side */
+  display_name?: string;
 };
 
 type SidebarProps = {
@@ -26,15 +32,18 @@ type SidebarProps = {
   scraperContext?: 'school' | 'church';
 };
 
-const getApiUrl = (scraperContext: 'school' | 'church') => {
-  const isChurch = scraperContext === 'church';
-  let url = isChurch
-    ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
-    : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || process.env.NEXT_PUBLIC_API_URL || "https://school-scraper-backend-production.up.railway.app");
-  url = url.replace(/\/+$/, '');
-  if (!url.match(/^https?:\/\//)) url = `https://${url}`;
-  return url;
-};
+const getApiUrl = (scraperContext: 'school' | 'church') =>
+  getApiUrlForScraperContext(scraperContext);
+
+/** Title for sidebar row when display_name missing (legacy metadata). */
+function runDisplayTitle(run: RunMetadata, scraperContext: 'school' | 'church'): string {
+  if (run.display_name?.trim()) return run.display_name.trim();
+  const pretty =
+    run.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) ||
+    "Unknown";
+  const kind = scraperContext === "church" ? "churches" : "schools";
+  return `${pretty} ${kind}`;
+}
 
 const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school' }: SidebarProps) => {
   const { token, username, logout } = useAuth();
@@ -42,6 +51,15 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
   const [loading, setLoading] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [deleteConfirmRunId, setDeleteConfirmRunId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && scraperSchoolAndChurchUrlsCollide()) {
+      console.warn(
+        "[NPSA] NEXT_PUBLIC_SCHOOL_API_URL (or NEXT_PUBLIC_API_URL) and NEXT_PUBLIC_CHURCH_API_URL resolve to the same URL. " +
+          "School and Church tabs will show the same runs. Set distinct Railway URLs in Vercel env."
+      );
+    }
+  }, []);
 
   useEffect(() => {
     fetchRuns();
@@ -63,9 +81,9 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
       if (response.ok) {
         const data = await response.json();
         const allRuns = data.runs || [];
-        // Filter by scraper_type so school runs don't appear in church section and vice versa
+        // Filter by scraper_type; default missing type to current tab (not always 'school')
         const filtered = allRuns.filter((r: RunMetadata) => {
-          const type = r.scraper_type || 'school';
+          const type = r.scraper_type ?? scraperContext;
           return type === scraperContext;
         });
         setRuns(filtered);
@@ -166,6 +184,15 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
             priority
           />
         </div>
+
+        {scraperSchoolAndChurchUrlsCollide() && (
+          <div className="mx-4 mt-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-900">
+            School and Church APIs point to the same URL. Set{" "}
+            <code className="bg-amber-100 px-1 rounded">NEXT_PUBLIC_CHURCH_API_URL</code> and{" "}
+            <code className="bg-amber-100 px-1 rounded">NEXT_PUBLIC_SCHOOL_API_URL</code> to different
+            Railway services in Vercel.
+          </div>
+        )}
 
         {/* Navigation Items */}
       <nav className="p-4 space-y-2 flex-shrink-0">
@@ -438,7 +465,7 @@ const Sidebar = ({ activeTab, onTabChange, onRunSelect, scraperContext = 'school
                               <div className="flex items-start justify-between mb-3">
                                 <div className="flex-1 min-w-0">
                                   <div className="font-semibold text-sm text-gray-900 truncate">
-                                    {run.state?.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown State'}
+                                    {runDisplayTitle(run, scraperContext)}
                                   </div>
                                   <div className="text-xs text-gray-500 mt-1">
                                     {formatDate(run.created_at)}
