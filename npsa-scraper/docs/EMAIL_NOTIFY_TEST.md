@@ -1,13 +1,11 @@
-# Email (SMTP) — test without running a state
+# Email (Resend HTTP) — test without running a state
 
-Production uses **`external_services/notify.py`** with:
+Production uses **`external_services/notify.py`** → **Resend** `POST https://api.resend.com/emails`.
 
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `NOTIFY_EMAIL`
-- Optional: `NOTIFY_ON_RUN_COMPLETE=false` to turn off all sends (including test)
+**Required:** `RESEND_API_KEY`, `NOTIFY_EMAIL`  
+**Optional:** `NOTIFY_FROM` (default `onboarding@resend.dev`), `NOTIFY_ON_RUN_COMPLETE=false` to disable all sends
 
 ## 1. Authenticated API (deployed backend)
-
-After deploy, `POST` with your JWT:
 
 ```bash
 curl -sS -X POST "$API_BASE/notify/test-email" \
@@ -15,21 +13,21 @@ curl -sS -X POST "$API_BASE/notify/test-email" \
   -H "Content-Type: application/json"
 ```
 
-- Church and school services each have their own route; subject line includes `[TEST] Church Scraper` or `[TEST] School Scraper`.
+Subject includes `[TEST] Church Scraper` or `[TEST] School Scraper` per service.
 
-## 2. Local CLI (real SMTP send)
+## 2. Local script (real Resend send)
 
-From repo root, with env vars set:
+Same HTTP API as `notify.py`:
 
 ```bash
-python3 npsa-scraper/scripts/test_smtp_notify.py --church
-# or
-python3 npsa-scraper/scripts/test_smtp_notify.py --school
+export RESEND_API_KEY="re_..." NOTIFY_EMAIL="you@example.com"
+# optional: NOTIFY_FROM="onboarding@resend.dev"
+python3 npsa-scraper/scripts/test_resend.py
 ```
 
 ## 3. Unit tests (mocked, no network)
 
 ```bash
-cd "npsa-scraper/Church Contact Scraper" && python3 -m unittest tests.test_notify_smtp -v
-cd "npsa-scraper/School Contact Scraper" && python3 -m unittest tests.test_notify_smtp -v
+cd "npsa-scraper/Church Contact Scraper" && python3 -m unittest tests.test_notify_resend -v
+cd "npsa-scraper/School Contact Scraper" && python3 -m unittest tests.test_notify_resend -v
 ```

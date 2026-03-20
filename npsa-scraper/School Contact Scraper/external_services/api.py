@@ -1920,7 +1920,7 @@ def health():
 @app.route("/notify/test-email", methods=["POST", "OPTIONS"])
 @require_auth
 def notify_test_email():
-    """Send a dummy email to NOTIFY_EMAIL to verify SMTP without running a scrape. Auth required."""
+    """Send a dummy email via Resend to NOTIFY_EMAIL (no scrape). Auth required."""
     if request.method == "OPTIONS":
         response = jsonify({})
         response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
