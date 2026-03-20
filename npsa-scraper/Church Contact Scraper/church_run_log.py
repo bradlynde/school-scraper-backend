@@ -1,7 +1,9 @@
 """
 Structured operational logging for Church Contact Scraper (stdout).
 Compact format; ASCII-only symbols so Railway / log viewers don't mojibake UTF-8.
-Set CHURCH_LOG_UNICODE=1 for Unicode symbols and box chars.
+Set CHURCH_LOG_UNICODE=1 for the full “operational report” look (✓ · ⚠, ───/═══ bars,
+en dash in the title, middle dots in progress/county summaries, → before CSV), matching
+the reference layout. Default ASCII stays safe for log viewers that mangle UTF-8.
 
 Pool workers send lines through a multiprocessing.Queue so the main process prints
 one line at a time (no interleaving). Main process prints directly with flush=True
@@ -71,6 +73,11 @@ def _sym(ok: str, ascii_alt: str) -> str:
     return ok if _use_unicode() else ascii_alt
 
 
+def _dot() -> str:
+    """Middle dot between clauses (reference log); ASCII uses spaced hyphen."""
+    return " \u00b7 " if _use_unicode() else " - "
+
+
 def _pad_line(inner: str, fill: str = "-") -> str:
     inner = inner.strip()
     if len(inner) >= W:
@@ -81,7 +88,10 @@ def _pad_line(inner: str, fill: str = "-") -> str:
 def log_startup(run_id: str, state: str, county_count: int, worker_count: int) -> None:
     bar = "═" * 55 if _use_unicode() else "=" * 55
     _emit(bar)
-    _emit("  Church Scraper - Operational")
+    title = (
+        "  Church Scraper \u2013 Operational" if _use_unicode() else "  Church Scraper - Operational"
+    )
+    _emit(title)
     _emit(f"  Run ID: {run_id}")
     st = state.replace("_", " ").title()
     _emit(f"  State: {st} | Counties: {county_count} | Workers: {worker_count}")
@@ -96,13 +106,13 @@ def log_county_header(county: str, index_1_based: int, total: int) -> None:
 
 def log_church_success(name: str, n_contacts: int) -> None:
     mark = _sym("\u2713", "+")
-    sep = " - " if not _use_unicode() else " \u2014 "
+    sep = " - " if not _use_unicode() else " \u2013 "  # en dash, matches reference mockup
     _emit(f"  {mark} {name}{sep}{n_contacts} contacts")
 
 
 def log_church_skip(name: str, reason: str) -> None:
     mark = _sym("\u00b7", ".")
-    sep = " - " if not _use_unicode() else " \u2014 "
+    sep = " - " if not _use_unicode() else " \u2013 "
     _emit(f"  {mark} {name}{sep}{reason}")
 
 
@@ -122,13 +132,15 @@ def log_county_done(
     minutes: float,
 ) -> None:
     dash = "─" if _use_unicode() else "-"
-    body = f"  {n_contacts} contacts ({n_with_emails} with emails) - {minutes:.0f} min"
+    d = _dot()
+    body = f"  {n_contacts} contacts ({n_with_emails} with emails){d}{minutes:.0f} min"
     _emit(_pad_line(f"--{body} ", dash))
 
 
 def log_progress_counties(completed: int, total: int, total_contacts: int) -> None:
     dash = "─" if _use_unicode() else "-"
-    body = f" Progress: {completed}/{total} counties - {total_contacts} contacts"
+    d = _dot()
+    body = f" Progress: {completed}/{total} counties{d}{total_contacts} contacts"
     _emit(_pad_line(f"--{body} ", dash))
 
 
@@ -148,7 +160,8 @@ def log_aggregation(
     _emit(
         f"  Hunter enrichment: {hunter_found:,} found / {hunter_searched:,} searched ({pct:.1f}%)"
     )
-    _emit(f"  Final output: {final_count:,} contacts -> {csv_filename}")
+    arrow = " \u2192 " if _use_unicode() else " -> "
+    _emit(f"  Final output: {final_count:,} contacts{arrow}{csv_filename}")
     _emit(bar)
 
 
@@ -171,20 +184,28 @@ def log_cost_estimate(
     total_cost = places_cost + hunter_cost + openai_cost + railway_cost
     per = (total_cost / total_contacts) if total_contacts else 0.0
     bar = "═" * 55 if _use_unicode() else "=" * 55
+    d = _dot()
 
     _emit("  Cost Estimate")
     _emit(
-        f"  Google Places: {places_calls:,} calls ({billable_places:,} billable) - ~${places_cost:.2f}"
+        f"  Google Places: {places_calls:,} calls ({billable_places:,} billable){d}~${places_cost:.2f}"
     )
-    _emit(f"  Hunter.io: {hunter_credits:,} credits - ~${hunter_cost:.2f}")
-    _emit(f"  OpenAI: {openai_calls:,} calls - ~${openai_cost:.2f}")
-    _emit(f"  Railway: {elapsed_hours:.1f} hrs - ~${railway_cost:.2f}")
-    _emit(f"  Total: ~${total_cost:.2f} - ${per:.3f}/contact")
+    _emit(f"  Hunter.io: {hunter_credits:,} credits{d}~${hunter_cost:.2f}")
+    _emit(f"  OpenAI: {openai_calls:,} calls{d}~${openai_cost:.2f}")
+    _emit(f"  Railway: {elapsed_hours:.1f} hrs{d}~${railway_cost:.2f}")
+    tot_sep = d if _use_unicode() else " - "
+    _emit(f"  Total: ~${total_cost:.2f}{tot_sep}${per:.3f}/contact")
     _emit(bar)
 
 
 def log_state_complete(state: str, completed: int, total: int, elapsed_hours: float) -> None:
     st = state.replace("_", " ").title()
     bar = "═" * 55 if _use_unicode() else "=" * 55
-    _emit(f"  {st} complete - {completed}/{total} counties - {elapsed_hours:.1f} hrs")
+    if _use_unicode():
+        # Reference: "State complete – n/n counties · h.h hrs"
+        _emit(
+            f"  {st} complete \u2013 {completed}/{total} counties \u00b7 {elapsed_hours:.1f} hrs"
+        )
+    else:
+        _emit(f"  {st} complete - {completed}/{total} counties - {elapsed_hours:.1f} hrs")
     _emit(bar)
