@@ -22,7 +22,7 @@ RESET = '\033[0m'
 
 def bold(text: str) -> str:
     """Make text bold in terminal output"""
-    return f"{BOLD}{text}{RESET}"0
+    return f"{BOLD}{text}{RESET}"
 
 
 class PageDiscoverer:
