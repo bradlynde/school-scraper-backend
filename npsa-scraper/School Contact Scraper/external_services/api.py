@@ -47,7 +47,7 @@ from assets.shared.models import Contact
 
 # Import authentication module
 from external_services.auth import require_auth, verify_password, generate_token
-from external_services.notify import send_run_complete_email
+from external_services.notify import send_run_complete_email, send_test_notification_email
 from external_services import queue_store
 
 SCRAPER_TYPE = "school"
@@ -1902,6 +1902,7 @@ def root():
         "service": "School Scraper API",
         "endpoints": {
             "health": "/health",
+            "notify-test-email": "/notify/test-email (POST, auth)",
             "run-pipeline": "/run-pipeline (POST)",
             "pipeline-status": "/pipeline-status/<run_id> (GET)"
         }
@@ -1914,6 +1915,29 @@ def health():
     # Flask-CORS handles CORS headers automatically, but we can add explicit headers if needed
     response = jsonify({"status": "healthy"})
     return response, 200
+
+
+@app.route("/notify/test-email", methods=["POST", "OPTIONS"])
+@require_auth
+def notify_test_email():
+    """Send a dummy email to NOTIFY_EMAIL to verify SMTP without running a scrape. Auth required."""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    r = send_test_notification_email("School Scraper")
+    if r.get("ok"):
+        resp = jsonify({
+            "status": "ok",
+            "message": "Test email sent to NOTIFY_EMAIL (check inbox and spam).",
+        })
+        resp.headers.add("Access-Control-Allow-Origin", "*")
+        return resp, 200
+    err = jsonify({"status": "error", "error": r.get("error", "Unknown error")})
+    err.headers.add("Access-Control-Allow-Origin", "*")
+    return err, 400
 
 
 @app.route("/debug/volume", methods=["GET", "OPTIONS"])
@@ -2971,7 +2995,7 @@ def not_found(e):
     return jsonify({
         "status": "error",
         "error": f"Endpoint not found: {request.path}",
-        "available_endpoints": ["/", "/health", "/debug/volume", "/run-pipeline", "/queue", "/queue/<job_id>", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/archive", "/runs/<run_id>/unarchive"]
+        "available_endpoints": ["/", "/health", "/debug/volume", "/notify/test-email", "/run-pipeline", "/queue", "/queue/<job_id>", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/archive", "/runs/<run_id>/unarchive"]
     }), 404
 
 # Cleanup old runs on startup to prevent storage exhaustion
