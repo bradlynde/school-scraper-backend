@@ -392,8 +392,8 @@ def cleanup_ephemeral_run(run_id: str):
 CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "1"))
 
 # Number of parallel workers for processing counties
-# Default to 4 for parallel processing
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
+# Default 8 (override with MAX_WORKERS env). Lower if Chrome/fork errors on small instances.
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "8"))
 
 # Estimated seconds per "parallel slot" for ETA math: (counties / MAX_WORKERS) * this value.
 # Calibrated from Alabama full-state run ≈ 42h wall-clock, 67 counties, MAX_WORKERS=4:
