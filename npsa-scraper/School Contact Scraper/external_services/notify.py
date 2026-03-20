@@ -1,33 +1,90 @@
 """
-Lightweight run-completion email notifications via SMTP (stdlib only).
-Set SMTP_* and NOTIFY_EMAIL to enable. Optional: NOTIFY_ON_RUN_COMPLETE=false to disable.
+Run-completion email notifications via Resend HTTP API (https://api.resend.com/emails).
 
-Troubleshooting:
-- [Errno 101] Network is unreachable: Container (e.g. Railway) cannot reach SMTP host.
-  Fix: Use an SMTP relay that allows connections from your host (e.g. SendGrid, Mailgun,
-  Resend) or ensure SMTP_HOST is reachable from the container network. Some platforms
-  block outbound SMTP on port 25/587.
+Required: RESEND_API_KEY, NOTIFY_EMAIL
+Optional: NOTIFY_FROM (default onboarding@resend.dev), NOTIFY_ON_RUN_COMPLETE=false to disable.
 """
 
+from __future__ import annotations
+
+import html
 import os
-import smtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from typing import Optional
+from typing import Any, Optional
+
+import requests
+
+RESEND_API_URL = "https://api.resend.com/emails"
+SCRAPER_SUBJECT_TAG = "School Scraper"
 
 
 def _is_enabled() -> bool:
-    """True if all required env vars are set and notifications are not explicitly disabled."""
+    """True if Resend + recipient are configured and notifications are not explicitly disabled."""
     if os.getenv("NOTIFY_ON_RUN_COMPLETE", "true").lower() in ("false", "0", "no"):
         return False
-    return bool(
-        os.getenv("SMTP_HOST")
-        and os.getenv("SMTP_PORT")
-        and os.getenv("SMTP_USER")
-        and os.getenv("SMTP_PASSWORD")
-        and os.getenv("NOTIFY_EMAIL")
+    return bool(os.getenv("RESEND_API_KEY", "").strip() and os.getenv("NOTIFY_EMAIL", "").strip())
+
+
+def _text_to_html(text: str) -> str:
+    return (
+        '<pre style="font-family:system-ui,sans-serif;white-space:pre-wrap">'
+        f"{html.escape(text)}"
+        "</pre>"
     )
+
+
+def _send_resend_html(subject: str, html_body: str) -> None:
+    """POST to Resend. Raises on configuration or API errors."""
+    api_key = os.getenv("RESEND_API_KEY", "").strip()
+    to_email = os.getenv("NOTIFY_EMAIL", "").strip()
+    from_addr = os.getenv("NOTIFY_FROM", "onboarding@resend.dev").strip()
+    if not api_key or not to_email:
+        raise ValueError("Missing RESEND_API_KEY or NOTIFY_EMAIL")
+    try:
+        r = requests.post(
+            RESEND_API_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": from_addr,
+                "to": [to_email],
+                "subject": subject,
+                "html": html_body,
+            },
+            timeout=30,
+        )
+    except requests.RequestException as e:
+        raise RuntimeError(f"Resend request failed: {e}") from e
+    if not r.ok:
+        raise RuntimeError(f"Resend API {r.status_code}: {r.text[:800]}")
+
+
+def send_test_notification_email(service_label: str) -> dict[str, Any]:
+    """
+    Send a dummy email to NOTIFY_EMAIL to verify Resend without running a pipeline.
+
+    Returns {"ok": True} or {"ok": False, "error": "..."}.
+    """
+    if not _is_enabled():
+        return {
+            "ok": False,
+            "error": (
+                "Email notifications disabled (NOTIFY_ON_RUN_COMPLETE=false) or "
+                "missing RESEND_API_KEY / NOTIFY_EMAIL"
+            ),
+        }
+    try:
+        subject = f"[TEST] {service_label} — Resend check (NPSA)"
+        text = (
+            "This is an automated test message from the NPSA scraper email notifier.\n\n"
+            "No state scrape was run — this is only a configuration check.\n\n"
+            "If this arrived, your RESEND_API_KEY and NOTIFY_EMAIL settings are working.\n"
+        )
+        _send_resend_html(subject, _text_to_html(text))
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def send_run_complete_email(
@@ -40,24 +97,16 @@ def send_run_complete_email(
     duration_seconds: Optional[float] = None,
 ) -> None:
     """
-    Send a single run-completion notification. No-op if SMTP/NOTIFY_EMAIL not set or send fails.
-    Call only when transitioning a run to "completed"; use a notify_sent flag at the call site to send at most once per run.
+    Send a single run-completion notification. No-op if not configured or send fails.
+    Call only when transitioning a run to "completed"; use notify_sent at the call site.
     """
     if not _is_enabled():
-        print(f"[NOTIFY] Email notifications disabled (Run ID: {run_id}, State: {state}) - check NOTIFY_ON_RUN_COMPLETE env var")
+        print(
+            f"[NOTIFY] Email notifications disabled (Run ID: {run_id}, State: {state}) — "
+            "check NOTIFY_ON_RUN_COMPLETE, RESEND_API_KEY, NOTIFY_EMAIL"
+        )
         return
     try:
-        host = os.getenv("SMTP_HOST", "").strip()
-        port_str = os.getenv("SMTP_PORT", "587").strip()
-        port = int(port_str) if port_str.isdigit() else 587
-        user = os.getenv("SMTP_USER", "").strip()
-        password = os.getenv("SMTP_PASSWORD", "").strip()
-        to_email = os.getenv("NOTIFY_EMAIL", "").strip()
-        if not all([host, user, password, to_email]):
-            print(f"[NOTIFY] Email notification skipped - missing required env vars (Run ID: {run_id}, State: {state})")
-            print(f"[NOTIFY] Required: SMTP_HOST={bool(host)}, SMTP_PORT={bool(port_str)}, SMTP_USER={bool(user)}, SMTP_PASSWORD={'***' if password else 'missing'}, NOTIFY_EMAIL={bool(to_email)}")
-            return
-        # Build plain-text body
         lines = [
             f"Run completed: {state}",
             f"Run ID: {run_id}",
@@ -69,21 +118,12 @@ def send_run_complete_email(
             mins = int(duration_seconds // 60)
             secs = int(duration_seconds % 60)
             lines.append(f"Duration: {mins}m {secs}s")
-        body = "\n".join(lines)
-        subject = f"[School Scraper] Run complete: {state}"
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = user
-        msg["To"] = to_email
-        msg.attach(MIMEText(body, "plain", "utf-8"))
-        context = ssl.create_default_context()
-        with smtplib.SMTP(host, port) as server:
-            server.starttls(context=context)
-            server.login(user, password)
-            server.sendmail(user, [to_email], msg.as_string())
-        
-        # Success log
-        print(f"[NOTIFY] Run completion email sent successfully: {state} (Run ID: {run_id}, Counties: {counties_processed}/{total_counties}, Contacts: {total_contacts}, Duration: {duration_seconds}s)")
+        body_text = "\n".join(lines)
+        subject = f"[{SCRAPER_SUBJECT_TAG}] Run complete: {state}"
+        _send_resend_html(subject, _text_to_html(body_text))
+        print(
+            f"[NOTIFY] Run completion email sent: {state} (Run ID: {run_id}, "
+            f"Counties: {counties_processed}/{total_counties}, Contacts: {total_contacts})"
+        )
     except Exception as e:
-        # Log but never fail the pipeline
         print(f"[NOTIFY] Run completion email failed: {e} (Run ID: {run_id}, State: {state})")

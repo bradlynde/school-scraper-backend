@@ -25,6 +25,7 @@ import platform  # For OS detection
 import multiprocessing  # For subprocess isolation
 import re  # For regex validation
 import shutil
+from typing import Optional
 
 # Try to import psutil for process tree killing (optional)
 try:
@@ -45,7 +46,10 @@ from assets.shared.models import Contact
 
 # Import authentication module
 from external_services.auth import require_auth, verify_password, generate_token
-from external_services.notify import send_run_complete_email
+from external_services.notify import send_run_complete_email, send_test_notification_email
+from external_services import queue_store
+
+SCRAPER_TYPE = "church"
 
 # Handle hyphens in filenames using importlib.util
 import importlib.util
@@ -110,6 +114,97 @@ pipeline_runs = {}
 # Format: {run_id: {'thread': Thread, 'cancelled': bool}}
 running_threads = {}
 
+
+def _unique_running_states_after_stale_cleanup() -> set:
+    """Expire stale 'running' / old 'finalizing' entries; return set of state slugs still running."""
+    current_time = time.time()
+    for rid, run_data in list(pipeline_runs.items()):
+        run_state = run_data.get("state", "").lower()
+        status = run_data.get("status")
+        if status == "running":
+            if rid in running_threads:
+                thread = running_threads[rid].get("thread")
+                if not thread or not thread.is_alive():
+                    pipeline_runs[rid]["status"] = "cancelled"
+            else:
+                pipeline_runs[rid]["status"] = "cancelled"
+        elif status == "finalizing":
+            finalizing_at = run_data.get("finalizingAt", 0)
+            if current_time - finalizing_at >= 120:
+                pipeline_runs[rid]["status"] = "completed"
+                if "completedAt" not in pipeline_runs[rid]:
+                    pipeline_runs[rid]["completedAt"] = current_time
+    unique: set = set()
+    for rid, run_data in pipeline_runs.items():
+        if run_data.get("status") != "running":
+            continue
+        if rid not in running_threads:
+            continue
+        thread = running_threads[rid].get("thread")
+        if not thread or not thread.is_alive():
+            continue
+        st = (run_data.get("state") or "").lower()
+        if st:
+            unique.add(st)
+    return unique
+
+
+def _same_state_running(state: str) -> bool:
+    state = state.lower()
+    for rid, run_data in pipeline_runs.items():
+        if (run_data.get("state") or "").lower() != state:
+            continue
+        if run_data.get("status") != "running":
+            continue
+        if rid not in running_threads:
+            continue
+        t = running_threads[rid].get("thread")
+        if t and t.is_alive():
+            return True
+    return False
+
+
+def _state_finalizing(state: str) -> bool:
+    state = state.lower()
+    now = time.time()
+    for run_data in pipeline_runs.values():
+        if run_data.get("status") != "finalizing":
+            continue
+        if (run_data.get("state") or "").lower() != state:
+            continue
+        if now - float(run_data.get("finalizingAt") or 0) < 120:
+            return True
+    return False
+
+
+def _church_queue_worker_loop():
+    while True:
+        time.sleep(2.5)
+        if not queue_store.is_enabled():
+            continue
+        try:
+            active = _unique_running_states_after_stale_cleanup()
+            if len(active) >= 2:
+                continue
+            nxt = queue_store.peek_next_queued(SCRAPER_TYPE)
+            if not nxt:
+                continue
+            job_id, st = nxt
+            if _same_state_running(st):
+                continue
+            if _state_finalizing(st):
+                continue
+            if len(active) >= 2:
+                continue
+            run_id = str(uuid.uuid4())
+            if not queue_store.mark_job_running(job_id, run_id, SCRAPER_TYPE):
+                continue
+            run_streaming_pipeline(st, run_id, False, job_id)
+        except Exception as e:
+            print(f"[QUEUE] worker error: {e}")
+            import traceback
+            traceback.print_exc()
+
 # Track 404 requests for non-existent run IDs to prevent spam from stale browser tabs
 # Format: {run_id: (first_404_time, count)}
 not_found_runs = {}
@@ -130,8 +225,7 @@ CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
 METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Volume: only the final state CSV is persisted here
-# Church service uses /data/church (set PERSISTENT_DATA_DIR in Railway)
-VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data/church"))
+VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
 VOLUME_DIR.mkdir(parents=True, exist_ok=True)
 
 # Automatic cleanup configuration
@@ -259,6 +353,13 @@ CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "1"))
 # Default to 4 for parallel processing
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
 
+# Estimated seconds per "parallel slot" for ETA math: (counties / MAX_WORKERS) * this value.
+# Calibrated from Alabama full-state run ≈ 42h wall-clock, 67 counties, MAX_WORKERS=4:
+#   42 * 3600 / (67 / 4) ≈ 9024. Override with CHURCH_AVG_SECONDS_PER_COUNTY_SLOT if needed.
+CHURCH_AVG_SECONDS_PER_COUNTY_SLOT = int(
+    os.getenv("CHURCH_AVG_SECONDS_PER_COUNTY_SLOT", "9024")
+)
+
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
@@ -274,15 +375,19 @@ def bold(text: str) -> str:
 
 # Security: Validate run_id to prevent path traversal attacks
 UUID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+# Also allow timestamp-style IDs (e.g. 20260315211349) from /data - alphanumeric, no path chars
+SAFE_RUN_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{8,64}$')
 
 def validate_run_id(run_id: str) -> bool:
     """
-    Validate that run_id is a valid UUID format.
-    This prevents path traversal attacks (e.g., '../../../etc/passwd').
+    Validate that run_id is safe (UUID or alphanumeric).
+    Prevents path traversal attacks (e.g., '../../../etc/passwd').
+    Accepts UUID format or timestamp-style IDs from /data.
     """
     if not run_id or not isinstance(run_id, str):
         return False
-    return bool(UUID_PATTERN.match(run_id.strip()))
+    s = run_id.strip()
+    return bool(UUID_PATTERN.match(s) or SAFE_RUN_ID_PATTERN.match(s))
 
 
 def list_chrome_processes():
@@ -725,8 +830,30 @@ def load_run_metadata(run_id: str) -> dict:
         return None
 
 
+def _run_display_name(state: str, scraper_type: str) -> str:
+    """Human-readable label for UI, e.g. 'Alabama Churches' / 'Delaware Schools'."""
+    suffix = "Churches" if scraper_type == "church" else "Schools"
+    if not state:
+        return f"Unknown {suffix}"
+    pretty = str(state).replace("_", " ").strip()
+    if not pretty:
+        return f"Unknown {suffix}"
+    pretty = " ".join(w.capitalize() for w in pretty.split())
+    return f"{pretty} {suffix}"
+
+
+def _backfill_run_list_fields(metadata: dict, default_scraper_type: str) -> None:
+    """Ensure scraper_type and display_name for /runs JSON (mutates dict)."""
+    if "scraper_type" not in metadata:
+        metadata["scraper_type"] = default_scraper_type
+    st = metadata.get("scraper_type") or default_scraper_type
+    if not metadata.get("display_name"):
+        metadata["display_name"] = _run_display_name(metadata.get("state") or "", st)
+
+
 def _parse_run_from_csv_filename(name: str) -> dict | None:
     """Parse run metadata from CSV filename: {state}_leads_{run_id}_{timestamp}.csv"""
+    import re
     m = re.match(r"^(.+?)_leads_([a-f0-9\-]{36})_(\d+_\d+)\.csv$", name, re.I)
     if not m:
         return None
@@ -737,6 +864,7 @@ def _parse_run_from_csv_filename(name: str) -> dict | None:
         "status": "completed",
         "created_at": ts.replace("_", ""),
         "scraper_type": "church",
+        "display_name": _run_display_name(state, "church"),
         "archived": False,
         "_from_volume": True,
     }
@@ -755,15 +883,13 @@ def list_all_runs() -> list:
                     # Skip deleted runs (filter them out from view)
                     if metadata.get("deleted", False):
                         continue
-
+                    
                     metadata["run_id"] = metadata_file.stem  # Add run_id from filename
                     seen_ids.add(metadata["run_id"])
                     # Ensure archived field exists (default to False for backwards compatibility)
                     if "archived" not in metadata:
                         metadata["archived"] = False
-                    # Backfill scraper_type at read-time for legacy runs (this backend only stores church runs)
-                    if "scraper_type" not in metadata:
-                        metadata["scraper_type"] = "church"
+                    _backfill_run_list_fields(metadata, "church")
                     runs.append(metadata)
             except Exception as e:
                 print(f"Error reading metadata file {metadata_file}: {e}")
@@ -773,9 +899,10 @@ def list_all_runs() -> list:
         for f in VOLUME_DIR.glob("*_leads_*.csv"):
             parsed = _parse_run_from_csv_filename(f.name)
             if parsed and parsed["run_id"] not in seen_ids:
+                _backfill_run_list_fields(parsed, "church")
                 seen_ids.add(parsed["run_id"])
                 runs.append(parsed)
-
+        
         # Sort by created_at (newest first)
         runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return runs
@@ -1275,6 +1402,8 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 "total_contacts_without_emails": len(contacts_without_emails_final),
                 "status": "finalizing"  # Will be updated to "completed" after 2-minute cooldown
             })
+            if not metadata.get("display_name"):
+                metadata["display_name"] = _run_display_name(state, "church")
             save_run_metadata(run_id, metadata)
         else:
             print(f"[{run_id}] ERROR: Final CSV not created at {final_csv_path}")
@@ -1312,6 +1441,8 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                     "completed_at": datetime.now().isoformat(),
                     "completion_time": time.time()
                 })
+                if not metadata.get("display_name"):
+                    metadata["display_name"] = _run_display_name(state, "church")
                 save_run_metadata(run_id, metadata)
                 if not pipeline_runs[run_id].get("notify_sent"):
                     duration = time.time() - pipeline_runs[run_id].get("startTime", time.time())
@@ -1341,7 +1472,12 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         traceback.print_exc()
 
 
-def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool = False):
+def run_streaming_pipeline(
+    state: str,
+    run_id: str,
+    resume_from_checkpoint: bool = False,
+    queue_job_id: Optional[int] = None,
+):
     """
     Initialize the pipeline and process all counties (sequentially or in parallel).
     
@@ -1388,6 +1524,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
         "countyChurches": [],  # Track churches per county for graphs
         "startTime": time.time(),  # Track overall start time
         "initialEstimatedTimeRemaining": None,  # Static estimate calculated once at start (in seconds)
+        "queue_job_id": queue_job_id,  # SQLite queue_jobs.id if started from queue
     }
     
     def process_all_counties():
@@ -1450,6 +1587,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "start_time": time.time(),
                 "created_at": datetime.now().isoformat(),
                 "scraper_type": "church",
+                "display_name": _run_display_name(state, "church"),
             }
             save_run_metadata(run_id, initial_metadata)
             
@@ -1465,10 +1603,9 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
             pipeline_runs[run_id]["countiesProcessed"] = len(completed_counties)
             
             # Calculate static initial estimated time remaining (only if not already set)
-            # Average county time: 871 seconds (~14.5 minutes) based on Arkansas run analysis
             if pipeline_runs[run_id].get("initialEstimatedTimeRemaining") is None:
                 remaining_counties = total_counties - len(completed_counties)
-                avg_time_per_county = 871  # 14.5 minutes average from log analysis
+                avg_time_per_county = CHURCH_AVG_SECONDS_PER_COUNTY_SLOT
                 # Account for parallel processing (MAX_WORKERS)
                 effective_remaining = max(1, remaining_counties / MAX_WORKERS)
                 initial_estimate = effective_remaining * avg_time_per_county
@@ -1587,6 +1724,8 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                                     "progress": progress_pct,
                                     "last_checkpoint": time.time()
                                 })
+                                if not metadata.get("display_name"):
+                                    metadata["display_name"] = _run_display_name(state, "church")
                                 save_run_metadata(run_id, metadata)
                                 
                                 print(f"[{run_id}] Checkpoint saved after {completed} counties")
@@ -1661,6 +1800,7 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 "completed_at": datetime.now().isoformat(),
                 "completion_time": time.time(),
                 "scraper_type": "church",
+                "display_name": _run_display_name(state, "church"),
                 "churchesFound": pipeline_runs.get(run_id, {}).get("churchesFound", 0),
                 "churchesProcessed": pipeline_runs.get(run_id, {}).get("churchesProcessed", 0),
                 "countyChurches": pipeline_runs.get(run_id, {}).get("countyChurches", []),
@@ -1763,6 +1903,14 @@ def run_streaming_pipeline(state: str, run_id: str, resume_from_checkpoint: bool
                 pipeline_runs[run_id]["error"] = f"Unhandled exception: {str(e)}"
                 pipeline_runs[run_id]["statusMessage"] = f"Pipeline crashed: {str(e)}"
         finally:
+            # SQLite queue row: mark done / cancelled / failed
+            if queue_store.is_enabled() and pipeline_runs.get(run_id, {}).get("queue_job_id") is not None:
+                pst = pipeline_runs.get(run_id, {}).get("status", "error")
+                perr = pipeline_runs.get(run_id, {}).get("error")
+                try:
+                    queue_store.finalize_job_for_run_id(run_id, SCRAPER_TYPE, str(pst), perr)
+                except Exception as qe:
+                    print(f"[{run_id}] queue finalize error: {qe}")
             # Always clean up thread tracking
             if run_id in running_threads:
                 # Don't remove, just mark as not running
@@ -1789,6 +1937,7 @@ def root():
         "service": "Church Scraper API",
         "endpoints": {
             "health": "/health",
+            "notify-test-email": "/notify/test-email (POST, auth)",
             "run-pipeline": "/run-pipeline (POST)",
             "pipeline-status": "/pipeline-status/<run_id> (GET)"
         }
@@ -1801,6 +1950,113 @@ def health():
     # Flask-CORS handles CORS headers automatically, but we can add explicit headers if needed
     response = jsonify({"status": "healthy"})
     return response, 200
+
+
+@app.route("/notify/test-email", methods=["POST", "OPTIONS"])
+@require_auth
+def notify_test_email():
+    """Send a dummy email via Resend to NOTIFY_EMAIL (no scrape). Auth required."""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        return response, 200
+    r = send_test_notification_email("Church Scraper")
+    if r.get("ok"):
+        resp = jsonify({
+            "status": "ok",
+            "message": "Test email sent to NOTIFY_EMAIL (check inbox and spam).",
+        })
+        resp.headers.add("Access-Control-Allow-Origin", "*")
+        return resp, 200
+    err = jsonify({"status": "error", "error": r.get("error", "Unknown error")})
+    err.headers.add("Access-Control-Allow-Origin", "*")
+    return err, 400
+
+
+@app.route("/debug/volume", methods=["GET", "OPTIONS"])
+@require_auth
+def debug_volume():
+    """List /data (persistent volume) contents - runs, CSVs, metadata. Auth required."""
+    if request.method == "OPTIONS":
+        response = jsonify({})
+        response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN if ALLOWED_ORIGIN != "*" else "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return response, 200
+    try:
+        data_path = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
+        if not data_path.exists():
+            return jsonify({
+                "path": str(data_path),
+                "exists": False,
+                "error": "Path does not exist"
+            }), 200
+        entries = []
+        total_size = 0
+        file_count = 0
+        csv_files = []
+        for item in sorted(data_path.iterdir()):
+            try:
+                if item.is_dir():
+                    sub_count = 0
+                    sub_size = 0
+                    sub_csvs = []
+                    for sub in sorted(item.iterdir()):
+                        try:
+                            if sub.is_file():
+                                sub_count += 1
+                                sz = sub.stat().st_size
+                                sub_size += sz
+                                if sub.suffix.lower() == ".csv":
+                                    sub_csvs.append({"name": sub.name, "size": sz})
+                            elif sub.is_dir():
+                                sub_count += 1
+                                for f in sub.rglob("*"):
+                                    if f.is_file():
+                                        sub_count += 1
+                                        sz = f.stat().st_size
+                                        sub_size += sz
+                                        if f.suffix.lower() == ".csv":
+                                            sub_csvs.append({"name": f.name, "path": str(f.relative_to(data_path)), "size": sz})
+                        except OSError:
+                            pass
+                    entries.append({
+                        "name": item.name,
+                        "type": "dir",
+                        "entries": sub_count,
+                        "size_bytes": sub_size,
+                        "size_mb": round(sub_size / (1024 * 1024), 2),
+                        "csvs": sub_csvs[:20]
+                    })
+                    total_size += sub_size
+                    file_count += sub_count
+                else:
+                    sz = item.stat().st_size
+                    total_size += sz
+                    file_count += 1
+                    entries.append({
+                        "name": item.name,
+                        "type": "file",
+                        "size_bytes": sz,
+                        "size_mb": round(sz / (1024 * 1024), 2)
+                    })
+                    if item.suffix.lower() == ".csv":
+                        csv_files.append({"name": item.name, "size": sz})
+            except OSError as e:
+                entries.append({"name": item.name, "error": str(e)})
+        return jsonify({
+            "path": str(data_path),
+            "exists": True,
+            "entries": entries,
+            "total_size_bytes": total_size,
+            "total_size_mb": round(total_size / (1024 * 1024), 2),
+            "file_count": file_count,
+            "csv_files": csv_files[:50]
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # Rate limiting for login endpoint (simple in-memory implementation)
@@ -1967,15 +2223,6 @@ def run_pipeline():
                 if run_state:
                     unique_active_states.add(run_state)
         
-        # Check if adding this state would exceed the cap
-        if state.lower() not in unique_active_states and len(unique_active_states) >= 2:
-            return jsonify({
-                "status": "error",
-                "error": f"Maximum of 2 concurrent states allowed. Currently running: {', '.join(sorted(unique_active_states))}. Please wait for one to complete.",
-                "activeStates": sorted(unique_active_states),
-                "maxConcurrentStates": 2
-            }), 409  # Conflict status code
-        
         if active_runs_same_state:
             return jsonify({
                 "status": "error",
@@ -1993,11 +2240,32 @@ def run_pipeline():
                 "state": state
             }), 409  # Conflict status code
         
+        # At capacity: enqueue (third+ state) or 409 if queue disabled
+        if state.lower() not in unique_active_states and len(unique_active_states) >= 2:
+            if queue_store.is_enabled():
+                dn = _run_display_name(state, SCRAPER_TYPE)
+                q = queue_store.enqueue(state, SCRAPER_TYPE, dn)
+                resp = jsonify({
+                    "status": "queued",
+                    "jobId": q["job_id"],
+                    "position": q["position"],
+                    "message": f"Queued: {len(unique_active_states)} states already running ({', '.join(sorted(unique_active_states))})",
+                    "activeStates": sorted(unique_active_states),
+                })
+                resp.headers.add("Access-Control-Allow-Origin", "*")
+                return resp, 202
+            return jsonify({
+                "status": "error",
+                "error": f"Maximum of 2 concurrent states allowed. Currently running: {', '.join(sorted(unique_active_states))}. Please wait for one to complete.",
+                "activeStates": sorted(unique_active_states),
+                "maxConcurrentStates": 2
+            }), 409  # Conflict status code
+        
         # Generate unique run ID
         run_id = str(uuid.uuid4())
         
         # Start pipeline in background thread
-        thread = threading.Thread(target=run_streaming_pipeline, args=(state, run_id))
+        thread = threading.Thread(target=run_streaming_pipeline, args=(state, run_id, False, None))
         thread.daemon = True
         thread.start()
         
@@ -2017,6 +2285,51 @@ def run_pipeline():
         })
         error_response.headers.add("Access-Control-Allow-Origin", "*")
         return error_response, 500
+
+
+@app.route("/queue", methods=["GET", "OPTIONS"])
+@require_auth
+def church_queue_list():
+    """List SQLite queue jobs for this scraper (requires SQLITE_PATH)."""
+    if request.method == "OPTIONS":
+        r = jsonify({})
+        r.headers.add("Access-Control-Allow-Origin", "*")
+        r.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        r.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return r, 200
+    if not queue_store.is_enabled():
+        return jsonify({
+            "status": "error",
+            "error": "Queue not configured. Set SQLITE_PATH on the service.",
+        }), 503
+    jobs = queue_store.list_jobs(SCRAPER_TYPE)
+    resp = jsonify({"status": "ok", "jobs": jobs, "count": len(jobs)})
+    resp.headers.add("Access-Control-Allow-Origin", "*")
+    return resp, 200
+
+
+@app.route("/queue/<int:job_id>", methods=["DELETE", "OPTIONS"])
+@require_auth
+def church_queue_cancel(job_id: int):
+    """Cancel a queued (not yet running) job."""
+    if request.method == "OPTIONS":
+        r = jsonify({})
+        r.headers.add("Access-Control-Allow-Origin", "*")
+        r.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        r.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
+        return r, 200
+    if not queue_store.is_enabled():
+        return jsonify({"status": "error", "error": "Queue not configured."}), 503
+    ok = queue_store.cancel_queued_job(job_id, SCRAPER_TYPE)
+    if not ok:
+        return jsonify({
+            "status": "error",
+            "error": "Job not found or not in queued status",
+            "jobId": job_id,
+        }), 404
+    resp = jsonify({"status": "ok", "message": "Job cancelled", "jobId": job_id})
+    resp.headers.add("Access-Control-Allow-Origin", "*")
+    return resp, 200
 
 
 # Removed /process-county endpoint - no longer needed with multiprocessing pool approach
@@ -2105,7 +2418,7 @@ def pipeline_status(run_id):
             
             if total_counties > 0:
                 remaining_counties = max(0, total_counties - counties_processed)
-                avg_time_per_county = 871  # 14.5 minutes average from log analysis
+                avg_time_per_county = CHURCH_AVG_SECONDS_PER_COUNTY_SLOT
                 effective_remaining = max(1, remaining_counties / MAX_WORKERS)
                 estimated_remaining = effective_remaining * avg_time_per_county
                 # Round to minutes
@@ -2328,7 +2641,7 @@ def resume_run(run_id: str):
             }), 400
         
         # Start pipeline with resume flag
-        thread = threading.Thread(target=run_streaming_pipeline, args=(state, run_id, True))
+        thread = threading.Thread(target=run_streaming_pipeline, args=(state, run_id, True, None))
         thread.daemon = True
         
         # Track the thread for cancellation
@@ -2671,7 +2984,7 @@ def download_run_csv(run_id: str):
             "status": "error",
             "error": "Invalid run ID format"
         }), 400
-
+    
     try:
         csv_path = None
         download_name = f"run_{run_id}.csv"
@@ -2718,12 +3031,17 @@ def not_found(e):
     return jsonify({
         "status": "error",
         "error": f"Endpoint not found: {request.path}",
-        "available_endpoints": ["/", "/health", "/run-pipeline", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/archive", "/runs/<run_id>/unarchive"]
+        "available_endpoints": ["/", "/health", "/notify/test-email", "/run-pipeline", "/queue", "/queue/<job_id>", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/archive", "/runs/<run_id>/unarchive"]
     }), 404
 
 # Cleanup old runs on startup to prevent storage exhaustion
 print("[STARTUP] Running cleanup of old runs...")
 cleanup_old_runs()
+
+if queue_store.init_db():
+    _church_q_thread = threading.Thread(target=_church_queue_worker_loop, daemon=True)
+    _church_q_thread.start()
+    print("[STARTUP] Queue worker thread started")
 
 # Production: Use Waitress server
 # NOTE: If Railway runs this file directly (bypassing Dockerfile ENTRYPOINT),
