@@ -92,6 +92,9 @@ class LLMParser:
         self.model = model
         # Note: timeout removed to avoid "signal only works in main thread" error when running in background threads
         self.client = OpenAI(api_key=api_key)
+        self.total_api_calls = 0
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
     
     def parse_with_llm(self, html_chunk: str, church_name: str, url: str, max_retries: int = 1) -> str:
         """
@@ -121,9 +124,11 @@ HTML CONTENT:
                 # Safety check: if chunk is still too large, it should have been split earlier
                 # But as a final safeguard, we'll note it (shouldn't happen with improved chunking)
                 if len(html_chunk) > 100000:
-                    print(f"      WARNING: HTML chunk still too large ({len(html_chunk):,} chars) - this should have been split earlier!")
-                    # Don't truncate - this indicates a bug in chunking logic
-                    # Process it anyway but log the issue
+                    from church_run_log import log_warn
+
+                    log_warn(
+                        f"HTML chunk large ({len(html_chunk):,} chars) — should have been split earlier"
+                    )
                 
                 # Set max_tokens based on input size
                 if estimated_input_tokens > 20000:
@@ -147,7 +152,14 @@ HTML CONTENT:
                 
                 # Extract response text
                 response_text = response.choices[0].message.content.strip()
-                
+                self.total_api_calls += 1
+                u = getattr(response, "usage", None)
+                if u is not None:
+                    self.total_prompt_tokens += int(getattr(u, "prompt_tokens", 0) or 0)
+                    self.total_completion_tokens += int(
+                        getattr(u, "completion_tokens", 0) or 0
+                    )
+
                 return response_text
                 
             except Exception as e:
@@ -155,45 +167,52 @@ HTML CONTENT:
                 
                 # Check if it's a timeout error
                 is_timeout = 'timeout' in error_str.lower() or 'timed out' in error_str.lower()
+                from church_run_log import log_warn
+
                 if is_timeout:
-                    print(f"      {bold('[LLM]')} Request timed out (attempt {attempt + 1}/{max_retries})")
+                    log_warn(f"OpenAI timeout (attempt {attempt + 1}/{max_retries})")
                     if attempt < max_retries - 1:
                         time.sleep(1.0)
                         continue
                     return ""
-                
+
                 # Check if it's a rate limit error (429)
-                is_rate_limit = '429' in error_str or 'rate_limit' in error_str.lower() or 'rate limit' in error_str.lower()
-                
+                is_rate_limit = (
+                    "429" in error_str
+                    or "rate_limit" in error_str.lower()
+                    or "rate limit" in error_str.lower()
+                )
+
                 if is_rate_limit:
-                    # Try to extract wait time from error message
-                    wait_seconds = 1.0  # Default wait
-                    # Look for "Please try again in Xms" or "Please try again in Xs"
-                    wait_match = re.search(r'Please try again in (\d+)(ms|s)', error_str, re.IGNORECASE)
+                    wait_seconds = 1.0
+                    wait_match = re.search(
+                        r"Please try again in (\d+)(ms|s)", error_str, re.IGNORECASE
+                    )
                     if wait_match:
                         wait_value = int(wait_match.group(1))
                         wait_unit = wait_match.group(2).lower()
-                        if wait_unit == 'ms':
-                            wait_seconds = (wait_value / 1000.0) + 0.5  # Add 0.5s buffer
+                        if wait_unit == "ms":
+                            wait_seconds = (wait_value / 1000.0) + 0.5
                         else:
-                            wait_seconds = wait_value + 0.5  # Add 0.5s buffer
-                    
-                    # For rate limits, wait longer and retry
+                            wait_seconds = wait_value + 0.5
+
                     if attempt < max_retries - 1:
-                        print(f"      {bold('[LLM]')} Rate limit hit (attempt {attempt + 1}/{max_retries}), waiting {wait_seconds:.1f}s...")
+                        log_warn(
+                            f"OpenAI rate limit (attempt {attempt + 1}/{max_retries}), wait {wait_seconds:.1f}s"
+                        )
                         time.sleep(wait_seconds)
                         continue
-                    else:
-                        print(f"      {bold('[LLM]')} Rate limit exceeded after {max_retries} attempts. Skipping this chunk.")
-                        return ""
+                    log_warn("OpenAI rate limit exceeded — skipping chunk")
+                    return ""
                 else:
-                    # For other errors, use exponential backoff
                     if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        print(f"      {bold('[LLM]')} Error (attempt {attempt + 1}/{max_retries}): {e}, retrying in {wait_time}s...")
+                        wait_time = 2**attempt
+                        log_warn(
+                            f"OpenAI error (attempt {attempt + 1}/{max_retries}): {e}, retry {wait_time}s"
+                        )
                         time.sleep(wait_time)
                         continue
-                    print(f"      {bold('[LLM]')} Error: {e}")
+                    log_warn(f"OpenAI error: {e}")
                     return ""
         
         return ""

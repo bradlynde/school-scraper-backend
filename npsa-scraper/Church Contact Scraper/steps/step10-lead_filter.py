@@ -92,6 +92,9 @@ class TitleFilter:
         self.api_key = api_key
         self.model = model
         self.client = OpenAI(api_key=api_key)
+        self.total_api_calls = 0
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
     
     def filter_contact(self, contact: Dict, max_retries: int = 3) -> bool:
         """
@@ -127,13 +130,20 @@ Title: {title}"""
                     model=self.model,
                     messages=[
                         {"role": "system", "content": TITLE_FILTERING_PROMPT},
-                        {"role": "user", "content": user_message}
+                        {"role": "user", "content": user_message},
                     ],
                     temperature=0.0,
-                    max_tokens=10  # Just need "KEEP" or "EXCLUDE"
+                    max_tokens=10,
                 )
-                
-                # Extract response
+
+                self.total_api_calls += 1
+                u = getattr(response, "usage", None)
+                if u is not None:
+                    self.total_prompt_tokens += int(getattr(u, "prompt_tokens", 0) or 0)
+                    self.total_completion_tokens += int(
+                        getattr(u, "completion_tokens", 0) or 0
+                    )
+
                 response_text = response.choices[0].message.content.strip().upper()
         
                 # Parse response
@@ -142,40 +152,49 @@ Title: {title}"""
                 elif "EXCLUDE" in response_text:
                     return False
                 else:
-                    # Default to exclude if unclear
-                    print(f"      WARNING: Unexpected LLM response for {first_name} {last_name}: {response_text}")
+                    from church_run_log import log_warn
+
+                    log_warn(
+                        f"Title filter unexpected LLM reply for {first_name} {last_name}: {response_text}"
+                    )
                     return False
-                
+
             except Exception as e:
+                from church_run_log import log_warn
+
                 error_str = str(e)
-                is_rate_limit = '429' in error_str or 'rate_limit' in error_str.lower()
-                
+                is_rate_limit = "429" in error_str or "rate_limit" in error_str.lower()
+
                 if is_rate_limit:
                     wait_seconds = 1.0
-                    import re
-                    wait_match = re.search(r'Please try again in (\d+)(ms|s)', error_str, re.IGNORECASE)
+                    wait_match = re.search(
+                        r"Please try again in (\d+)(ms|s)", error_str, re.IGNORECASE
+                    )
                     if wait_match:
                         wait_value = int(wait_match.group(1))
                         wait_unit = wait_match.group(2).lower()
-                        if wait_unit == 'ms':
+                        if wait_unit == "ms":
                             wait_seconds = (wait_value / 1000.0) + 0.5
                         else:
                             wait_seconds = wait_value + 0.5
-                    
+
                     if attempt < max_retries - 1:
-                        print(f"      {bold('[LLM]')} Rate limit hit (attempt {attempt + 1}/{max_retries}), waiting {wait_seconds:.1f}s...")
+                        log_warn(
+                            f"Title filter rate limit (attempt {attempt + 1}/{max_retries}), wait {wait_seconds:.1f}s"
+                        )
                         time.sleep(wait_seconds)
                         continue
-                    else:
-                        print(f"      {bold('[LLM]')} Rate limit exceeded. Excluding contact.")
-                        return False
+                    log_warn("Title filter rate limit — excluding contact")
+                    return False
                 else:
                     if attempt < max_retries - 1:
-                        wait_time = 2 ** attempt
-                        print(f"      WARNING: LLM error (attempt {attempt + 1}/{max_retries}): {e}, retrying in {wait_time}s...")
+                        wait_time = 2**attempt
+                        log_warn(
+                            f"Title filter error (attempt {attempt + 1}/{max_retries}): {e}, retry {wait_time}s"
+                        )
                         time.sleep(wait_time)
                         continue
-                    print(f"      ERROR: LLM error: {e}")
+                    log_warn(f"Title filter LLM error: {e}")
                     return False
         
         return False
@@ -191,11 +210,10 @@ Title: {title}"""
         """
         # Read contacts from Step 9
         df = pd.read_csv(input_csv)
-        print(f"{bold('[STEP 10]')} Processing {len(df)} contacts")
-        
+
         kept_contacts = []
         excluded_contacts = []
-        
+
         for idx, row in df.iterrows():
             contact = {
                 'first_name': row.get('first_name', ''),
@@ -206,9 +224,6 @@ Title: {title}"""
                 'church_name': row.get('church_name', ''),
                 'source_url': row.get('source_url', '')
             }
-            
-            if (idx + 1) % 50 == 0:
-                print(f"{bold('[STEP 10]')} Progress: {idx + 1}/{len(df)} contacts")
             
             # Filter by title
             should_keep = self.filter_contact(contact, max_retries=5)
@@ -234,9 +249,6 @@ Title: {title}"""
             df_excluded = pd.DataFrame(excluded_contacts)
             df_excluded.to_csv(output_excluded_csv, index=False)
         
-        print(f"{bold('[STEP 10]')} Complete: {len(kept_contacts)} kept, {len(excluded_contacts)} excluded from {len(df)} total")
-
-
 if __name__ == "__main__":
     import argparse
     

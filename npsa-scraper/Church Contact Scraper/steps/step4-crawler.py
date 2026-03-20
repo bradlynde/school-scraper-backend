@@ -35,6 +35,8 @@ from typing import List, Dict, Set, Optional
 import pandas as pd
 from collections import defaultdict
 
+from church_run_log import log_err, log_warn
+
 # Try to import psutil for process tree killing (optional)
 try:
     import psutil
@@ -217,36 +219,16 @@ class ContentCollector:
             # Verify dumb-init is PID 1 (critical for proper process reaping)
             # If PID 1 is not dumb-init, Railway may have overridden ENTRYPOINT
             # This will cause zombie processes to accumulate over time
-            if HAS_PSUTIL:
-                try:
-                    pid1 = psutil.Process(1)
-                    pid1_name = pid1.name().lower()
-                    # Check if PID 1 is dumb-init (or init system)
-                    if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
-                        # This is a real issue - log it once per driver setup
-                        # Don't spam logs, but make it clear this needs attention
-                        import sys
-                        print(f"    {bold('[SELENIUM]')} WARNING: PID 1 is '{pid1_name}', expected 'dumb-init'. Process reaping may not work correctly.", file=sys.stderr)
-                        print(f"    {bold('[SELENIUM]')} This may cause zombie Chrome processes. Check Railway ENTRYPOINT configuration.", file=sys.stderr)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass  # Can't verify, but continue anyway
-            
             return driver
         except Exception as e:
             if retry_count < max_retries:
-                # Cleanup any leftover Chrome processes before retry (bottom-up)
                 self._kill_all_chrome_processes()
-                
-                # 2 second grace period between retries
-                print(f"    {bold('[SELENIUM]')} Failed to create Chrome driver (attempt {retry_count + 1}/{max_retries + 1}): {e}")
-                print(f"    {bold('[SELENIUM]')} Retrying in 2s...")
                 time.sleep(2)
-                return self._setup_selenium(retry_count=retry_count + 1, max_retries=max_retries)
+                return self._setup_selenium(
+                    retry_count=retry_count + 1, max_retries=max_retries
+                )
             else:
-                # Final attempt with minimal options
-                # Cleanup any leftover Chrome processes before final attempt (bottom-up)
                 self._kill_all_chrome_processes()
-                print(f"    {bold('[SELENIUM]')} All retries exhausted, trying minimal options...")
             try:
                 minimal_options = Options()
                 minimal_options.add_argument('--headless')
@@ -258,12 +240,10 @@ class ContentCollector:
                 chromedriver_path = os.getenv('CHROMEDRIVER_PATH', '/usr/bin/chromedriver')
                 service = Service(executable_path=chromedriver_path)
                 driver = webdriver.Chrome(service=service, options=minimal_options)
-                # Page load timeout handled by thread timeout (900s)
-                driver.set_script_timeout(900)  # Script timeout matches unified timeout
-                print(f"    {bold('[SELENIUM]')} Driver created with minimal options")
+                driver.set_script_timeout(900)
                 return driver
             except Exception as e2:
-                print(f"    {bold('[SELENIUM]')} ERROR: Could not create Chrome driver even with minimal options: {e2}")
+                log_err(f"Chrome driver failed (minimal options): {e2}")
                 raise
     
     def _wait_for_driver_ready(self, driver, max_wait=5):
@@ -328,10 +308,6 @@ class ContentCollector:
     
     def cleanup(self):
         """Basic cleanup: quit Selenium driver and kill all Chrome processes (bottom-up)"""
-        # Monitor processes before cleanup
-        before_zombies, before_orphaned, before_active = self._get_process_counts()
-        print(f"    {bold('[CLEANUP]')} BEFORE: Chrome processes - Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
-        
         # Cleanup Chrome processes first (bottom-up) before quitting driver
         self._kill_all_chrome_processes()
         time.sleep(0.5)  # Wait for children to die
@@ -349,15 +325,11 @@ class ContentCollector:
                 self._kill_all_chrome_processes()
                 self._kill_orphaned_chrome_processes()
         except Exception as e:
-            # Even if quit() fails, try to kill processes
+            log_err(f"Chrome cleanup (driver.quit): {e}")
             self._kill_all_chrome_processes()
             self._kill_orphaned_chrome_processes()
         finally:
             self.driver = None
-            
-            # Monitor processes after cleanup
-            after_zombies, after_orphaned, after_active = self._get_process_counts()
-            print(f"    {bold('[CLEANUP]')} AFTER: Chrome processes - Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}")
     
     def _get_process_counts(self):
         """Get current Chrome process counts: (zombies, orphaned_zombies, active)"""
@@ -410,11 +382,7 @@ class ContentCollector:
         if not HAS_PSUTIL:
             return 0
         
-        # Monitor processes before cleanup
-        before_zombies, before_orphaned, before_active = self._get_process_counts()
-        print(f"      {bold('[CLEANUP]')} BEFORE kill_all: Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
-        
-        killed_count = 0  # Initialize early to ensure it's always defined
+        killed_count = 0
         
         try:
             current_pid = os.getpid()
@@ -559,12 +527,8 @@ class ContentCollector:
                 pass
             
         except Exception as e:
-            pass
-        
-        # Monitor processes after cleanup
-        after_zombies, after_orphaned, after_active = self._get_process_counts()
-        print(f"      {bold('[CLEANUP]')} AFTER kill_all: Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}, Killed: {killed_count}")
-        
+            log_err(f"Chrome kill_all cleanup: {e}")
+
         return killed_count
     
     def _kill_orphaned_chrome_processes(self):
@@ -739,8 +703,7 @@ class ContentCollector:
         
         # Check if thread is still alive (timed out)
         if thread.is_alive():
-            # Timeout occurred - kill children FIRST (bottom-up) before quitting driver
-            print(f"      [TIMEOUT] Page load exceeded {timeout}s, forcefully terminating...")
+            log_warn(f"Page load exceeded {timeout}s; terminating navigation thread")
             try:
                 # CRITICAL: Kill children BEFORE parent to prevent orphans
                 # Step 1: Kill all Chrome processes in worker's tree (bottom-up)
@@ -862,7 +825,6 @@ class ContentCollector:
                     # Check if it's a connection refused error (driver not ready)
                     if 'connection refused' in error_str or 'errno 111' in error_str:
                         if attempt < max_retries - 1:
-                            print(f"    {bold('[SELENIUM]')} Driver not ready, retrying in 2s...")
                             self.driver = None
                             time.sleep(2)  # 2 second grace period before retry
                             continue
@@ -875,7 +837,7 @@ class ContentCollector:
             return None
             
         except Exception as e:
-            print(f"      Selenium error: {e}")
+            log_err(f"Selenium error: {e}")
             return None
         finally:
             # Get process counts before cleanup
@@ -940,8 +902,7 @@ class ContentCollector:
         
         # Check if thread is still alive (timed out)
         if collection_thread.is_alive():
-            # TIMEOUT: Kill everything and cleanup
-            print(f"    [TIMEOUT] Page processing exceeded {TIMEOUT}s hard limit, forcefully terminating...")
+            log_warn(f"Page processing exceeded {TIMEOUT}s; forcing cleanup")
             try:
                 # List processes before cleanup
                 
@@ -971,9 +932,9 @@ class ContentCollector:
                 # List processes after cleanup to verify
                 remaining = self._list_all_chrome_processes()
                 if remaining > 0:
-                    print(f"    {bold('[TIMEOUT]')} WARNING: {remaining} Chrome processes still active after cleanup!")
+                    log_warn(f"{remaining} Chrome processes still active after timeout cleanup")
             except Exception as e:
-                print(f"    [TIMEOUT] Error during cleanup: {e}")
+                log_err(f"Timeout cleanup error: {e}")
             
             # Add 3-second buffer after cleanup to prevent connection refused warnings
             time.sleep(3.0)
@@ -1000,13 +961,12 @@ class ContentCollector:
             if not response:
                 # If requests failed, try Selenium directly (if enabled)
                 if self.use_selenium:
-                    print(f"    WARNING: Requests failed, trying Selenium...")
                     html_selenium = self.fetch_with_selenium(url, interact=True)
                     if html_selenium:
                         html = html_selenium
                         fetch_method = 'selenium'
                 else:
-                    print(f"    ERROR: Failed to fetch page content")
+                    log_err(f"Failed to fetch page content: {url}")
                     return None
             else:
                 html = response.text
@@ -1042,7 +1002,6 @@ class ContentCollector:
                 # Check for name patterns in titles as last resort
                 name_pattern = re.search(r'\b[A-Z][a-z]+ [A-Z][a-z]+\b', title_text)
                 if not name_pattern:
-                    print(f"    [SKIP] Page doesn't appear relevant (no emails, no admin titles) - skipping")
                     return None
             
             # Timeout is handled by thread timeout (900s) - no need to check here
@@ -1071,11 +1030,6 @@ class ContentCollector:
             if should_use_selenium:
                 # Timeout is handled by thread timeout (900s) - proceed with Selenium if needed
                 if self.use_selenium:
-                    if not emails or len(emails) == 0:
-                        print(f"    No emails in HTML, trying Selenium (click/hover reveals)...")
-                    else:
-                        print(f"    Found {len(emails)} emails + high-value titles detected, using Selenium for comprehensive extraction...")
-                    
                     # TIER 2: Use Selenium for better extraction
                     html_selenium = self.fetch_with_selenium(url, interact=True)
                     if html_selenium:
@@ -1085,11 +1039,9 @@ class ContentCollector:
                         # Re-check emails after Selenium
                         emails_after = self.extract_emails(html)
                         if emails_after:
-                            was_count = len(emails) if emails else 0
-                            print(f"      Emails found: {len(emails_after)} (method=\"selenium\", was={was_count})")
                             emails = emails_after
             else:
-                print(f"      Emails found: {len(emails)} (method=\"simple_html\")")
+                pass
             
             # Timeout is handled by thread timeout (900s) - no need to check here
             
