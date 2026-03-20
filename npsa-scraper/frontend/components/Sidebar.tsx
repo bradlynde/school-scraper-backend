@@ -7,6 +7,7 @@ import {
   getApiUrlForScraperContext,
   scraperSchoolAndChurchUrlsCollide,
 } from "../lib/scraperApiUrl";
+import { normalizeScraperDisplayTitle } from "../lib/scraperDisplayName";
 
 type RunMetadata = {
   run_id: string;
@@ -37,11 +38,11 @@ const getApiUrl = (scraperContext: 'school' | 'church') =>
 
 /** Title for sidebar row when display_name missing (legacy metadata). */
 function runDisplayTitle(run: RunMetadata, scraperContext: 'school' | 'church'): string {
-  if (run.display_name?.trim()) return run.display_name.trim();
+  if (run.display_name?.trim()) return normalizeScraperDisplayTitle(run.display_name);
   const pretty =
     run.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) ||
     "Unknown";
-  const kind = scraperContext === "church" ? "churches" : "schools";
+  const kind = scraperContext === "church" ? "Churches" : "Schools";
   return `${pretty} ${kind}`;
 }
 

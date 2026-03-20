@@ -7,6 +7,7 @@ import LoginForm from "../components/LoginForm";
 import LOEGenerator from "../components/LOEGenerator";
 import Homepage from "../components/Homepage";
 import { useAuth } from "../contexts/AuthContext";
+import { normalizeScraperDisplayTitle } from "../lib/scraperDisplayName";
 
 type StepSummary = {
   name: string;
@@ -49,6 +50,17 @@ type QueueJobRow = {
   run_id?: string | null;
   created_at?: string | null;
 };
+
+function queueJobDisplayLabel(
+  j: Pick<QueueJobRow, "display_name" | "state">,
+  scraperContext: "school" | "church"
+): string {
+  if (j.display_name?.trim()) return normalizeScraperDisplayTitle(j.display_name);
+  const pretty =
+    j.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) || "Unknown";
+  const kind = scraperContext === "church" ? "Churches" : "Schools";
+  return `${pretty} ${kind}`;
+}
 
 type ViewState = "start" | "progress" | "summary" | "running" | "finished" | "archive";
 
@@ -1386,9 +1398,9 @@ Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CO
                     )}
                   </div>
                   <h2 className="text-xl font-semibold text-gray-900">
-                    {selectedQueueDetail?.job.display_name?.trim() ||
-                      selectedQueueDetail?.job.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) ||
-                      "Queued scrape"}
+                    {selectedQueueDetail
+                      ? queueJobDisplayLabel(selectedQueueDetail.job, scraperContext)
+                      : "Queued scrape"}
                   </h2>
                   <p className="text-gray-600 mt-4">
                     It will start automatically when a worker slot opens. You can remove it from the queue using the trash

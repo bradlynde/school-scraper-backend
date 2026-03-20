@@ -6,6 +6,7 @@ import Sidebar from "../components/Sidebar";
 import LoginForm from "../components/LoginForm";
 import { useAuth } from "../contexts/AuthContext";
 import { getApiUrlForScraperContext } from "../lib/scraperApiUrl";
+import { normalizeScraperDisplayTitle } from "../lib/scraperDisplayName";
 
 type StepSummary = {
   name: string;
@@ -51,6 +52,17 @@ type QueueJobRow = {
   created_at?: string | null;
   position?: number;
 };
+
+function queueJobDisplayLabel(
+  j: Pick<QueueJobRow, "display_name" | "state">,
+  scraperContext: "school" | "church"
+): string {
+  if (j.display_name?.trim()) return normalizeScraperDisplayTitle(j.display_name);
+  const pretty =
+    j.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) || "Unknown";
+  const kind = scraperContext === "church" ? "Churches" : "Schools";
+  return `${pretty} ${kind}`;
+}
 
 // Single source of truth for run progress/state
 type RunProgress = {
@@ -1237,7 +1249,10 @@ export default function Home() {
                               >
                                 <span className="text-gray-800">
                                   <span className="text-gray-500 mr-2">#{idx + 1}</span>
-                                  {j.display_name || j.state.replace(/_/g, " ")}
+                                  {queueJobDisplayLabel(
+                                    j,
+                                    selectedType === "church" ? "church" : "school"
+                                  )}
                                 </span>
                                 <button
                                   type="button"
@@ -1445,9 +1460,9 @@ export default function Home() {
                     )}
                   </div>
                   <h2 className="text-xl font-semibold text-gray-900">
-                    {selectedQueueDetail?.job.display_name?.trim() ||
-                      selectedQueueDetail?.job.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) ||
-                      "Queued scrape"}
+                    {selectedQueueDetail
+                      ? queueJobDisplayLabel(selectedQueueDetail.job, scraperContext)
+                      : "Queued scrape"}
                   </h2>
                   <p className="text-gray-600 mt-4">
                     It will start automatically when a worker slot opens. You can remove it from the queue using the trash

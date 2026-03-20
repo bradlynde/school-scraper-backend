@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { normalizeScraperDisplayTitle } from "../lib/scraperDisplayName";
 
 type RunMetadata = {
   run_id: string;
@@ -51,10 +52,10 @@ const getApiUrl = (scraperContext: 'school' | 'church') => {
 };
 
 function runDisplayTitle(run: RunMetadata, scraperContext: "school" | "church"): string {
-  if (run.display_name?.trim()) return run.display_name.trim();
+  if (run.display_name?.trim()) return normalizeScraperDisplayTitle(run.display_name);
   const pretty =
     run.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) || "Unknown";
-  const kind = scraperContext === "church" ? "churches" : "schools";
+  const kind = scraperContext === "church" ? "Churches" : "Schools";
   return `${pretty} ${kind}`;
 }
 

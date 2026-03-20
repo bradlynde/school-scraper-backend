@@ -831,8 +831,8 @@ def load_run_metadata(run_id: str) -> dict:
 
 
 def _run_display_name(state: str, scraper_type: str) -> str:
-    """Human-readable label for UI, e.g. 'Alabama churches' / 'Iowa schools'."""
-    suffix = "churches" if scraper_type == "church" else "schools"
+    """Human-readable label for UI, e.g. 'Alabama Churches' / 'Delaware Schools'."""
+    suffix = "Churches" if scraper_type == "church" else "Schools"
     if not state:
         return f"Unknown {suffix}"
     pretty = str(state).replace("_", " ").strip()
