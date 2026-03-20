@@ -32,7 +32,11 @@ class ChurchSearcher:
     def __init__(self, api_key: str, global_max_api_calls: int = None, max_churches: int = None, target_state: str = 'texas'):
         # Debug: Verify API key is received
         if not api_key or len(api_key) < 10:
-            print(f"WARNING: API key appears invalid in ChurchSearcher.__init__ (length: {len(api_key) if api_key else 0})")
+            from church_run_log import log_warn
+
+            log_warn(
+                f"Places API key invalid in ChurchSearcher (length: {len(api_key) if api_key else 0})"
+            )
         self.api_key = api_key
         self.global_max_api_calls = global_max_api_calls
         self.max_churches = max_churches
@@ -208,12 +212,12 @@ class ChurchSearcher:
         Search for Christian/Catholic churches in a specific county.
         YIELDS Church objects one at a time (generator).
         
-        Uses 28 search terms (curated for yield).
+        Uses 20 search terms for church discovery.
         """
         if state is None:
             state = self.full_state_name
         
-        # Search terms - 28 terms (ordered by yield)
+        # Search terms - 20 terms
         all_search_terms = [
             f"Churches in {county} County, {state}",
             f"Christian churches in {county} County, {state}",
@@ -231,26 +235,20 @@ class ChurchSearcher:
             f"Catholic churches in {county} County, {state}",
             f"Lutheran churches in {county} County, {state}",
             f"Presbyterian churches in {county} County, {state}",
-            f"Evangelical Presbyterian church in {county} County, {state}",
             f"Episcopal churches in {county} County, {state}",
             f"Anglican church in {county} County, {state}",
             f"Church of the Nazarene in {county} County, {state}",
             f"Church of God in {county} County, {state}",
-            f"Full Gospel church in {county} County, {state}",
-            f"Charismatic church in {county} County, {state}",
-            f"Calvary Chapel in {county} County, {state}",
-            f"Vineyard church in {county} County, {state}",
-            f"Fellowship church in {county} County, {state}",
-            f"Worship center in {county} County, {state}",
-            f"Nazarene church in {county} County, {state}",
         ]
-        # Default to all 28 terms when not specified
+        # Default to all 20 terms when not specified
         limit = max_search_terms if max_search_terms is not None else len(all_search_terms)
         search_terms = all_search_terms[:max(0, limit)]
 
         for query in search_terms:
             if self._hit_global_limit():
-                print(f"    Global API call limit reached. Stopping {county} County search.")
+                from church_run_log import log_warn
+
+                log_warn(f"Places API cap reached — stopping {county} County search")
                 break
 
             try:
@@ -268,19 +266,9 @@ class ChurchSearcher:
                     'languageCode': 'en'
                 }
                 
-                if not self.api_key or len(self.api_key) < 10:
-                    print(f"    WARNING: API key appears invalid (length: {len(self.api_key) if self.api_key else 0})")
-                
-                response = requests.post(self.text_search_url, headers=headers, json=request_body, timeout=60)
-                
-                if response.status_code != 200:
-                    try:
-                        error_data = response.json() if response.content else {}
-                        error_msg = error_data.get('error', {}).get('message', 'Unknown error')
-                        if response.status_code == 400:
-                            print(f"    DEBUG: Full error response: {error_data}")
-                    except Exception as e:
-                        print(f"    DEBUG: Could not parse error response: {e}")
+                response = requests.post(
+                    self.text_search_url, headers=headers, json=request_body, timeout=60
+                )
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -322,20 +310,32 @@ class ChurchSearcher:
                 elif response.status_code == 204:
                     pass
                 else:
+                    from church_run_log import log_warn
+
                     try:
                         error_data = response.json() if response.content else {}
-                        error_msg = error_data.get('error', {}).get('message', 'Unknown error')
+                        error_msg = error_data.get("error", {}).get(
+                            "message", "Unknown error"
+                        )
                         if response.status_code == 403:
-                            print(f"    API authentication error for query '{query}': {error_msg}")
+                            log_warn(
+                                f"Places API 403: {query[:50]} — {error_msg[:120]}"
+                            )
                         else:
-                            print(f"    API error for query '{query}': HTTP {response.status_code} - {error_msg}")
-                    except:
-                        print(f"    API error for query '{query}': HTTP {response.status_code} - {response.text[:200]}")
+                            log_warn(
+                                f"Places API HTTP {response.status_code}: {query[:40]} — {error_msg[:100]}"
+                            )
+                    except Exception:
+                        log_warn(
+                            f"Places API HTTP {response.status_code}: {query[:40]}"
+                        )
                 
                 time.sleep(0.1)
                 
             except Exception as e:
-                print(f"    Error on query '{query}': {e}")
+                from church_run_log import log_warn
+
+                log_warn(f"Places error on query '{query[:50]}': {e}")
                 time.sleep(2)
             
             if self._hit_global_limit():
@@ -362,30 +362,25 @@ class ChurchSearcher:
             counties_to_search = shuffled_counties[:batch_size]
         else:
             counties_to_search = shuffled_counties
-        print(f"{bold('[STEP 1]')} Starting discovery: {len(counties_to_search)} counties, API cap: {self.global_max_api_calls or 'None'}")
-        
         start_time = time.time()
-        
+
         for i, county in enumerate(counties_to_search, 1):
             if self._hit_global_limit():
-                print(f"Global API call cap reached after {i-1} counties.")
+                from church_run_log import log_warn
+
+                log_warn(f"Places API cap after {i - 1} counties")
                 break
-            
-            print(f"[{i}/{len(counties_to_search)}] Searching {county} County...")
+
             county_start = time.time()
-            
             churches_found = 0
             for church in self.search_county(county, state, max_search_terms):
                 churches_found += 1
-                self.stats['counties_searched'] = i
+                self.stats["counties_searched"] = i
                 yield church
-            
-            county_time = time.time() - county_start
-            if churches_found > 0 or (i % 5 == 0):
-                print(f"{bold('[STEP 1]')} {county}: {churches_found} churches ({county_time:.1f}s) | Total: {self.stats['total_churches_found']} churches, {self.stats['total_api_calls']} API calls")
-            
+
+            _ = time.time() - county_start
+
             if self._hit_global_limit():
                 break
-        
-        elapsed = time.time() - start_time
-        print(f"{bold('[STEP 1]')} Complete: {self.stats['counties_searched']} counties, {self.stats['total_churches_found']} churches, {self.stats['total_api_calls']} API calls, {elapsed/60:.1f} min")
+
+        _ = time.time() - start_time

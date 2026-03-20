@@ -12,11 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl gnupg unzip ca-certificates \
     chromium chromium-driver \
     dumb-init \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* \
-    && echo "Verifying dumb-init installation..." \
-    && which dumb-init || echo "ERROR: dumb-init not in PATH" \
-    && dumb-init --version || echo "ERROR: dumb-init not executable" \
-    && ls -la /usr/bin/dumb-init || echo "ERROR: /usr/bin/dumb-init not found"
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Note: Pinning specific versions requires checking available versions in apt
 # For now, we install latest but Selenium will use explicit path to bypass Manager
@@ -28,11 +24,11 @@ ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 WORKDIR /app
 
 # Install Python dependencies
-COPY ["requirements.txt", "./requirements.txt"]
+COPY ["npsa-scraper/requirements.txt", "./requirements.txt"]
 RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Copy the School Contact Scraper directory contents
-COPY School\ Contact\ Scraper/ ./
+# Copy the Church Contact Scraper directory contents
+COPY ["npsa-scraper/Church Contact Scraper/", "./"]
 
 # Verify assets/data/state_counties directory exists
 RUN ls -la assets/data/state_counties/ | head -5 || echo "Warning: assets/data/state_counties directory not found"
@@ -45,9 +41,5 @@ EXPOSE 8080
 # Waitress is a pure-Python WSGI server that uses a fixed thread pool, eliminating thread exhaustion issues
 # It's designed for production workloads and handles long-running processes better than Flask's dev server
 # dumb-init acts as PID 1 and automatically reaps zombie processes (fixes Chrome zombie accumulation)
-# Use exec form for ENTRYPOINT to ensure dumb-init is PID 1
-# Use shell form for CMD to allow PORT environment variable expansion
-# This matches the working backup branch configuration
 ENTRYPOINT ["dumb-init", "--"]
 CMD waitress-serve --host=0.0.0.0 --port=${PORT:-8080} --threads=4 --channel-timeout=300 external_services.api:app
-

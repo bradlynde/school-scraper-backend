@@ -19,8 +19,20 @@ from pathlib import Path
 import traceback
 import importlib.util
 
+
+def _maybe_traceback():
+    if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in ("1", "true", "yes"):
+        traceback.print_exc()
+
 # Import shared models
 from assets.shared.models import Church, Page, PageContent, Contact
+from church_run_log import (
+    log_church_skip,
+    log_church_success,
+    log_county_done,
+    log_err,
+    log_warn,
+)
 
 # Import streaming steps
 _script_dir = Path(__file__).parent
@@ -103,7 +115,9 @@ class StreamingPipeline:
         self.max_churches = max_churches
         
         if not google_api_key or len(google_api_key) < 10:
-            print(f"WARNING: Google API key appears invalid in Pipeline (length: {len(google_api_key) if google_api_key else 0})")
+            log_warn(
+                f"Google API key appears invalid in Pipeline (length: {len(google_api_key) if google_api_key else 0})"
+            )
         self.church_searcher = ChurchSearcher(google_api_key, global_max_api_calls, max_churches=max_churches, target_state=state)
         
         if openai_api_key:
@@ -115,7 +129,7 @@ class StreamingPipeline:
                     batch_size=20
                 )
             except Exception as e:
-                print(f"WARNING: Could not initialize LLM church filter: {e}")
+                log_warn(f"Could not initialize LLM church filter: {e}")
                 self.llm_church_filter = None
         else:
             self.llm_church_filter = None
@@ -135,13 +149,17 @@ class StreamingPipeline:
         self.all_contacts = []
         self.unique_contacts_set = set()
         self.stats = {
-            'churches_discovered': 0,
-            'churches_filtered_out': 0,
-            'churches_processed': 0,
-            'pages_discovered': 0,
-            'pages_collected': 0,
-            'contacts_extracted': 0,
-            'contacts_with_emails': 0,
+            "churches_discovered": 0,
+            "churches_filtered_out": 0,
+            "churches_processed": 0,
+            "pages_discovered": 0,
+            "pages_collected": 0,
+            "contacts_extracted": 0,
+            "contacts_with_emails": 0,
+            "places_api_calls": 0,
+            "openai_calls": 0,
+            "openai_prompt_tokens": 0,
+            "openai_completion_tokens": 0,
         }
     
     def _get_contact_key(self, contact: Contact) -> str:
@@ -162,42 +180,40 @@ class StreamingPipeline:
     
     def process_single_lead(self, church: Church) -> List[Contact]:
         """Process one church through all steps. Returns list of Contact objects."""
-        print(f"Processing: {church.name} ({church.county})")
-        
-        filter_result = filter_church(church, target_state=self._state, llm_filter=self.llm_church_filter)
+        filter_result = filter_church(
+            church, target_state=self._state, llm_filter=self.llm_church_filter
+        )
         if isinstance(filter_result, tuple):
             filtered_church, filter_reason = filter_result
         else:
             filtered_church, filter_reason = filter_result, None
-        
+
         if not filtered_church:
-            if filter_reason:
-                if "LLM rejected" in filter_reason:
-                    print(f"  [FILTER] reason=\"LLM rejected\" detail=\"{filter_reason.replace('LLM rejected (', '').replace(')', '')}\"")
-                elif "failed pre-filters" in filter_reason:
-                    detail = filter_reason.replace("failed pre-filters (", "").replace(")", "")
-                    print(f"  [FILTER] reason=\"pre-filter failed\" detail=\"{detail}\"")
-                else:
-                    print(f"  [FILTER] reason=\"{filter_reason}\"")
+            if filter_reason and "LLM rejected" in filter_reason:
+                log_church_skip(church.name, "filtered (LLM)")
+            elif filter_reason and "failed pre-filters" in filter_reason:
+                log_church_skip(church.name, "filtered (pre-filter)")
+            elif filter_reason:
+                log_church_skip(church.name, f"filtered ({filter_reason[:40]})")
             else:
-                print(f"  [FILTER] reason=\"unknown\"")
-            self.stats['churches_filtered_out'] += 1
+                log_church_skip(church.name, "filtered")
+            self.stats["churches_filtered_out"] += 1
             return []
-        
+
         if not filtered_church.website:
-            print("  [SKIP] No website")
+            log_church_skip(church.name, "no website")
             return []
-        
+
         try:
             pages = self._discover_pages_for_church(filtered_church)
-            self.stats['pages_discovered'] += len(pages)
-            
+            self.stats["pages_discovered"] += len(pages)
+
             if not pages:
-                print("  [SKIP] No pages found")
+                log_church_skip(church.name, "no pages found")
                 return []
         except Exception as e:
-            print(f"  [ERROR] Error: {e}")
-            traceback.print_exc()
+            log_err(f"Page discovery: {church.name}: {e}")
+            _maybe_traceback()
             return []
         
         page_contents = []
@@ -211,7 +227,7 @@ class StreamingPipeline:
                 continue
         
         if not page_contents:
-            print("  [SKIP] No content collected")
+            log_church_skip(church.name, "no content collected")
             return []
         
         all_contacts = []
@@ -223,11 +239,11 @@ class StreamingPipeline:
                 continue
         
         if all_contacts:
-            print(f"  [SUCCESS] Contacts extracted: {len(all_contacts)}")
+            log_church_success(church.name, len(all_contacts))
         else:
-            print("  [SKIP] No contacts")
-        
-        self.stats['churches_processed'] += 1
+            log_church_skip(church.name, "no contacts")
+
+        self.stats["churches_processed"] += 1
         return all_contacts
     
     def _discover_pages_for_church(self, church: Church) -> List[Page]:
@@ -256,8 +272,8 @@ class StreamingPipeline:
                     discovered_via=page_dict.get('url')
                 ))
         except Exception as e:
-            print(f"    Error in page discovery: {e}")
-            traceback.print_exc()
+            log_err(f"Page discovery inner: {e}")
+            _maybe_traceback()
         
         return pages
     
@@ -282,8 +298,8 @@ class StreamingPipeline:
                 collection_method=fetch_method
             )
         except Exception as e:
-            print(f"    Error collecting content: {e}")
-            traceback.print_exc()
+            log_err(f"Content collection: {e}")
+            _maybe_traceback()
             return None
     
     def _parse_content_with_llm(self, page_content: PageContent, church: Church) -> List[Contact]:
@@ -347,8 +363,8 @@ class StreamingPipeline:
             
             return filtered_contacts
         except Exception as e:
-            print(f"  [ERROR] LLM parsing error: {e}")
-            traceback.print_exc()
+            log_err(f"LLM parsing: {e}")
+            _maybe_traceback()
             return []
     
     def run(
@@ -358,18 +374,15 @@ class StreamingPipeline:
         output_csv: str = "final_contacts.csv"
     ):
         """Run the streaming pipeline. Processes churches one at a time through all steps."""
-        print(f"\nPipeline started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Output: {output_csv}\n")
-        
-        print("Discovering churches...")
+        county_wall_start = time.time()
         churches_discovered = 0
-        
+
         if not counties:
             if not hasattr(self, '_state') or not self._state:
                 raise ValueError("--state parameter is required for county-based search")
             counties = load_counties_from_state(self._state)
         
-        max_search_terms_per_county = 28
+        max_search_terms_per_county = 20
         
         church_generator = self.church_searcher.discover_churches(
             counties=counties,
@@ -378,55 +391,58 @@ class StreamingPipeline:
             max_search_terms=max_search_terms_per_county
         )
         
-        first_church = True
         for church in church_generator:
             churches_discovered += 1
-            self.stats['churches_discovered'] = churches_discovered
-            
-            if not first_church:
-                print()
-            first_church = False
-            
+            self.stats["churches_discovered"] = churches_discovered
+
             contacts = self.process_single_lead(church)
-            
-            unique_before = len(self.unique_contacts_set)
-            new_unique_count = 0
+
             for contact in contacts:
                 contact_key = self._get_contact_key(contact)
                 if contact_key not in self.unique_contacts_set:
                     self.unique_contacts_set.add(contact_key)
-                    new_unique_count += 1
-            
+
             self.all_contacts.extend(contacts)
-            
-            total_contacts = len(self.all_contacts)
-            unique_contacts = len(self.unique_contacts_set)
-            processed = self.stats['churches_processed']
-            delta_str = f" (+{new_unique_count})" if new_unique_count > 0 else ""
-            print(f"Progress: {churches_discovered} churches | {processed}/{churches_discovered} processed | {unique_contacts} contacts{delta_str}")
-        
+
         if self.llm_church_filter:
             self.llm_church_filter.flush()
         
-        print()
-        
         if not output_csv or output_csv == "final_contacts.csv":
             output_csv = "final_contacts.csv"
-        
+
         if self.all_contacts:
             self._write_final_csv(self.all_contacts, output_csv)
         else:
-            print(f"No contacts to write to {output_csv}")
-        
-        self.stats['contacts_extracted'] = len(self.all_contacts)
-        self.stats['unique_contacts'] = len(self.unique_contacts_set)
-        
+            pass
+
+        self.stats["contacts_extracted"] = len(self.all_contacts)
+        self.stats["unique_contacts"] = len(self.unique_contacts_set)
+
         contacts_with_emails = [c for c in self.all_contacts if c.has_email()]
         contacts_without_emails = [c for c in self.all_contacts if not c.has_email()]
-        self.stats['contacts_with_emails'] = len(contacts_with_emails)
-        self.stats['contacts_without_emails'] = len(contacts_without_emails)
-        
-        self._print_summary()
+        self.stats["contacts_with_emails"] = len(contacts_with_emails)
+        self.stats["contacts_without_emails"] = len(contacts_without_emails)
+
+        self.stats["places_api_calls"] = self.church_searcher.stats.get(
+            "total_api_calls", 0
+        )
+        self.stats["openai_calls"] = getattr(
+            self.llm_parser, "total_api_calls", 0
+        ) + getattr(self.title_filter, "total_api_calls", 0)
+        self.stats["openai_prompt_tokens"] = getattr(
+            self.llm_parser, "total_prompt_tokens", 0
+        ) + getattr(self.title_filter, "total_prompt_tokens", 0)
+        self.stats["openai_completion_tokens"] = getattr(
+            self.llm_parser, "total_completion_tokens", 0
+        ) + getattr(self.title_filter, "total_completion_tokens", 0)
+
+        if counties and len(counties) == 1:
+            elapsed_min = (time.time() - county_wall_start) / 60.0
+            log_county_done(
+                len(self.all_contacts),
+                len(contacts_with_emails),
+                elapsed_min,
+            )
     
     def cleanup(self):
         """Basic cleanup: quit Selenium driver if it exists."""
@@ -447,30 +463,23 @@ class StreamingPipeline:
     def _write_final_csv(self, contacts: List[Contact], filename: str):
         """Write contacts to final CSV file"""
         if not contacts:
-            print(f"No contacts to write to {filename}")
             return
-        
-        fieldnames = ['first_name', 'last_name', 'title', 'email', 'phone', 
-                     'church_name', 'source_url']
-        
-        with open(filename, 'w', newline='', encoding='utf-8') as f:
+
+        fieldnames = [
+            "first_name",
+            "last_name",
+            "title",
+            "email",
+            "phone",
+            "church_name",
+            "source_url",
+        ]
+
+        with open(filename, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for contact in contacts:
                 writer.writerow(contact.to_dict())
-        
-        from pathlib import Path
-        filename_only = Path(filename).name
-        print(f"[SAVE] Wrote {len(contacts)} contacts -> \"{filename_only}\"")
-    
-    def _print_summary(self):
-        """Print final pipeline summary"""
-        print(f"\n[COMPLETE] Pipeline complete: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"  Churches: {self.stats['churches_discovered']} discovered, {self.stats['churches_processed']} processed")
-        if self.stats['contacts_extracted'] > 0:
-            print(f"  Contacts: {self.stats['unique_contacts']} unique ({self.stats['contacts_with_emails']} with emails)")
-        else:
-            print("  Contacts: 0")
 
 
 if __name__ == "__main__":
@@ -530,5 +539,5 @@ if __name__ == "__main__":
             )
     except Exception as e:
         print(f"\n\nPipeline failed: {e}")
-        traceback.print_exc()
+        _maybe_traceback()
         sys.exit(1)

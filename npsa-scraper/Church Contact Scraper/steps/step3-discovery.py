@@ -250,11 +250,10 @@ class PageDiscoverer:
         Returns:
             List of page dictionaries with url, church_name, title, priority_score
         """
-        print(f"  Discovering pages for: {church_name}")
-        print(f"  Base URL: {base_url}")
-        
-        if not base_url or base_url == '':
-            print("    WARNING: No website URL provided")
+        if not base_url or base_url == "":
+            from church_run_log import log_warn
+
+            log_warn("Page discovery: no website URL")
             return []
         
         visited = set()
@@ -399,7 +398,6 @@ class PageDiscoverer:
                 
                 if high_value_page_found and len(discovered_pages) >= min_sufficient_pages:
                     sufficient_pages_found = True
-                    print(f"    {bold('[STEP 3]')} Found {len(discovered_pages)} sufficient pages - stopping crawl")
                     break
                 
                 if depth < max_depth and len(discovered_pages) < max_pages_per_church and not sufficient_pages_found:
@@ -462,70 +460,46 @@ class PageDiscoverer:
                             
                             if total_score > 0 and not title_is_church_name:
                                 valid_pages.append({
-                                    'url': fallback_url,
-                                    'title': title_text,
-                                    'priority_score': total_score,
-                                    'church_name': church_name
+                                    "url": fallback_url,
+                                    "title": title_text,
+                                    "priority_score": total_score,
+                                    "church_name": church_name,
                                 })
-                                print(f"    {bold('[STEP 3]')} Found fallback page: {path} (score: {total_score})")
-                    except:
+                    except Exception:
                         pass
         
         valid_pages.sort(key=lambda x: x['priority_score'], reverse=True)
         discovered_pages = valid_pages[:top_pages_limit]
         
-        if discovered_pages:
-            print(f"    {bold('[STEP 3]')} Found {len(discovered_pages)} page(s)")
-            for page in discovered_pages:
-                title = page['title']
-                if len(title) > 80:
-                    title = title[:77] + "..."
-                print(f"      Page: \"{title}\"")
-        else:
-            print(f"    ⚠ No pages found")
-        
         return discovered_pages
 
     def process_churches_csv(self, input_csv: str, output_csv: str, max_depth: int = 3, max_pages_per_church: int = 3, top_pages_limit: int = 3):
         """Process churches from Step 1 CSV and discover all their pages"""
-        print("\n" + "="*70)
-        print("STEP 3: PAGE DISCOVERY")
-        print("="*70)
-        
         df = pd.read_csv(input_csv)
-        df_with_urls = df[df['website'].notna() & (df['website'] != '')]
-        
-        print(f"Processing {len(df_with_urls)} churches with websites")
-        print("="*70 + "\n")
-        
+        df_with_urls = df[df["website"].notna() & (df["website"] != "")]
+
         all_pages = []
         
         for idx, row in df_with_urls.iterrows():
             church_name = row['name']
             base_url = row['website']
             
-            print(f"\n[{idx + 1}/{len(df_with_urls)}] {church_name}")
             
             try:
                 pages = self.discover_pages(church_name, base_url, max_depth=max_depth, max_pages_per_church=max_pages_per_church, top_pages_limit=top_pages_limit)
                 all_pages.extend(pages)
                 
             except Exception as e:
-                print(f"    ERROR: {e}")
+                from church_run_log import log_err
+
+                log_err(f"Step3 CSV row: {e}")
                 continue
             
             if (idx + 1) % 10 == 0:
                 self._save_progress(all_pages, output_csv)
-                print(f"\n  Progress saved: {len(all_pages)} pages discovered")
         
         self._save_progress(all_pages, output_csv)
         
-        print("\n" + "="*70)
-        print("PAGE DISCOVERY COMPLETE")
-        print("="*70)
-        print(f"Total pages discovered: {len(all_pages)}")
-        print(f"Output file: {output_csv}")
-        print("="*70)
         
     def _save_progress(self, pages: List[Dict], filename: str):
         """Save discovered pages to CSV"""
