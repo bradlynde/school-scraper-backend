@@ -25,6 +25,8 @@ import platform  # For OS detection
 import multiprocessing  # For subprocess isolation
 import re  # For regex validation
 import shutil
+import random
+import socket
 from typing import Optional
 
 # Try to import psutil for process tree killing (optional)
@@ -155,8 +157,11 @@ def _is_any_run_active() -> bool:
     """
     True if any run is in progress: running (alive worker thread) or finalizing (cooldown).
     Runs stale cleanup first so dead threads do not block the queue.
+    When SQLITE_PATH is set, an unfinished county_dispatch also counts as active (multi-replica).
     """
     _cleanup_stale_pipeline_runs()
+    if queue_store.is_enabled() and queue_store.has_active_church_county_pipeline():
+        return True
     now = time.time()
     for rid, run_data in pipeline_runs.items():
         status = run_data.get("status")
@@ -189,6 +194,10 @@ def _same_state_running(state: str) -> bool:
 
 def _first_running_run_id_for_state(state: str) -> Optional[str]:
     state = state.lower()
+    if queue_store.is_enabled():
+        aid = queue_store.active_dispatch_run_id_for_state(state, SCRAPER_TYPE)
+        if aid:
+            return aid
     for rid, run_data in pipeline_runs.items():
         if (run_data.get("state") or "").lower() != state:
             continue
@@ -245,6 +254,309 @@ def _church_queue_worker_loop():
             print(f"[QUEUE] worker error: {e}")
             import traceback
             traceback.print_exc()
+
+
+def _hydrate_pipeline_run_from_dispatch(run_id: str) -> bool:
+    """If this replica missed run_streaming_pipeline init, rebuild minimal pipeline_runs from SQLite."""
+    if run_id in pipeline_runs:
+        return True
+    row = queue_store.get_dispatch_row(run_id)
+    if not row:
+        return False
+    try:
+        meta = json.loads(row["meta_json"] or "{}")
+    except json.JSONDecodeError:
+        meta = {}
+    st = (row["state"] or "").lower()
+    pipeline_runs[run_id] = {
+        "status": "running",
+        "state": st,
+        "progress": 0,
+        "currentStep": 1,
+        "totalSteps": 7,
+        "statusMessage": "Restored run (multi-replica)",
+        "steps": [],
+        "totalContacts": 0,
+        "totalContactsNoEmails": 0,
+        "churchesFound": 0,
+        "churchesProcessed": 0,
+        "csvData": None,
+        "csvFilename": None,
+        "csvNoEmailsData": None,
+        "csvNoEmailsFilename": None,
+        "error": None,
+        "countiesProcessed": 0,
+        "totalCounties": int(row["total_counties"] or 0),
+        "currentCounty": None,
+        "currentCountyIndex": 0,
+        "countyTimes": [],
+        "countyContacts": [],
+        "countyChurches": [],
+        "startTime": float(meta.get("startTime") or time.time()),
+        "initialEstimatedTimeRemaining": meta.get("initialEstimatedTimeRemaining"),
+        "queue_job_id": meta.get("queue_job_id"),
+        "places_api_calls_total": 0,
+        "openai_calls_total": 0,
+        "openai_prompt_tokens_total": 0,
+        "openai_completion_tokens_total": 0,
+    }
+    return True
+
+
+def _merge_county_result_into_pipeline_runs(
+    run_id: str,
+    county: str,
+    result: dict,
+    county_index: int,
+    total_counties: int,
+    processing_time: float,
+) -> None:
+    """Apply one county result to in-memory progress (starter replica only)."""
+    if run_id not in pipeline_runs:
+        return
+    done = int(queue_store.get_run_progress(run_id).get("terminal") or 0)
+    with progress_lock:
+        pr = pipeline_runs[run_id]
+        progress_pct = int((done / max(1, total_counties)) * 100) if total_counties else 0
+        pr["progress"] = progress_pct
+        pr["statusMessage"] = f"Processing {done}/{total_counties} counties..."
+        pr["countiesProcessed"] = done
+        if done < total_counties:
+            pr["currentCounty"] = f"Processing {done}/{total_counties} counties"
+        else:
+            pr["currentCounty"] = f"All {total_counties} counties completed"
+        if result.get("success"):
+            pr["churchesFound"] = pr.get("churchesFound", 0) + int(result.get("churches") or 0)
+            pr["churchesProcessed"] = pr.get("churchesProcessed", 0) + int(result.get("churches") or 0)
+            if "countyTimes" not in pr:
+                pr["countyTimes"] = []
+            pr["countyTimes"].append(processing_time)
+            if "countyContacts" not in pr:
+                pr["countyContacts"] = []
+            if "countyChurches" not in pr:
+                pr["countyChurches"] = []
+            pr["countyContacts"].append(int(result.get("contacts") or 0))
+            pr["countyChurches"].append(int(result.get("churches") or 0))
+            pr["places_api_calls_total"] = pr.get("places_api_calls_total", 0) + int(
+                result.get("places_api_calls") or 0
+            )
+            pr["openai_calls_total"] = pr.get("openai_calls_total", 0) + int(result.get("openai_calls") or 0)
+            pr["openai_prompt_tokens_total"] = pr.get("openai_prompt_tokens_total", 0) + int(
+                result.get("openai_prompt_tokens") or 0
+            )
+            pr["openai_completion_tokens_total"] = pr.get("openai_completion_tokens_total", 0) + int(
+                result.get("openai_completion_tokens") or 0
+            )
+    tc = sum(pipeline_runs[run_id].get("countyContacts") or [])
+    log_progress_counties(done, total_counties, tc)
+    if done % CHECKPOINT_BATCH_SIZE == 0 or done == total_counties:
+        names = queue_store.terminal_county_names_ordered(run_id)
+        st = pipeline_runs[run_id]["state"]
+        next_index = 0
+        for i, c in enumerate(load_counties_from_state(st)):
+            if c in names:
+                next_index = i + 1
+            else:
+                break
+        save_checkpoint(
+            run_id,
+            st,
+            names,
+            next_index,
+            total_counties,
+        )
+        metadata = load_run_metadata(run_id) or {}
+        metadata.update(
+            {
+                "status": "running",
+                "completed_counties": names,
+                "progress": progress_pct,
+                "last_checkpoint": time.time(),
+            }
+        )
+        if not metadata.get("display_name"):
+            metadata["display_name"] = _run_display_name(pipeline_runs[run_id]["state"], "church")
+        save_run_metadata(run_id, metadata)
+    check_health()
+    log_resource_usage()
+    gc.collect()
+    if done < total_counties:
+        time.sleep(2.0)
+
+
+def _county_processor_worker_loop(worker_tag: str) -> None:
+    """Daemon thread: claim county_tasks rows and run one isolated Process per county."""
+    while True:
+        time.sleep(0.35 + random.random() * 0.4)
+        if not queue_store.is_enabled():
+            time.sleep(5)
+            continue
+        try:
+            task = queue_store.claim_next_county_task(worker_tag, SCRAPER_TYPE)
+            if not task:
+                continue
+            run_id = task["run_id"]
+            state = task["state"]
+            county = task["county"]
+            idx = int(task["county_index"])
+            total = int(task["total_counties"])
+            if queue_store.is_dispatch_cancelled(run_id):
+                continue
+            if run_id in running_threads and running_threads[run_id].get("cancelled"):
+                queue_store.mark_county_failed(run_id, county, "cancelled")
+                continue
+            start_time = time.time()
+            run_dir = RUNS_DIR / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            result_file = str(run_dir / f"{county.replace(' ', '_')}_result.json")
+            proc = multiprocessing.Process(
+                target=_county_worker,
+                args=(state, county, run_id, idx, total, result_file),
+            )
+            proc.start()
+            proc.join()
+            try:
+                if os.path.exists(result_file):
+                    with open(result_file, "r") as f:
+                        result = json.load(f)
+                    try:
+                        os.remove(result_file)
+                    except OSError:
+                        pass
+                else:
+                    result = {"success": False, "error": "Worker did not write results file"}
+            except Exception as e:
+                result = {"success": False, "error": str(e)}
+            elapsed = time.time() - start_time
+            if not result.get("success"):
+                err = result.get("error", "Unknown error")
+                log_err(f"{county} County: {err}")
+                queue_store.mark_county_failed(run_id, county, str(err))
+            else:
+                queue_store.mark_county_done(run_id, county, result)
+            _merge_county_result_into_pipeline_runs(
+                run_id, county, result, idx, total, elapsed
+            )
+        except Exception as e:
+            print(f"[COUNTY-Q] worker {worker_tag}: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+
+def _watch_county_queue_until_aggregated(
+    run_id: str,
+    state: str,
+    counties: list,
+    completed_counties: list,
+) -> None:
+    """
+    Starter-replica loop: sync SQLite task progress into pipeline_runs, then aggregate when done.
+    County execution happens in _county_processor_worker_loop threads on all replicas.
+    """
+    reclaim_every = 0
+    wait_loops = 0
+    while True:
+        time.sleep(3.0)
+        reclaim_every += 1
+        if reclaim_every >= 20:
+            reclaim_every = 0
+            try:
+                queue_store.reclaim_stale_county_tasks(7200)
+            except Exception as e:
+                log_warn(f"reclaim stale county tasks: {e}")
+
+        if running_threads.get(run_id, {}).get("cancelled") or queue_store.is_dispatch_cancelled(run_id):
+            pipeline_runs[run_id]["status"] = "cancelled"
+            pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+            queue_store.cancel_dispatch_run(run_id)
+            return
+
+        prog = queue_store.get_run_progress(run_id)
+        total = len(counties)
+        terminal = int(prog.get("terminal") or 0)
+        with progress_lock:
+            pipeline_runs[run_id]["progress"] = int((terminal / max(1, total)) * 100)
+            pipeline_runs[run_id]["countiesProcessed"] = terminal
+            pipeline_runs[run_id]["churchesFound"] = int(prog.get("churches_found") or 0)
+            pipeline_runs[run_id]["churchesProcessed"] = int(prog.get("churches_found") or 0)
+            pipeline_runs[run_id]["places_api_calls_total"] = int(prog.get("places_api_calls_total") or 0)
+            pipeline_runs[run_id]["openai_calls_total"] = int(prog.get("openai_calls_total") or 0)
+            pipeline_runs[run_id]["openai_prompt_tokens_total"] = int(
+                prog.get("openai_prompt_tokens_total") or 0
+            )
+            pipeline_runs[run_id]["openai_completion_tokens_total"] = int(
+                prog.get("openai_completion_tokens_total") or 0
+            )
+            if terminal < total:
+                pipeline_runs[run_id]["statusMessage"] = (
+                    f"Processing {terminal}/{total} counties (multi-replica queue)..."
+                )
+            else:
+                pipeline_runs[run_id]["statusMessage"] = "All counties finished; aggregating..."
+
+        if not queue_store.all_county_tasks_terminal(run_id):
+            wait_loops = 0
+            continue
+
+        # All county rows terminal (done or failed)
+        claimer = f"{_CHURCH_PROCESS_ID}-agg"
+        if queue_store.try_claim_aggregation(run_id, claimer):
+            try:
+                aggregate_final_results(run_id, state, skip_wait=True)
+                queue_store.mark_aggregation_done(run_id)
+            except Exception as e:
+                log_err(f"Aggregation after county queue: {e}")
+                queue_store.clear_aggregation_claim(run_id)
+                if run_id in pipeline_runs:
+                    pipeline_runs[run_id]["status"] = "error"
+                    pipeline_runs[run_id]["error"] = str(e)
+                    pipeline_runs[run_id]["statusMessage"] = f"Aggregation failed: {e}"
+            return
+
+        # Another replica holds the lease or will run recovery — wait for completion
+        row = queue_store.get_dispatch_row(run_id)
+        if row and row.get("aggregation_done"):
+            return
+        wait_loops += 1
+        if wait_loops > 4800:  # ~4h at 3s sleep
+            log_warn("County queue watcher: aggregation wait timeout")
+            return
+
+
+def _church_aggregation_recovery_loop() -> None:
+    """Pick up aggregation if the starter replica died after all counties finished."""
+    while True:
+        time.sleep(45.0)
+        if not queue_store.is_enabled():
+            continue
+        try:
+            queue_store.reclaim_stale_county_tasks(7200)
+            pending = queue_store.list_dispatch_pending_aggregation(SCRAPER_TYPE)
+            for rid in pending:
+                claimer = f"{_CHURCH_PROCESS_ID}-recover"
+                if not queue_store.try_claim_aggregation(rid, claimer):
+                    continue
+                row = queue_store.get_dispatch_row(rid)
+                if not row:
+                    queue_store.clear_aggregation_claim(rid)
+                    continue
+                st = (row["state"] or "").lower()
+                try:
+                    if not _hydrate_pipeline_run_from_dispatch(rid):
+                        queue_store.clear_aggregation_claim(rid)
+                        continue
+                    aggregate_final_results(rid, st, skip_wait=True)
+                    queue_store.mark_aggregation_done(rid)
+                except Exception as e:
+                    log_err(f"[RECOVER] aggregation {rid}: {e}")
+                    queue_store.clear_aggregation_claim(rid)
+        except Exception as e:
+            print(f"[RECOVER] loop error: {e}")
+            import traceback
+
+            traceback.print_exc()
+
 
 # Track 404 requests for non-existent run IDs to prevent spam from stale browser tabs
 # Format: {run_id: (first_404_time, count)}
@@ -394,6 +706,10 @@ CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "1"))
 # Number of parallel workers for processing counties
 # Default 8 (override with MAX_WORKERS env). Lower if Chrome/fork errors on small instances.
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "8"))
+# Multi-replica: processes per container claiming counties from SQLite (override MAX_WORKERS if unset).
+WORKERS_PER_REPLICA = int(os.getenv("WORKERS_PER_REPLICA", os.getenv("MAX_WORKERS", "8")))
+# Set to your Railway replica count for ETA math when using the SQLite county queue.
+CHURCH_REPLICA_COUNT = max(1, int(os.getenv("CHURCH_REPLICA_COUNT", "1")))
 
 # Estimated seconds per "parallel slot" for ETA math: (counties / MAX_WORKERS) * this value.
 # Calibrated from Alabama full-state run ≈ 42h wall-clock, 67 counties, MAX_WORKERS=4:
@@ -405,6 +721,19 @@ CHURCH_AVG_SECONDS_PER_COUNTY_SLOT = int(
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
+
+# Unique ID for this process (county workers + aggregation lease)
+_CHURCH_PROCESS_ID = f"{socket.gethostname()}-{os.getpid()}-{random.randint(1, 999_999)}"
+
+
+def _effective_church_parallelism() -> float:
+    """Parallel slots for ETA when SQLite county queue + multiple Railway replicas are used."""
+    return max(1.0, float(WORKERS_PER_REPLICA) * float(CHURCH_REPLICA_COUNT))
+
+
+def _church_log_worker_count() -> int:
+    """Workers per container for startup banner (Pool uses MAX_WORKERS; queue uses WORKERS_PER_REPLICA)."""
+    return WORKERS_PER_REPLICA if queue_store.is_enabled() else MAX_WORKERS
 
 # ANSI escape codes for bold text
 BOLD = '\033[1m'
@@ -1601,7 +1930,7 @@ def run_streaming_pipeline(
             # Load counties for state
             counties = load_counties_from_state(state)
             total_counties = len(counties)
-            log_startup(run_id, state, total_counties, MAX_WORKERS)
+            log_startup(run_id, state, total_counties, _church_log_worker_count())
 
             # Check if resuming from checkpoint
             completed_counties = []
@@ -1654,18 +1983,60 @@ def run_streaming_pipeline(
             pipeline_runs[run_id]["countiesProcessed"] = len(completed_counties)
             
             # Calculate static initial estimated time remaining (only if not already set)
+            eff_parallel = (
+                _effective_church_parallelism() if queue_store.is_enabled() else float(MAX_WORKERS)
+            )
             if pipeline_runs[run_id].get("initialEstimatedTimeRemaining") is None:
-                remaining_counties = total_counties - len(completed_counties)
+                remaining_n = total_counties - len(completed_counties)
                 avg_time_per_county = CHURCH_AVG_SECONDS_PER_COUNTY_SLOT
-                # Account for parallel processing (MAX_WORKERS)
-                effective_remaining = max(1, remaining_counties / MAX_WORKERS)
+                effective_remaining = max(1, remaining_n / eff_parallel)
                 initial_estimate = effective_remaining * avg_time_per_county
                 pipeline_runs[run_id]["initialEstimatedTimeRemaining"] = int(initial_estimate)
             
             # Process remaining counties (skip completed ones if resuming)
             remaining_counties = [(idx, county) for idx, county in enumerate(counties) if county not in completed_counties]
-            
-            if not remaining_counties:
+            use_sqlite_queue = queue_store.is_enabled()
+
+            if use_sqlite_queue:
+                # Multi-replica: county_tasks in SQLite; Process workers on each replica claim tasks.
+                if not queue_store.get_dispatch_row(run_id):
+                    queue_store.register_dispatch_run(
+                        run_id,
+                        state,
+                        total_counties,
+                        SCRAPER_TYPE,
+                        meta={
+                            "startTime": pipeline_runs[run_id]["startTime"],
+                            "initialEstimatedTimeRemaining": pipeline_runs[run_id].get(
+                                "initialEstimatedTimeRemaining"
+                            ),
+                            "queue_job_id": queue_job_id,
+                        },
+                    )
+                else:
+                    queue_store.update_dispatch_meta(
+                        run_id,
+                        {
+                            "startTime": pipeline_runs[run_id]["startTime"],
+                            "queue_job_id": queue_job_id,
+                        },
+                    )
+                if remaining_counties:
+                    queue_store.seed_county_tasks(
+                        run_id,
+                        state,
+                        SCRAPER_TYPE,
+                        remaining_counties,
+                        total_counties,
+                    )
+                if not remaining_counties:
+                    pipeline_runs[run_id]["progress"] = 100
+                    pipeline_runs[run_id]["countiesProcessed"] = total_counties
+                    pipeline_runs[run_id]["statusMessage"] = (
+                        f"All {total_counties} counties already completed"
+                    )
+                _watch_county_queue_until_aggregated(run_id, state, counties, completed_counties)
+            elif not remaining_counties:
                 # Update progress to show all complete
                 pipeline_runs[run_id]["progress"] = 100
                 pipeline_runs[run_id]["countiesProcessed"] = total_counties
@@ -1874,30 +2245,48 @@ def run_streaming_pipeline(
                         pass
                     log_drain_thread.join(timeout=120)
             
-            # All counties completed, aggregate results
-            try:
-                aggregate_final_results(run_id, state)
-            except Exception as e:
-                log_err(f"Aggregation: {e}")
-                if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in (
-                    "1",
-                    "true",
-                    "yes",
-                ):
-                    import traceback
+            # Pool path only: SQLite county queue runs aggregation inside the watcher / recovery loop.
+            if not use_sqlite_queue:
+                try:
+                    aggregate_final_results(run_id, state)
+                except Exception as e:
+                    log_err(f"Aggregation: {e}")
+                    if os.environ.get("CHURCH_LOG_TRACEBACK", "").strip() in (
+                        "1",
+                        "true",
+                        "yes",
+                    ):
+                        import traceback
 
-                    traceback.print_exc()
-                # Still mark as completed if we have results
-                if run_id in pipeline_runs:
-                    pipeline_runs[run_id]["status"] = "error"
-                    pipeline_runs[run_id]["error"] = f"Aggregation failed: {str(e)}"
+                        traceback.print_exc()
+                    if run_id in pipeline_runs:
+                        pipeline_runs[run_id]["status"] = "error"
+                        pipeline_runs[run_id]["error"] = f"Aggregation failed: {str(e)}"
             
-            # Final checkpoint - mark as completed (always save, even if aggregation failed)
-            save_checkpoint(run_id, state, completed_counties, len(counties), total_counties)
+            # Final checkpoint (always save, even if aggregation failed)
+            done_names = (
+                queue_store.terminal_county_names_ordered(run_id)
+                if use_sqlite_queue
+                else completed_counties
+            )
+            next_index_final = 0
+            for i, c in enumerate(counties):
+                if c in done_names:
+                    next_index_final = i + 1
+                else:
+                    break
+            save_checkpoint(run_id, state, done_names, next_index_final, total_counties)
             final_metadata = load_run_metadata(run_id) or {}
+            pst_done = pipeline_runs.get(run_id, {}).get("status", "error")
+            if pst_done == "cancelled":
+                meta_done_status = "cancelled"
+            elif pst_done == "error":
+                meta_done_status = "error"
+            else:
+                meta_done_status = "completed"
             final_metadata.update({
-                "status": "completed" if run_id in pipeline_runs and pipeline_runs[run_id].get("status") != "error" else "error",
-                "completed_counties": completed_counties,
+                "status": meta_done_status,
+                "completed_counties": done_names,
                 "progress": 100,
                 "completed_at": datetime.now().isoformat(),
                 "completion_time": time.time(),
@@ -1909,50 +2298,44 @@ def run_streaming_pipeline(
             })
             save_run_metadata(run_id, final_metadata)
             
-            # Final status update - set to finalizing for 2-minute cooldown
-            if run_id in pipeline_runs:
-                if pipeline_runs[run_id].get("status") != "error":
+            # Legacy pool-only cooldown + notify (aggregate_final_results already finalizes when it runs)
+            if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "running":
+                if not use_sqlite_queue:
                     pipeline_runs[run_id]["status"] = "finalizing"
-                    pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed. Finalizing..."
+                    pipeline_runs[run_id]["statusMessage"] = (
+                        f"Pipeline completed: {len(done_names)}/{total_counties} counties processed. Finalizing..."
+                    )
                     pipeline_runs[run_id]["finalizingAt"] = time.time()
                     pipeline_runs[run_id]["containerResetRequested"] = True
-                    
-                    # Create restart marker for start.sh to detect restart
                     try:
                         with open("/tmp/run_completed_marker", "w") as f:
                             f.write(str(time.time()))
-                    except:
-                        pass  # Ignore if can't write marker
-                    
-                    # Start background thread to transition to completed after 2 minutes
+                    except OSError:
+                        pass
+
                     def finalize_completion():
-                        time.sleep(120)  # 2-minute cooldown
+                        time.sleep(120)
                         if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "finalizing":
                             pipeline_runs[run_id]["status"] = "completed"
-                            pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed"
+                            pipeline_runs[run_id]["statusMessage"] = (
+                                f"Pipeline completed: {len(done_names)}/{total_counties} counties processed"
+                            )
                             pipeline_runs[run_id]["completedAt"] = time.time()
                             if not pipeline_runs[run_id].get("notify_sent"):
                                 duration = time.time() - pipeline_runs[run_id].get("startTime", time.time())
                                 send_run_complete_email(
                                     run_id,
                                     state,
-                                    len(completed_counties),
+                                    len(done_names),
                                     total_counties,
                                     pipeline_runs[run_id].get("totalContacts", 0),
                                     pipeline_runs[run_id].get("totalContactsWithEmails", 0),
                                     duration,
                                 )
                                 pipeline_runs[run_id]["notify_sent"] = True
-                    
-                    finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
-                    finalize_thread.start()
-                    
-                    # Pipeline completed successfully - no container reset needed
-                    # The backup branch doesn't force container restarts, allowing the container to stay running
-                    # This prevents Railway from logging crashes and allows the container to handle multiple runs
+
+                    threading.Thread(target=finalize_completion, daemon=True).start()
                     pipeline_runs[run_id]["progress"] = 100
-            else:
-                pass
         
         except FileNotFoundError as e:
             # State file not found
@@ -2414,6 +2797,70 @@ def church_queue_cancel(job_id: int):
 # Removed /process-county endpoint - no longer needed with multiprocessing pool approach
 
 
+def _synthetic_pipeline_status_from_dispatch(run_id: str) -> Optional[dict]:
+    """When polling hits a replica that did not start the run, rebuild status from SQLite + dispatch meta."""
+    if not validate_run_id(run_id) or not queue_store.is_enabled():
+        return None
+    if not queue_store.dispatch_exists(run_id):
+        return None
+    row = queue_store.get_dispatch_row(run_id)
+    if not row:
+        return None
+    prog = queue_store.get_run_progress(run_id)
+    try:
+        meta = json.loads(row["meta_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        meta = {}
+    total = int(row["total_counties"] or 0)
+    terminal = int(prog.get("terminal") or 0)
+    st = (row["state"] or "").lower()
+    if bool(row["cancelled"]):
+        pstatus = "cancelled"
+    elif bool(row["aggregation_done"]):
+        pstatus = "completed"
+    else:
+        pstatus = "running"
+    start_time = float(meta.get("startTime") or time.time())
+    progress = (
+        100
+        if total and terminal >= total and pstatus != "running"
+        else int((terminal / max(1, total)) * 100)
+    )
+    return {
+        "status": pstatus,
+        "state": st,
+        "progress": progress,
+        "currentStep": 1,
+        "totalSteps": 7,
+        "statusMessage": (
+            f"County queue {terminal}/{total} (multi-replica)"
+            if pstatus == "running"
+            else pstatus
+        ),
+        "steps": [],
+        "totalContacts": 0,
+        "totalContactsNoEmails": 0,
+        "churchesFound": int(prog.get("churches_found") or 0),
+        "churchesProcessed": int(prog.get("churches_found") or 0),
+        "csvData": None,
+        "csvFilename": None,
+        "error": None,
+        "countiesProcessed": terminal,
+        "totalCounties": total,
+        "currentCounty": None,
+        "currentCountyIndex": 0,
+        "countyTimes": [],
+        "countyContacts": [],
+        "countyChurches": [],
+        "startTime": start_time,
+        "initialEstimatedTimeRemaining": meta.get("initialEstimatedTimeRemaining"),
+        "places_api_calls_total": int(prog.get("places_api_calls_total") or 0),
+        "openai_calls_total": int(prog.get("openai_calls_total") or 0),
+        "openai_prompt_tokens_total": int(prog.get("openai_prompt_tokens_total") or 0),
+        "openai_completion_tokens_total": int(prog.get("openai_completion_tokens_total") or 0),
+    }
+
+
 @app.route("/pipeline-status/<run_id>", methods=["GET"])
 @require_auth
 def pipeline_status(run_id):
@@ -2425,7 +2872,11 @@ def pipeline_status(run_id):
             "error": "Invalid run ID format"
         }), 400
     
-    if run_id not in pipeline_runs:
+    if run_id in pipeline_runs:
+        run_data = pipeline_runs[run_id].copy()
+    elif (syn := _synthetic_pipeline_status_from_dispatch(run_id)):
+        run_data = syn
+    else:
         # Track repeated 404 requests to prevent spam from stale browser tabs
         current_time = time.time()
         if run_id in not_found_runs:
@@ -2453,8 +2904,6 @@ def pipeline_status(run_id):
             "error": "Run ID not found"
         }), 404
     
-    run_data = pipeline_runs[run_id].copy()
-    
     # If run is completed, return 410 Gone after grace period to stop polling
     # Allow a 2-minute grace period for the final status fetch, then return 410 Gone
     if run_data.get("status") == "completed":
@@ -2464,7 +2913,7 @@ def pipeline_status(run_id):
             if time_since_completion > 120:  # 2 minutes grace period, then return 410 Gone
                 # Clean up old completed runs from memory (older than 1 hour)
                 if time_since_completion > 3600:  # 1 hour
-                    pipeline_runs.pop(run_id, None)
+                    pipeline_runs.pop(run_id, None)  # no-op if status was synthetic-only
                 return jsonify({
                     "status": "completed",
                     "message": "Run completed. Status no longer available."
@@ -2498,7 +2947,12 @@ def pipeline_status(run_id):
             if total_counties > 0:
                 remaining_counties = max(0, total_counties - counties_processed)
                 avg_time_per_county = CHURCH_AVG_SECONDS_PER_COUNTY_SLOT
-                effective_remaining = max(1, remaining_counties / MAX_WORKERS)
+                eff_w = (
+                    _effective_church_parallelism()
+                    if queue_store.is_enabled()
+                    else float(MAX_WORKERS)
+                )
+                effective_remaining = max(1, remaining_counties / eff_w)
                 estimated_remaining = effective_remaining * avg_time_per_county
                 # Round to minutes
                 remaining_minutes = int((estimated_remaining + 59) // 60)
@@ -2581,6 +3035,13 @@ def stop_run(run_id: str):
     try:
         # Check metadata first (persistent storage)
         metadata = load_run_metadata(run_id)
+        if not metadata and queue_store.is_enabled() and queue_store.dispatch_exists(run_id):
+            row = queue_store.get_dispatch_row(run_id) or {}
+            metadata = {
+                "run_id": run_id,
+                "state": row.get("state"),
+                "status": "running",
+            }
         if not metadata:
             return jsonify({
                 "status": "error",
@@ -2598,6 +3059,8 @@ def stop_run(run_id: str):
         # Set cancellation flag
         if run_id in running_threads:
             running_threads[run_id]['cancelled'] = True
+        if queue_store.is_enabled():
+            queue_store.cancel_dispatch_run(run_id)
         
         # Update in-memory status if present
         if run_id in pipeline_runs:
@@ -3121,6 +3584,15 @@ def _ensure_api_bootstrap() -> None:
         cleanup_old_runs(silent_success=True)
         if queue_store.init_db(log_ready=False):
             threading.Thread(target=_church_queue_worker_loop, daemon=True).start()
+            n_proc = max(1, WORKERS_PER_REPLICA)
+            for i in range(n_proc):
+                tag = f"{_CHURCH_PROCESS_ID}-w{i}"
+                threading.Thread(
+                    target=_county_processor_worker_loop,
+                    args=(tag,),
+                    daemon=True,
+                ).start()
+            threading.Thread(target=_church_aggregation_recovery_loop, daemon=True).start()
 
 
 _ensure_api_bootstrap()
