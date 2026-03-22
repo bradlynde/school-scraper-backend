@@ -2,8 +2,9 @@
 .DS_Store
 Thumbs.db
 
-# Cursor / local session exports (do not commit)
+# Cursor / local session exports and handoff context (do not commit)
 Context/
+npsa-tools-context/
 
 # Node / Next.js (if run from repo root)
 node_modules/
