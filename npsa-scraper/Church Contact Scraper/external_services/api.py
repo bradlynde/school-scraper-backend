@@ -1747,7 +1747,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails_final)
             pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails_final)
             
-            # Save metadata (ephemeral) - final_csv_path on volume for reference
+            # Save metadata — mark completed immediately so status survives container restarts
             metadata = load_run_metadata(run_id) or {}
             metadata.update({
                 "final_csv_path": str(volume_csv_path) if volume_saved else final_csv_path,
@@ -1755,7 +1755,9 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 "total_contacts": len(final_df),
                 "total_contacts_with_emails": len(contacts_with_emails_final),
                 "total_contacts_without_emails": len(contacts_without_emails_final),
-                "status": "finalizing"  # Will be updated to "completed" after 2-minute cooldown
+                "status": "completed",
+                "completed_at": datetime.now().isoformat(),
+                "completion_time": time.time(),
             })
             if not metadata.get("display_name"):
                 metadata["display_name"] = _run_display_name(state, "church")
@@ -3574,6 +3576,46 @@ def not_found(e):
         "available_endpoints": ["/", "/health", "/notify/test-email", "/run-pipeline", "/queue", "/queue/<job_id>", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/archive", "/runs/<run_id>/unarchive"]
     }), 404
 
+def _repair_stuck_metadata() -> None:
+    """Fix runs stuck in 'finalizing' or 'running' that have a final CSV on the volume.
+    This happens when the container restarts before the 2-minute finalize thread completes."""
+    repaired = 0
+    for metadata_file in METADATA_DIR.glob("*.json"):
+        try:
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+            status = metadata.get("status", "")
+            if status not in ("finalizing", "running"):
+                continue
+            if metadata.get("deleted"):
+                continue
+            # Check if a final CSV exists on the volume for this run
+            run_id = metadata_file.stem
+            csv_path = metadata.get("final_csv_path")
+            has_csv = csv_path and Path(csv_path).exists()
+            if not has_csv:
+                # Fallback: search volume for CSV containing run_id
+                for f in VOLUME_DIR.glob(f"*_{run_id}_*.csv"):
+                    has_csv = True
+                    csv_path = str(f)
+                    break
+            if has_csv:
+                metadata["status"] = "completed"
+                if not metadata.get("completed_at"):
+                    metadata["completed_at"] = datetime.now().isoformat()
+                if not metadata.get("completion_time"):
+                    metadata["completion_time"] = time.time()
+                if csv_path:
+                    metadata["final_csv_path"] = csv_path
+                save_run_metadata(run_id, metadata)
+                repaired += 1
+                print(f"[REPAIR] Fixed stuck run {run_id}: {status} → completed")
+        except Exception:
+            continue
+    if repaired:
+        print(f"[REPAIR] Repaired {repaired} stuck run(s)")
+
+
 def _ensure_api_bootstrap() -> None:
     """Run once per process: silent cleanup + queue worker (avoids duplicate startup logs)."""
     global _bootstrap_done  # noqa: PLW0603
@@ -3581,6 +3623,7 @@ def _ensure_api_bootstrap() -> None:
         if _bootstrap_done:
             return
         _bootstrap_done = True
+        _repair_stuck_metadata()
         cleanup_old_runs(silent_success=True)
         if queue_store.init_db(log_ready=False):
             threading.Thread(target=_church_queue_worker_loop, daemon=True).start()
