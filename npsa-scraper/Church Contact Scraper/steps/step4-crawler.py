@@ -763,8 +763,8 @@ class ContentCollector:
                             continue
                         return None
                     
-                    # Use timeout wrapper for driver.get() - 45 second hard limit
-                    if not self._get_url_with_timeout(driver, url, timeout=900):
+                    # Use timeout wrapper for driver.get()
+                    if not self._get_url_with_timeout(driver, url, timeout=30):
                         # Driver failed (timeout or connection error) - need to recreate it
                         self.driver = None
                         if attempt < max_retries - 1:
@@ -795,27 +795,21 @@ class ContentCollector:
                         for selector in clickable_selectors:
                             try:
                                 elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                                # Increased to 75 clicks per selector type to handle large staff directories
-                                for element in elements[:75]:
+                                for element in elements[:30]:
                                     try:
-                                        # Scroll element into view
                                         driver.execute_script("arguments[0].scrollIntoView(true);", element)
-                                        time.sleep(0.5)
-                                        
-                                        # Try clicking
-                                        element.click()
-                                        time.sleep(0.5)
-                                        
-                                        # Try hovering
-                                        ActionChains(driver).move_to_element(element).perform()
                                         time.sleep(0.3)
-                                    except:
+                                        element.click()
+                                        time.sleep(0.3)
+                                        ActionChains(driver).move_to_element(element).perform()
+                                        time.sleep(0.2)
+                                    except Exception:
                                         continue
-                            except:
+                            except Exception:
                                 continue
-                        
-                        # Additional wait for any JavaScript-revealed emails
-                        time.sleep(2)
+
+                        # Wait for any JavaScript-revealed emails
+                        time.sleep(1)
                     
                     # Success - break out of retry loop
                     return driver.page_source
@@ -882,8 +876,8 @@ class ContentCollector:
         import time
         import threading
         
-        # TIMEOUT: 900 seconds hard limit - always triggers cleanup
-        TIMEOUT = 900
+        # TIMEOUT: 60 seconds hard limit - forces cleanup regardless of state
+        TIMEOUT = int(os.getenv("STEP4_PAGE_TIMEOUT", "60"))
         page_start_time = time.time()
         result_container = [None]  # Use list to allow modification from nested function
         exception_container = [None]

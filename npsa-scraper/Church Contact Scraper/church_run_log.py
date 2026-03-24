@@ -104,10 +104,11 @@ def log_county_header(county: str, index_1_based: int, total: int) -> None:
     _emit(_pad_line(f"-- {label} ", dash))
 
 
-def log_church_success(name: str, n_contacts: int) -> None:
+def log_church_success(name: str, n_contacts: int, *, timing: Optional[str] = None) -> None:
     mark = _sym("\u2713", "+")
     sep = " - " if not _use_unicode() else " \u2013 "  # en dash, matches reference mockup
-    _emit(f"  {mark} {name}{sep}{n_contacts} contacts")
+    suffix = f" [{timing}]" if timing else ""
+    _emit(f"  {mark} {name}{sep}{n_contacts} contacts{suffix}")
 
 
 def log_church_skip(name: str, reason: str) -> None:

@@ -647,10 +647,13 @@ def cleanup_old_runs(*, silent_success: bool = False):
                         final_csv = metadata.get("final_csv_path")
                         if final_csv and Path(final_csv).exists():
                             try:
+                                csv_size = Path(final_csv).stat().st_size
                                 Path(final_csv).unlink()
-                                freed_space += Path(final_csv).stat().st_size
-                            except Exception:
-                                pass
+                                freed_space += csv_size
+                            except FileNotFoundError:
+                                pass  # Already deleted
+                            except Exception as e:
+                                log_warn(f"[CLEANUP] Could not delete CSV {final_csv}: {e}")
                     except Exception as e:
                         print(f"[CLEANUP] Error deleting files for {run_id}: {e}")
                         continue
@@ -847,9 +850,9 @@ def get_chrome_process_counts():
                         active += 1
             except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, KeyError):
                 continue
-    except:
-        pass
-    
+    except Exception:
+        pass  # Best-effort process inspection; non-critical
+
     return (zombies, orphaned_zombies, active)
 
 
@@ -1393,8 +1396,8 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         try:
             with open(result_file, 'w') as f:
                 json.dump(results, f)
-        except:
-            pass
+        except Exception:
+            pass  # Best-effort result file write
         return results
     finally:
         # CRITICAL: Cleanup Chrome processes BOTTOM-UP (children first, then parents)
@@ -1406,8 +1409,8 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
                     pipeline.content_collector.driver = None
                     try:
                         driver.quit()
-                    except:
-                        pass
+                    except Exception:
+                        pass  # Best-effort driver cleanup
         except Exception:
             pass
         
@@ -1464,8 +1467,8 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
             # Clean up result file
             try:
                 os.remove(result_file)
-            except:
-                pass
+            except Exception:
+                pass  # Best-effort temp file cleanup
             return results
         else:
             return {'success': False, 'error': 'Subprocess did not write results file'}
@@ -1510,8 +1513,8 @@ def process_county_worker_multiprocessing(args):
             # Clean up result file
             try:
                 os.remove(result_file)
-            except:
-                pass
+            except Exception:
+                pass  # Best-effort temp file cleanup
         else:
             result = {'success': False, 'error': 'Worker did not write results file'}
         
@@ -1633,9 +1636,9 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             try:
                 with open("/tmp/run_completed_marker", "w") as f:
                     f.write(str(time.time()))
-            except:
-                pass  # Ignore if can't write marker
-            
+            except Exception:
+                pass  # Marker file optional
+
             # Start background thread to transition to completed after 2 minutes
             def finalize_completion():
                 time.sleep(120)  # 2-minute cooldown
@@ -1749,6 +1752,15 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             
             # Save metadata — mark completed immediately so status survives container restarts
             metadata = load_run_metadata(run_id) or {}
+            elapsed_h = (
+                time.time() - pipeline_runs[run_id].get("startTime", time.time())
+            ) / 3600.0
+            pr = pipeline_runs[run_id]
+            places_calls = int(pr.get("places_api_calls_total", 0))
+            billable_places = max(0, places_calls - 1000)
+            hunter_credits_used = len(contacts_enriched)
+            openai_input_tok = int(pr.get("openai_prompt_tokens_total", 0))
+            openai_output_tok = int(pr.get("openai_completion_tokens_total", 0))
             metadata.update({
                 "final_csv_path": str(volume_csv_path) if volume_saved else final_csv_path,
                 "csv_filename": csv_filename,
@@ -1758,6 +1770,20 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 "status": "completed",
                 "completed_at": datetime.now().isoformat(),
                 "completion_time": time.time(),
+                "cost_estimate": {
+                    "places_api_calls": places_calls,
+                    "places_billable": billable_places,
+                    "places_cost": round(billable_places * 0.035, 2),
+                    "hunter_credits": hunter_credits_used,
+                    "hunter_cost": round(hunter_credits_used * 0.05, 2),
+                    "openai_calls": int(pr.get("openai_calls_total", 0)),
+                    "openai_cost": round(
+                        (openai_input_tok / 1_000_000) * 0.15
+                        + (openai_output_tok / 1_000_000) * 0.60, 2
+                    ),
+                    "railway_hours": round(elapsed_h, 2),
+                    "railway_cost": round(elapsed_h * 60 * 0.000463, 2),
+                },
             })
             if not metadata.get("display_name"):
                 metadata["display_name"] = _run_display_name(state, "church")
@@ -1774,16 +1800,12 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 len(final_df),
                 Path(final_csv_path).name,
             )
-            elapsed_h = (
-                time.time() - pipeline_runs[run_id].get("startTime", time.time())
-            ) / 3600.0
-            pr = pipeline_runs[run_id]
             log_cost_estimate(
-                int(pr.get("places_api_calls_total", 0)),
-                len(contacts_enriched),
+                places_calls,
+                hunter_credits_used,
                 int(pr.get("openai_calls_total", 0)),
-                int(pr.get("openai_prompt_tokens_total", 0)),
-                int(pr.get("openai_completion_tokens_total", 0)),
+                openai_input_tok,
+                openai_output_tok,
                 elapsed_h,
                 int(pr.get("totalContacts", len(final_df))),
             )
@@ -1806,9 +1828,9 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         try:
             with open("/tmp/run_completed_marker", "w") as f:
                 f.write(str(time.time()))
-        except:
-            pass  # Ignore if can't write marker
-        
+        except Exception:
+            pass  # Marker file optional
+
         # Start background thread to transition to completed after 2 minutes
         def finalize_completion():
             time.sleep(120)  # 2-minute cooldown
@@ -3656,8 +3678,8 @@ if __name__ == "__main__":
             pid1_name = pid1.name().lower()
             if 'dumb-init' not in pid1_name and 'init' not in pid1_name:
                 needs_dumb_init = True
-        except:
-            pass  # Can't verify, continue anyway
+        except Exception:
+            pass  # Can't verify PID 1, continue anyway
     
     # If dumb-init is not PID 1, exec into it with waitress-serve as the command
     # This ensures dumb-init becomes PID 1 and properly reaps zombie processes

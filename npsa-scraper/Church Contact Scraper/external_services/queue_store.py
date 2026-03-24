@@ -541,7 +541,7 @@ def mark_county_failed(run_id: str, county: str, error: str) -> None:
             conn.close()
 
 
-def reclaim_stale_county_tasks(stale_seconds: int = 7200) -> int:
+def reclaim_stale_county_tasks(stale_seconds: int = 900) -> int:
     """Reset stuck processing tasks to pending. Returns rows updated."""
     cutoff = (datetime.now() - timedelta(seconds=stale_seconds)).isoformat()
     with _lock:
@@ -664,7 +664,7 @@ def get_dispatch_row(run_id: str) -> Optional[dict[str, Any]]:
             conn.close()
 
 
-def try_claim_aggregation(run_id: str, claimer_id: str, stale_seconds: int = 7200) -> bool:
+def try_claim_aggregation(run_id: str, claimer_id: str, stale_seconds: int = 900) -> bool:
     """Single winner for aggregate_final_results across replicas."""
     now = datetime.now().isoformat()
     with _lock:

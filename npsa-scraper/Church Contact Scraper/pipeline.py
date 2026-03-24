@@ -180,6 +180,8 @@ class StreamingPipeline:
     
     def process_single_lead(self, church: Church) -> List[Contact]:
         """Process one church through all steps. Returns list of Contact objects."""
+        t_start = time.time()
+
         filter_result = filter_church(
             church, target_state=self._state, llm_filter=self.llm_church_filter
         )
@@ -204,6 +206,7 @@ class StreamingPipeline:
             log_church_skip(church.name, "no website")
             return []
 
+        t_discover = time.time()
         try:
             pages = self._discover_pages_for_church(filtered_church)
             self.stats["pages_discovered"] += len(pages)
@@ -215,7 +218,8 @@ class StreamingPipeline:
             log_err(f"Page discovery: {church.name}: {e}")
             _maybe_traceback()
             return []
-        
+        t_after_discover = time.time()
+
         page_contents = []
         for page in pages[:self.max_pages_per_church]:
             try:
@@ -225,11 +229,12 @@ class StreamingPipeline:
                     self.stats['pages_collected'] += 1
             except Exception as e:
                 continue
-        
+        t_after_crawl = time.time()
+
         if not page_contents:
             log_church_skip(church.name, "no content collected")
             return []
-        
+
         all_contacts = []
         for page_content in page_contents:
             try:
@@ -237,9 +242,20 @@ class StreamingPipeline:
                 all_contacts.extend(contacts)
             except Exception as e:
                 continue
-        
+        t_after_parse = time.time()
+
         if all_contacts:
-            log_church_success(church.name, len(all_contacts))
+            if os.getenv("CHURCH_LOG_TIMING", "").strip() in ("1", "true", "yes"):
+                log_church_success(
+                    church.name,
+                    len(all_contacts),
+                    timing=f"discover:{t_after_discover - t_discover:.1f}s "
+                           f"crawl:{t_after_crawl - t_after_discover:.1f}s "
+                           f"parse:{t_after_parse - t_after_crawl:.1f}s "
+                           f"total:{t_after_parse - t_start:.1f}s",
+                )
+            else:
+                log_church_success(church.name, len(all_contacts))
         else:
             log_church_skip(church.name, "no contacts")
 

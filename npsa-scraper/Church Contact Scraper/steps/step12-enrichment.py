@@ -50,8 +50,10 @@ class HunterIOEnricher:
             'emails_found': 0,
             'emails_verified': 0,
             'api_calls': 0,
-            'errors': 0
+            'errors': 0,
+            'cache_hits': 0,
         }
+        self._lookup_cache: Dict[tuple, Optional[Dict]] = {}
     
     def extract_domain_from_url(self, url: str) -> Optional[str]:
         """
@@ -104,17 +106,28 @@ class HunterIOEnricher:
         """
         if not all([first_name, last_name, domain]):
             return None
-        
+
         # Clean names
         first_name = str(first_name).strip()
         last_name = str(last_name).strip()
         domain = str(domain).strip().lower()
-        
+
         if not first_name or not last_name or not domain:
             return None
-        
+
+        # Dedup: skip if we already looked up this exact combo
+        cache_key = (first_name.lower(), last_name.lower(), domain)
+        if cache_key in self._lookup_cache:
+            self.stats['cache_hits'] += 1
+            return self._lookup_cache[cache_key]
+
+        result = self._hunter_api_call(first_name, last_name, domain)
+        self._lookup_cache[cache_key] = result
+        return result
+
+    def _hunter_api_call(self, first_name: str, last_name: str, domain: str) -> Optional[Dict]:
+        """Internal: make the actual Hunter.io API call (no caching)."""
         try:
-            # Hunter.io Email Finder API
             url = f"{self.base_url}/email-finder"
             params = {
                 'domain': domain,
@@ -122,40 +135,34 @@ class HunterIOEnricher:
                 'last_name': last_name,
                 'api_key': self.api_key
             }
-            
+
             response = requests.get(url, params=params, timeout=10)
             self.stats['api_calls'] += 1
-            
+
             if response.status_code == 200:
                 data = response.json()
-                
+
                 if data.get('data') and data['data'].get('email'):
                     email_data = data['data']
                     score = email_data.get('score', 0)
-                    
-                    # Only return if score meets threshold
-                    # Note: We return score for threshold checking, but only email is used/stored
+
                     if score >= self.score_threshold:
                         return {
                             'email': email_data['email'],
-                            'score': score  # Only used for threshold check and logging, not stored
+                            'score': score
                         }
                     else:
                         print(f"      {bold('[ENRICH]')} Email score too low ({score} < {self.score_threshold}): {email_data['email']}")
                         return None
                 else:
-                    # Email not found
                     return None
-                    
+
             elif response.status_code == 404:
-                # Email not found - this is normal, not an error
                 return None
-                
+
             elif response.status_code == 429:
-                # Rate limit exceeded
                 print(f"      {bold('[ENRICH]')} Rate limit exceeded, waiting 60 seconds...")
                 time.sleep(60)
-                # Retry once
                 response = requests.get(url, params=params, timeout=10)
                 self.stats['api_calls'] += 1
                 if response.status_code == 200:
@@ -163,25 +170,23 @@ class HunterIOEnricher:
                     if data.get('data') and data['data'].get('email'):
                         email_data = data['data']
                         score = email_data.get('score', 0)
-                        # Only return if score meets threshold
-                        # Note: We return score for threshold checking, but only email is used/stored
                         if score >= self.score_threshold:
                             return {
                                 'email': email_data['email'],
-                                'score': score  # Only used for threshold check and logging, not stored
+                                'score': score
                             }
                 return None
-                
+
             elif response.status_code == 401:
                 print(f"      {bold('[ENRICH]')} Invalid Hunter.io API key")
                 self.stats['errors'] += 1
                 return None
-                
+
             else:
                 print(f"      {bold('[ENRICH]')} Hunter.io API error: {response.status_code}")
                 self.stats['errors'] += 1
                 return None
-                
+
         except requests.exceptions.Timeout:
             print(f"      {bold('[ENRICH]')} Hunter.io API timeout")
             self.stats['errors'] += 1
