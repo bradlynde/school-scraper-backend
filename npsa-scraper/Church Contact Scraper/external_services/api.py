@@ -63,6 +63,7 @@ from church_run_log import (
 from external_services.auth import require_auth, verify_password, generate_token
 from external_services.notify import send_run_complete_email, send_test_notification_email
 from external_services import queue_store
+from external_services import db
 
 SCRAPER_TYPE = "church"
 
@@ -434,6 +435,17 @@ def _county_processor_worker_loop(worker_tag: str) -> None:
                 queue_store.mark_county_failed(run_id, county, str(err))
             else:
                 queue_store.mark_county_done(run_id, county, result)
+                # In Postgres mode, store county CSV rows in DB so any service can aggregate
+                if db.is_postgres():
+                    csv_path = result.get("csv_path")
+                    if csv_path and os.path.exists(csv_path):
+                        try:
+                            with open(csv_path, "r") as cf:
+                                csv_text = cf.read()
+                            row_count = max(0, csv_text.count("\n") - 1)  # minus header
+                            queue_store.store_county_results(run_id, county, csv_text, row_count)
+                        except Exception as e:
+                            log_warn(f"Could not store county CSV in Postgres: {e}")
             _merge_county_result_into_pipeline_runs(
                 run_id, county, result, idx, total, elapsed
             )
@@ -490,7 +502,7 @@ def _watch_county_queue_until_aggregated(
             )
             if terminal < total:
                 pipeline_runs[run_id]["statusMessage"] = (
-                    f"Processing {terminal}/{total} counties (multi-replica queue)..."
+                    f"Processing {terminal}/{total} counties (distributed queue)..."
                 )
             else:
                 pipeline_runs[run_id]["statusMessage"] = "All counties finished; aggregating..."
@@ -1590,40 +1602,54 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             log_warn("Skipping county wait; aggregating available data")
         
         pipeline_runs[run_id]["statusMessage"] = "Aggregating results from all counties..."
-        
+
         # Read and combine all county CSVs into Contact objects
         all_contacts = []
-        for county in counties:
-            county_dir = run_dir / county.replace(' ', '_')
-            county_csv = county_dir / "final_contacts.csv"
-            
-            if county_csv.exists():
-                try:
-                    df = pd.read_csv(county_csv)
-                    if len(df) > 0:
-                        # Convert DataFrame rows to Contact objects
-                        for _, row in df.iterrows():
-                            # Safe coercion helpers
-                            def sval(val):
-                                return str(val).strip() if val is not None and not (isinstance(val, float) and pd.isna(val)) else ""
-                            
-                            email_raw = row.get('email', '') or row.get('Email', '')
-                            email_val = sval(email_raw)
-                            if not email_val:
-                                email_val = None
-                            
-                            contact = Contact(
-                                first_name=sval(row.get('first_name', '') or row.get('First Name', '')),
-                                last_name=sval(row.get('last_name', '') or row.get('Last Name', '')),
-                                title=sval(row.get('title', '') or row.get('Title', '')),
-                                email=email_val,
-                                phone=sval(row.get('phone', '') or row.get('Phone', '')),
-                                church_name=sval(row.get('church_name', '') or row.get('Church Name', '')),
-                                source_url=sval(row.get('source_url', '') or row.get('Source URL', ''))
-                            )
-                            all_contacts.append(contact)
-                except Exception as e:
-                    log_err(f"Reading {county_csv}: {e}")
+
+        def _csv_text_to_contacts(csv_text: str, label: str) -> list:
+            """Parse CSV text into Contact objects."""
+            contacts = []
+            try:
+                import io
+                df = pd.read_csv(io.StringIO(csv_text))
+                if len(df) > 0:
+                    for _, row in df.iterrows():
+                        def sval(val):
+                            return str(val).strip() if val is not None and not (isinstance(val, float) and pd.isna(val)) else ""
+                        email_raw = row.get('email', '') or row.get('Email', '')
+                        email_val = sval(email_raw)
+                        if not email_val:
+                            email_val = None
+                        contacts.append(Contact(
+                            first_name=sval(row.get('first_name', '') or row.get('First Name', '')),
+                            last_name=sval(row.get('last_name', '') or row.get('Last Name', '')),
+                            title=sval(row.get('title', '') or row.get('Title', '')),
+                            email=email_val,
+                            phone=sval(row.get('phone', '') or row.get('Phone', '')),
+                            church_name=sval(row.get('church_name', '') or row.get('Church Name', '')),
+                            source_url=sval(row.get('source_url', '') or row.get('Source URL', ''))
+                        ))
+            except Exception as e:
+                log_err(f"Reading {label}: {e}")
+            return contacts
+
+        if db.is_postgres():
+            # Multi-service: read county CSV data from Postgres
+            county_rows = queue_store.get_all_county_results(run_id)
+            for cr in county_rows:
+                all_contacts.extend(_csv_text_to_contacts(cr["csv_rows"], f"Postgres:{cr['county']}"))
+        else:
+            # Single-service: read county CSVs from local filesystem
+            for county in counties:
+                county_dir = run_dir / county.replace(' ', '_')
+                county_csv = county_dir / "final_contacts.csv"
+                if county_csv.exists():
+                    try:
+                        with open(county_csv, 'r') as f:
+                            csv_text = f.read()
+                        all_contacts.extend(_csv_text_to_contacts(csv_text, str(county_csv)))
+                    except Exception as e:
+                        log_err(f"Reading {county_csv}: {e}")
         
         if not all_contacts:
             log_warn("No contacts found in any county")
@@ -3018,14 +3044,19 @@ def list_runs():
     
     try:
         runs = list_all_runs()
-        
+
+        # Optional filter: ?scraper_type=church (prevents cross-scraper contamination in frontend)
+        filter_type = request.args.get("scraper_type", "").strip()
+        if filter_type:
+            runs = [r for r in runs if r.get("scraper_type") == filter_type]
+
         # Format response
         response_data = {
             "status": "ok",
             "runs": runs,
             "count": len(runs)
         }
-        
+
         # Flask-CORS will add CORS headers automatically
         response = jsonify(response_data)
         return response, 200
