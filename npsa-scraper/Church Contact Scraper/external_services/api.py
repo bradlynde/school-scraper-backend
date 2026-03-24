@@ -3569,6 +3569,30 @@ def unarchive_run(run_id: str):
         return error_response, 500
 
 
+@app.route("/admin/upload-csv", methods=["POST"])
+@require_auth
+def admin_upload_csv():
+    """Upload a CSV file to the persistent volume (for recovery/restore).
+    POST body: { "filename": "Arizona_leads_....csv", "content": "<csv text>" }
+    """
+    try:
+        data = request.get_json(force=True)
+        filename = data.get("filename", "").strip()
+        content = data.get("content", "")
+        if not filename or not content:
+            return jsonify({"status": "error", "error": "filename and content required"}), 400
+        # Sanitize filename — no path traversal
+        safe_name = Path(filename).name
+        if not safe_name.endswith(".csv"):
+            return jsonify({"status": "error", "error": "filename must end with .csv"}), 400
+        dest = VOLUME_DIR / safe_name
+        with open(dest, "w") as f:
+            f.write(content)
+        return jsonify({"status": "ok", "path": str(dest), "size": len(content)}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 @app.route("/runs/<run_id>/download", methods=["GET"])
 @require_auth
 def download_run_csv(run_id: str):
