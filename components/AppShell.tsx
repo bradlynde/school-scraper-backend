@@ -30,8 +30,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", height: "100vh" }}>
       <Sidebar />
-      <main style={{ flex: 1, overflowY: "auto", background: "#f4f5f7", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ width: "100%", height: "100%" }}>
+      <main style={{ flex: 1, overflowY: "auto", background: "#f4f5f7", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 0 }}>
+        <div style={{ width: "100%" }}>
           {children}
         </div>
       </main>
