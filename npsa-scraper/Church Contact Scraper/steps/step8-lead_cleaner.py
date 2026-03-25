@@ -153,8 +153,8 @@ class CSVParser:
                 if contact['first_name'] and contact['last_name'] and contact['title']:
                     contacts.append(contact)
         except Exception as e:
-            print(f"      WARNING: CSV parse error: {e}")
-            print(f"      CSV preview: {csv_text[:500]}")
+            from church_run_log import log_warn
+            log_warn(f"CSV parse error: {e}")
         
         return contacts
 

@@ -12,6 +12,7 @@ import os
 from typing import Any, Optional
 
 import requests
+from church_run_log import log_warn, log_err
 
 RESEND_API_URL = "https://api.resend.com/emails"
 SCRAPER_SUBJECT_TAG = "Church Scraper"
@@ -101,10 +102,7 @@ def send_run_complete_email(
     Call only when transitioning a run to "completed"; use notify_sent at the call site.
     """
     if not _is_enabled():
-        print(
-            f"[NOTIFY] Email notifications disabled (Run ID: {run_id}, State: {state}) — "
-            "check NOTIFY_ON_RUN_COMPLETE, RESEND_API_KEY, NOTIFY_EMAIL"
-        )
+        log_warn(f"Notify disabled for {state} ({run_id})")
         return
     try:
         lines = [
@@ -121,9 +119,6 @@ def send_run_complete_email(
         body_text = "\n".join(lines)
         subject = f"[{SCRAPER_SUBJECT_TAG}] Run complete: {state}"
         _send_resend_html(subject, _text_to_html(body_text))
-        print(
-            f"[NOTIFY] Run completion email sent: {state} (Run ID: {run_id}, "
-            f"Counties: {counties_processed}/{total_counties}, Contacts: {total_contacts})"
-        )
+        log_warn(f"Notify sent: {state} ({counties_processed}/{total_counties} counties, {total_contacts} contacts)")
     except Exception as e:
-        print(f"[NOTIFY] Run completion email failed: {e} (Run ID: {run_id}, State: {state})")
+        log_err(f"Notify failed: {e} ({state})")

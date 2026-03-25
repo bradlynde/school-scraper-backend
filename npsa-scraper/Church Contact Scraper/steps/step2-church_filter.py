@@ -234,7 +234,8 @@ class LLMChurchFilter:
                 self.cache[church.name.lower().strip()] = is_valid
         
         except Exception as e:
-            print(f"  {bold('[LLM]')} Filter error: {e}")
+            from church_run_log import log_err
+            log_err(f"LLM church filter: {e}")
             for church in batch:
                 self.cache[church.name.lower().strip()] = False
     

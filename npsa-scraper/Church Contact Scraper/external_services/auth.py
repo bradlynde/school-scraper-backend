@@ -26,7 +26,8 @@ def _load_users() -> dict:
     """
     raw = os.getenv("AUTH_USERS", "")
     if not raw:
-        print("[AUTH] WARNING: AUTH_USERS not set — no users can log in")
+        from church_run_log import log_warn
+        log_warn("AUTH_USERS not set — no users can log in")
         return {}
     users = {}
     for entry in raw.split(","):
@@ -42,9 +43,11 @@ def _load_users() -> dict:
                 "username": username,
             }
     if users:
-        print(f"[AUTH] Loaded {len(users)} user(s): {', '.join(users.keys())}")
+        from church_run_log import log_warn
+        log_warn(f"Auth: {len(users)} user(s) loaded")
     else:
-        print("[AUTH] WARNING: AUTH_USERS set but no valid entries parsed")
+        from church_run_log import log_warn
+        log_warn("AUTH_USERS set but no valid entries parsed")
     return users
 
 

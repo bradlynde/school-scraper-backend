@@ -94,8 +94,8 @@ else:
     # Allow wildcard only if explicitly set to "*" for development
     # In production, ALLOWED_ORIGIN must be set to your frontend URL
     import sys
-    print("WARNING: ALLOWED_ORIGIN not set. Defaulting to '*' for development.")
-    print("SECURITY: Set ALLOWED_ORIGIN environment variable in production to your frontend URL.")
+    log_warn("ALLOWED_ORIGIN not set — defaulting to '*' (dev only)")
+    log_warn("Set ALLOWED_ORIGIN in production to your frontend URL")
     ALLOWED_ORIGIN = "*"
 
 # Configure CORS to automatically handle OPTIONS preflight requests
@@ -252,7 +252,7 @@ def _church_queue_worker_loop():
                     continue
                 run_streaming_pipeline(st, run_id, False, job_id)
         except Exception as e:
-            print(f"[QUEUE] worker error: {e}")
+            log_err(f"Queue worker: {e}")
             import traceback
             traceback.print_exc()
 
@@ -450,7 +450,7 @@ def _county_processor_worker_loop(worker_tag: str) -> None:
                 run_id, county, result, idx, total, elapsed
             )
         except Exception as e:
-            print(f"[COUNTY-Q] worker {worker_tag}: {e}")
+            log_err(f"County worker {worker_tag}: {e}")
             import traceback
 
             traceback.print_exc()
@@ -564,7 +564,7 @@ def _church_aggregation_recovery_loop() -> None:
                     log_err(f"[RECOVER] aggregation {rid}: {e}")
                     queue_store.clear_aggregation_claim(rid)
         except Exception as e:
-            print(f"[RECOVER] loop error: {e}")
+            log_err(f"Recovery loop: {e}")
             import traceback
 
             traceback.print_exc()
@@ -667,7 +667,7 @@ def cleanup_old_runs(*, silent_success: bool = False):
                             except Exception as e:
                                 log_warn(f"[CLEANUP] Could not delete CSV {final_csv}: {e}")
                     except Exception as e:
-                        print(f"[CLEANUP] Error deleting files for {run_id}: {e}")
+                        log_err(f"Cleanup: error deleting files for {run_id}: {e}")
                         continue
 
                     # Mark as deleted in metadata
@@ -678,19 +678,19 @@ def cleanup_old_runs(*, silent_success: bool = False):
 
                     deleted_count += 1
                     if not silent_success:
-                        print(f"[CLEANUP] Auto-deleted old run {run_id} (created: {created_at_str})")
+                        log_warn(f"Cleanup: auto-deleted run {run_id} (created: {created_at_str})")
             except Exception as e:
-                print(f"[CLEANUP] Error processing metadata file {metadata_file}: {e}")
+                log_err(f"Cleanup: error processing {metadata_file}: {e}")
                 continue
 
         if not silent_success:
             if deleted_count > 0:
                 freed_mb = freed_space / (1024 * 1024)
-                print(f"[CLEANUP] Cleaned up {deleted_count} old runs, freed ~{freed_mb:.2f} MB")
+                log_warn(f"Cleanup: {deleted_count} old runs removed, freed ~{freed_mb:.2f} MB")
             else:
-                print(f"[CLEANUP] No old runs to clean up (cutoff: {cutoff_date.isoformat()})")
+                log_warn(f"Cleanup: no old runs to remove (cutoff: {cutoff_date.isoformat()})")
     except Exception as e:
-        print(f"[CLEANUP] Error during cleanup: {e}")
+        log_err(f"Cleanup: {e}")
         import traceback
         traceback.print_exc()
 
@@ -711,7 +711,7 @@ def cleanup_ephemeral_run(run_id: str):
             except Exception:
                 pass
     except Exception as e:
-        print(f"[{run_id}] Error during ephemeral cleanup: {e}")
+        log_err(f"Ephemeral cleanup {run_id}: {e}")
 
 
 # Batch size for checkpointing (save checkpoint every N counties)
@@ -1146,10 +1146,10 @@ def save_checkpoint(run_id: str, state: str, completed_counties: list, next_coun
     try:
         with open(checkpoint_path, 'w') as f:
             json.dump(checkpoint_data, f, indent=2)
-        print(f"[{run_id}] Checkpoint saved: {len(completed_counties)}/{total_counties} counties completed")
+        log_warn(f"Checkpoint saved: {len(completed_counties)}/{total_counties} counties")
         return True
     except Exception as e:
-        print(f"[{run_id}] Error saving checkpoint: {e}")
+        log_err(f"Checkpoint save failed: {e}")
         return False
 
 
@@ -1164,10 +1164,10 @@ def load_checkpoint(run_id: str) -> dict:
     try:
         with open(checkpoint_path, 'r') as f:
             checkpoint_data = json.load(f)
-        print(f"[{run_id}] Checkpoint loaded: {len(checkpoint_data.get('completed_counties', []))}/{checkpoint_data.get('total_counties', 0)} counties completed")
+        log_warn(f"Checkpoint loaded: {len(checkpoint_data.get('completed_counties', []))}/{checkpoint_data.get('total_counties', 0)} counties")
         return checkpoint_data
     except Exception as e:
-        print(f"[{run_id}] Error loading checkpoint: {e}")
+        log_err(f"Checkpoint load failed: {e}")
         return None
 
 
@@ -1187,7 +1187,7 @@ def save_run_metadata(run_id: str, metadata: dict):
             json.dump(metadata, f, indent=2)
         return True
     except Exception as e:
-        print(f"[{run_id}] Error saving metadata: {e}")
+        log_err(f"Metadata save failed: {e}")
         return False
 
 
@@ -1203,7 +1203,7 @@ def load_run_metadata(run_id: str) -> dict:
         with open(metadata_path, 'r') as f:
             return json.load(f)
     except Exception as e:
-        print(f"[{run_id}] Error loading metadata: {e}")
+        log_err(f"Metadata load failed: {e}")
         return None
 
 
@@ -1269,7 +1269,7 @@ def list_all_runs() -> list:
                     _backfill_run_list_fields(metadata, "church")
                     runs.append(metadata)
             except Exception as e:
-                print(f"Error reading metadata file {metadata_file}: {e}")
+                log_err(f"Metadata read failed: {metadata_file}: {e}")
                 continue
 
         # Fallback: include runs from volume CSVs when metadata is missing (e.g. after container restart)
@@ -1284,7 +1284,7 @@ def list_all_runs() -> list:
         runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return runs
     except Exception as e:
-        print(f"Error listing runs: {e}")
+        log_err(f"Error listing runs: {e}")
         return []
 
 
@@ -3129,7 +3129,7 @@ def stop_run(run_id: str):
         })
         save_run_metadata(run_id, metadata)
         
-        print(f"[{run_id}] Pipeline stop requested")
+        log_warn(f"Pipeline stop requested: {run_id}")
         
         response = jsonify({
             "status": "success",
@@ -3334,7 +3334,7 @@ def aggregate_run(run_id: str):
             try:
                 aggregate_final_results(run_id, state, skip_wait=True)
             except Exception as e:
-                print(f"[{run_id}] Error during manual aggregation: {e}")
+                log_err(f"Manual aggregation {run_id}: {e}")
                 import traceback
                 traceback.print_exc()
                 if run_id in pipeline_runs:
@@ -3407,7 +3407,7 @@ def delete_run(run_id: str):
             # Update metadata to cancelled first
             metadata["status"] = "cancelled"
             metadata["cancelled_at"] = datetime.now().isoformat()
-            print(f"[{run_id}] Run stopped for deletion")
+            log_warn(f"Run stopped for deletion: {run_id}")
         
         # Actually delete files (ephemeral + volume final CSV)
         run_dir = RUNS_DIR / run_id
@@ -3417,23 +3417,23 @@ def delete_run(run_id: str):
             # Delete ephemeral run directory
             if run_dir.exists():
                 shutil.rmtree(run_dir)
-                print(f"[{run_id}] Deleted ephemeral run directory: {run_dir}")
+                log_warn(f"Deleted run dir: {run_dir}")
 
             # Delete checkpoint file if it exists
             if checkpoint_file.exists():
                 checkpoint_file.unlink()
-                print(f"[{run_id}] Deleted checkpoint file: {checkpoint_file}")
+                log_warn(f"Deleted checkpoint: {checkpoint_file}")
 
             # Delete final CSV from volume if it exists
             final_csv_path = metadata.get("final_csv_path")
             if final_csv_path and Path(final_csv_path).exists():
                 try:
                     Path(final_csv_path).unlink()
-                    print(f"[{run_id}] Deleted final CSV from volume: {final_csv_path}")
+                    log_warn(f"Deleted final CSV: {final_csv_path}")
                 except Exception:
                     pass
         except Exception as e:
-            print(f"[{run_id}] Warning: Error deleting files: {e}")
+            log_err(f"Delete files {run_id}: {e}")
 
         # Mark as deleted in metadata
         metadata["deleted"] = True
@@ -3444,7 +3444,7 @@ def delete_run(run_id: str):
         pipeline_runs.pop(run_id, None)
         running_threads.pop(run_id, None)
 
-        print(f"[{run_id}] Run deleted and files removed")
+        log_warn(f"Run deleted: {run_id}")
         
         response = jsonify({
             "status": "success",
@@ -3498,7 +3498,7 @@ def archive_run(run_id: str):
         metadata["archived"] = True
         save_run_metadata(run_id, metadata)
         
-        print(f"[{run_id}] Run archived")
+        log_warn(f"Run archived: {run_id}")
         
         response = jsonify({
             "status": "success",
@@ -3552,7 +3552,7 @@ def unarchive_run(run_id: str):
         metadata["archived"] = False
         save_run_metadata(run_id, metadata)
         
-        print(f"[{run_id}] Run unarchived")
+        log_warn(f"Run unarchived: {run_id}")
         
         response = jsonify({
             "status": "success",
@@ -3686,11 +3686,11 @@ def _repair_stuck_metadata() -> None:
                     metadata["final_csv_path"] = csv_path
                 save_run_metadata(run_id, metadata)
                 repaired += 1
-                print(f"[REPAIR] Fixed stuck run {run_id}: {status} → completed")
+                log_warn(f"Repair: fixed stuck run {run_id}: {status} -> completed")
         except Exception:
             continue
     if repaired:
-        print(f"[REPAIR] Repaired {repaired} stuck run(s)")
+        log_warn(f"Repair: fixed {repaired} stuck run(s)")
 
 
 def _ensure_api_bootstrap() -> None:

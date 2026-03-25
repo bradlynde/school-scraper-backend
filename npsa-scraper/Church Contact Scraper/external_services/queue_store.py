@@ -198,7 +198,8 @@ _PG_SCHEMA = [
 def init_db(*, log_ready: bool = True) -> bool:
     if not is_enabled():
         if log_ready:
-            print("[QUEUE] No database configured — queue disabled")
+            from church_run_log import log_warn
+            log_warn("No database configured — queue disabled")
         return False
     with _lock:
         conn = _conn()
@@ -211,7 +212,8 @@ def init_db(*, log_ready: bool = True) -> bool:
             conn.close()
     backend = "Postgres" if db.is_postgres() else f"SQLite at {db.sqlite_path()}"
     if log_ready:
-        print(f"[QUEUE] Queue ready ({backend})")
+        from church_run_log import log_warn
+        log_warn(f"Queue ready ({backend})")
     return True
 
 

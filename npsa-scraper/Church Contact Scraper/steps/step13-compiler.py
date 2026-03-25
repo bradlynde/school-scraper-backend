@@ -18,6 +18,7 @@ from pathlib import Path
 import shutil
 from urllib.parse import urlparse
 from assets.shared.models import Contact
+from church_run_log import log_warn, log_err
 
 # ANSI escape codes for bold text
 BOLD = '\033[1m'
@@ -426,10 +427,10 @@ class FinalCompiler:
         
         # Combine all contacts
         all_contacts = contacts_with_emails + contacts_enriched
-        print(f"{bold('[STEP 13]')} Compiling: {len(contacts_with_emails)} with emails, {len(contacts_enriched)} enriched, {len(all_contacts)} total")
-        
+        log_warn(f"Compiler: {len(contacts_with_emails)} with emails, {len(contacts_enriched)} enriched, {len(all_contacts)} total")
+
         if not all_contacts:
-            print(f"  {bold('[STEP 13]')} No contacts to compile")
+            log_warn("Compiler: no contacts to compile")
             # Create empty CSV with headers
             empty_df = pd.DataFrame(columns=['first_name', 'last_name', 'title', 'email', 'phone', 'church_name', 'source_url'])
             empty_df.to_csv(output_csv, index=False)
@@ -439,7 +440,7 @@ class FinalCompiler:
         contact_dicts = [contact.to_dict() for contact in all_contacts]
         df = pd.DataFrame(contact_dicts)
         
-        print(f"\nCleaning and validating...")
+        # Clean and validate
         
         # Clean emails
         if 'email' in df.columns:
@@ -449,31 +450,30 @@ class FinalCompiler:
         if 'email' in df.columns:
             df['email_valid'] = df['email'].apply(lambda x: True if (pd.isna(x) or str(x).strip() == '') else self.is_valid_email(x))
             df = df[df['email_valid'] == True]
-            print(f"  After email validation: {len(df)}")
+            pass  # email validation applied
         
         # Validate names
         df['name'] = (df['first_name'].fillna('') + ' ' + df['last_name'].fillna('')).str.strip()
         df['name_valid'] = df['name'].apply(self.is_valid_name)
         df = df[df['name_valid'] == True]
-        print(f"  After name validation: {len(df)}")
+        pass  # name validation applied
         
         # Format phones
         if 'phone' in df.columns:
             df['phone'] = df['phone'].apply(self.format_phone)
 
         if not already_deduplicated:
-            print(f"\nBefore deduplication: {len(df)}")
+            before_dedup = len(df)
             df = self.deduplicate_contacts(df)
-            print(f"After deduplication: {len(df)}")
+            if len(df) < before_dedup:
+                log_warn(f"Compiler: dedup {before_dedup} -> {len(df)}")
         else:
             # Safety check: do a lightweight deduplication pass even if already deduplicated
             # This catches any edge cases (e.g., email normalization issues)
             before = len(df)
             df = self.deduplicate_contacts(df)
             if len(df) < before:
-                print(f"\nSafety deduplication removed {before - len(df)} additional duplicates: {len(df)}")
-            else:
-                print(f"\nSafety deduplication check: {len(df)} (no additional duplicates found)")
+                log_warn(f"Compiler: safety dedup removed {before - len(df)}: {len(df)}")
 
         # Create final structure
         final_df = pd.DataFrame({
@@ -493,7 +493,7 @@ class FinalCompiler:
         df_with_emails = final_df[final_df['email'].notna() & (final_df['email'] != '') & (final_df['email'].str.strip() != '')]
         df_without_emails = final_df[final_df['email'].isna() | (final_df['email'] == '') | (final_df['email'].str.strip() == '')]
         
-        print(f"{bold('[STEP 13]')} Saved {len(final_df)} contacts ({len(df_with_emails)} with emails, {len(df_without_emails)} without)")
+        log_warn(f"Compiler: saved {len(final_df)} contacts ({len(df_with_emails)} with emails, {len(df_without_emails)} without)")
         
         return output_csv
     
@@ -508,9 +508,7 @@ class FinalCompiler:
                        If not provided, will generate based on state name
             state: State name (e.g., 'Texas', 'California') for filename generation
         """
-        print("\n" + "="*70)
-        print("STEP 6: COMPILING FINAL CSV")
-        print("="*70)
+        log_warn("Compiler: compiling final CSV")
         
         # Generate output filenames with state name if not provided
         if not output_csv:
@@ -528,7 +526,7 @@ class FinalCompiler:
         # Read parsed contacts
         df = pd.read_csv(input_csv)
         
-        print(f"Initial contacts: {len(df)}")
+        log_warn(f"Compiler: {len(df)} initial contacts")
         
         # Handle different input formats - check if we have 'name' column or 'first_name'/'last_name' columns
         if 'name' in df.columns and ('first_name' not in df.columns or 'last_name' not in df.columns):
@@ -555,7 +553,7 @@ class FinalCompiler:
                 df['church_name'] = ''
         
         # Clean and validate
-        print("\nCleaning and validating...")
+        # Clean and validate
         
         # First, clean all emails to remove special characters and invalid text
         df['email'] = df['email'].apply(lambda x: self.clean_email(x) if (x and not pd.isna(x) and str(x).strip()) else x)
@@ -565,7 +563,7 @@ class FinalCompiler:
         # Only validate format if email is present
         df['email_valid'] = df['email'].apply(lambda x: True if (pd.isna(x) or str(x).strip() == '') else self.is_valid_email(x))
         df = df[df['email_valid'] == True]
-        print(f"  After email validation: {len(df)} (empty emails kept)")
+        pass  # email validation applied
         
         # Validate names (filter out generic text/placeholders only)
         # Check if we have a combined 'name' column for validation
@@ -574,14 +572,14 @@ class FinalCompiler:
             df['name'] = (df['first_name'].fillna('') + ' ' + df['last_name'].fillna('')).str.strip()
         df['name_valid'] = df['name'].apply(self.is_valid_name)
         df = df[df['name_valid'] == True]
-        print(f"  After name validation (removed generic text): {len(df)}")
+        pass  # name validation applied
         
         # NO ROLE FILTERING - LLM handles all title filtering
-        print(f"  Skipping role validation (LLM handles all filtering)")
+        pass  # LLM handles filtering
         
         # Check if dataframe is empty
         if len(df) == 0:
-            print("  WARNING: No contacts remaining after validation")
+            log_warn("Compiler: no contacts remaining after validation")
             # Create empty CSV with proper columns
             empty_df = pd.DataFrame(columns=['Church Name', 'First Name', 'Last Name', 'Title', 'Email', 'Phone', 'Confidence Score', 'Source URL', 'Date Collected', 'Verified', 'Notes'])
             empty_df.to_csv(output_csv, index=False)
@@ -592,9 +590,10 @@ class FinalCompiler:
         df['phone'] = df['phone'].apply(self.format_phone)
         
         # Deduplicate
-        print(f"\nBefore deduplication: {len(df)}")
+        before_dedup = len(df)
         df = self.deduplicate_contacts(df)
-        print(f"After deduplication: {len(df)}")
+        if len(df) < before_dedup:
+            log_warn(f"Compiler: dedup {before_dedup} -> {len(df)}")
         
         # Create final structure
         final_df = pd.DataFrame({
@@ -620,12 +619,12 @@ class FinalCompiler:
         if not final_df.empty:
             final_df.to_csv(output_csv, index=False)
             self._copy_to_downloads(output_csv)
-            print(f"{bold('[STEP 13]')} Saved {len(final_df)} contacts ({len(df_with_emails)} with emails, {len(df_without_emails)} without)")
+            log_warn(f"Compiler: saved {len(final_df)} contacts ({len(df_with_emails)} with emails, {len(df_without_emails)} without)")
         else:
             # Create empty CSV with headers if no contacts
             pd.DataFrame(columns=final_df.columns).to_csv(output_csv, index=False)
             self._copy_to_downloads(output_csv)
-            print(f"{bold('[STEP 13]')} No contacts found")
+            log_warn("Compiler: no contacts found")
         
         # Print summary (using combined data)
         self._print_summary(final_df, output_csv, df_with_emails, df_without_emails)
@@ -638,48 +637,21 @@ class FinalCompiler:
         try:
             downloads_dir = Path.home() / "Downloads"
             if not downloads_dir.exists():
-                print(f"  WARNING: Downloads folder not found at {downloads_dir}. Skipping copy.")
-            return
-        
+                return
+
             destination = downloads_dir / Path(file_path).name
             shutil.copy2(file_path, destination)
-            print(f"  Copied output file to {destination}")
-        except Exception as e:
-            print(f"  WARNING: Could not copy file to Downloads: {e}")
+        except Exception:
+            pass
     
     def _print_summary(self, df: pd.DataFrame, output_file: str, df_with_emails: pd.DataFrame = None, df_without_emails: pd.DataFrame = None):
-        """Print final summary statistics"""
-        print("\n" + "="*70)
-        print("FINAL CSV COMPILATION COMPLETE")
-        print("="*70)
-        print(f"Total validated contacts: {len(df)}")
-        print(f"  - With emails: {len(df_with_emails) if df_with_emails is not None else df[df['Email'].ne('')].shape[0]}")
-        print(f"  - Without emails: {len(df_without_emails) if df_without_emails is not None else df[df['Email'] == ''].shape[0]}")
-        print(f"Unique churches: {df['Church Name'].nunique()}")
-        print(f"\nData completeness:")
-        print(f"  First Name: {df['First Name'].ne('').sum()} ({df['First Name'].ne('').sum()/len(df)*100:.1f}%)")
-        print(f"  Last Name: {df['Last Name'].ne('').sum()} ({df['Last Name'].ne('').sum()/len(df)*100:.1f}%)")
-        print(f"  Email: {df['Email'].ne('').sum()} ({df['Email'].ne('').sum()/len(df)*100:.1f}%)")
-        print(f"  Phone: {df['Phone'].ne('').sum()} ({df['Phone'].ne('').sum()/len(df)*100:.1f}%)")
-        print(f"\nConfidence scores:")
-        print(f"  High (80-100): {len(df[df['Confidence Score'] >= 80])}")
-        print(f"  Medium (60-79): {len(df[(df['Confidence Score'] >= 60) & (df['Confidence Score'] < 80)])}")
-        print(f"  Low (0-59): {len(df[df['Confidence Score'] < 60])}")
-        print(f"\nAverage confidence: {df['Confidence Score'].mean():.1f}")
-        print(f"\nOutput file: {output_file}")
-        print("="*70)
-        
-        # Show top churches
-        print("\nTop 10 churches by contacts:")
-        top_churches = df.groupby('Church Name').size().sort_values(ascending=False).head(10)
-        for church, count in top_churches.items():
-            print(f"  {church[:40]:40} | {count} contacts")
-        
-        # Show title distribution
-        print("\nTop 10 titles:")
-        title_counts = df['Title'].value_counts().head(10)
-        for title, count in title_counts.items():
-            print(f"  {title[:40]:40} | {count}")
+        """Print final summary statistics (compact)"""
+        n_with = len(df_with_emails) if df_with_emails is not None else df[df['Email'].ne('')].shape[0]
+        n_without = len(df_without_emails) if df_without_emails is not None else df[df['Email'] == ''].shape[0]
+        n_churches = df['Church Name'].nunique()
+        email_pct = df['Email'].ne('').sum() / len(df) * 100 if len(df) else 0
+        phone_pct = df['Phone'].ne('').sum() / len(df) * 100 if len(df) else 0
+        log_warn(f"Compiler: {len(df)} contacts, {n_churches} churches, {n_with} with email ({email_pct:.0f}%), {phone_pct:.0f}% with phone -> {output_file}")
     
     def _create_quality_report(self, df: pd.DataFrame, report_file: str):
         """Create detailed quality report"""
@@ -719,7 +691,7 @@ class FinalCompiler:
             for title, count in title_counts.items():
                 f.write(f"{title[:50]:50} {count:3}\n")
         
-        print(f"\nQuality report saved: {report_file}")
+        log_warn(f"Compiler: quality report -> {report_file}")
 
 
 if __name__ == "__main__":
