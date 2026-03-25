@@ -474,7 +474,7 @@ def _watch_county_queue_until_aggregated(
         if reclaim_every >= 20:
             reclaim_every = 0
             try:
-                queue_store.reclaim_stale_county_tasks(7200)
+                queue_store.reclaim_stale_county_tasks(600)
             except Exception as e:
                 log_warn(f"reclaim stale county tasks: {e}")
 
@@ -543,7 +543,7 @@ def _church_aggregation_recovery_loop() -> None:
         if not queue_store.is_enabled():
             continue
         try:
-            queue_store.reclaim_stale_county_tasks(7200)
+            queue_store.reclaim_stale_county_tasks(600)
             pending = queue_store.list_dispatch_pending_aggregation(SCRAPER_TYPE)
             for rid in pending:
                 claimer = f"{_CHURCH_PROCESS_ID}-recover"
