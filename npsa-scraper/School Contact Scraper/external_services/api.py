@@ -750,7 +750,7 @@ MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
 
 WORKERS_PER_REPLICA = int(os.getenv("WORKERS_PER_REPLICA", os.getenv("MAX_WORKERS", "8")))
 # Set to your Railway replica count for ETA math when using the Postgres county queue.
-SCHOOL_REPLICA_COUNT = max(1, int(os.getenv("SCHOOL_REPLICA_COUNT", "3")))
+SCHOOL_REPLICA_COUNT = max(1, int(os.getenv("SCHOOL_REPLICA_COUNT", "1")))
 
 # Estimated seconds per "parallel slot" for ETA math
 SCHOOL_AVG_SECONDS_PER_COUNTY_SLOT = int(
