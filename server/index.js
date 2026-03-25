@@ -7,7 +7,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openai = null;
+
+function getOpenAI() {
+  if (!openai) {
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) throw new Error('OPENAI_API_KEY is not configured');
+    openai = new OpenAI({ apiKey: key });
+  }
+  return openai;
+}
 
 app.use(express.json());
 
@@ -21,7 +30,7 @@ app.post('/api/polish', async (req, res) => {
     return res.status(400).json({ error: 'No text provided' });
   }
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAI().chat.completions.create({
       model: 'gpt-4o-mini',
       max_tokens: 1000,
       messages: [
