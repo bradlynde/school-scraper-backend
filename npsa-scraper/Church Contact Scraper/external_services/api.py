@@ -1288,6 +1288,9 @@ def list_all_runs() -> list:
                     rid = dr["run_id"]
                     if rid in seen_ids:
                         continue
+                    # Skip cancelled dispatch runs (not useful to display)
+                    if bool(dr.get("cancelled")):
+                        continue
                     seen_ids.add(rid)
                     try:
                         meta = json.loads(dr.get("meta_json") or "{}")
