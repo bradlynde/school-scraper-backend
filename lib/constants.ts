@@ -28,6 +28,8 @@ export const API_URLS: Record<string, string> = {
   school: process.env.NEXT_PUBLIC_SCHOOL_API_URL || 'https://school-scraper-backend-production.up.railway.app',
 };
 
+export const LOE_URL = process.env.NEXT_PUBLIC_LOE_URL || 'https://loe-generator-production.up.railway.app';
+
 export const US_STATES = [
   { value: 'alabama', label: 'Alabama' },
   { value: 'alaska', label: 'Alaska' },
