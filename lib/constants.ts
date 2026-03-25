@@ -24,8 +24,8 @@ export const COLORS = {
 };
 
 export const API_URLS: Record<string, string> = {
-  church: process.env.NEXT_PUBLIC_CHURCH_API_URL || 'https://church-scraper-backend-production.up.railway.app',
-  school: process.env.NEXT_PUBLIC_SCHOOL_API_URL || 'https://school-scraper-backend-production.up.railway.app',
+  church: process.env.NEXT_PUBLIC_CHURCH_API_URL || 'https://church-scraper-production.up.railway.app',
+  school: process.env.NEXT_PUBLIC_SCHOOL_API_URL || 'https://npsa-scraper.up.railway.app',
 };
 
 export const LOE_URL = process.env.NEXT_PUBLIC_LOE_URL || 'https://loe-generator-production.up.railway.app';
