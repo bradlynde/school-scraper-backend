@@ -12,9 +12,9 @@ export default function ProgressBar({ completed, total, label }: {
         <div style={{ fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 }}>{label}</div>
       )}
       <div style={{
-        background: '#e8eaed',
-        borderRadius: 8,
-        height: 24,
+        background: '#e5e7eb',
+        borderRadius: 6,
+        height: 22,
         position: 'relative',
         overflow: 'hidden',
       }}>

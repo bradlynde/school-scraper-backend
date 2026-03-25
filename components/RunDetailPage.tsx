@@ -104,16 +104,16 @@ export default function RunDetailPage({ runId, scraperType }: { runId: string; s
   const stateName = status.state ? formatState(status.state) : "Unknown";
 
   return (
-    <div style={{ padding: "32px 48px", maxWidth: 1200, margin: "0 auto" }}>
+    <div style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
       {/* Back link */}
-      <Link href={`/${scraperType}`} style={{ fontSize: 13, color: COLORS.textMuted, textDecoration: "none", marginBottom: 20, display: "inline-block" }}>
+      <Link href={`/${scraperType}`} style={{ fontSize: 12, color: COLORS.textMuted, textDecoration: "none", marginBottom: 16, display: "inline-flex", alignItems: "center", gap: 4 }}>
         &larr; Back to {labels.title}
       </Link>
 
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: COLORS.textPrimary, margin: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, margin: 0, letterSpacing: "-0.02em" }}>
             {stateName} {labels.plural}
           </h1>
           <StatusBadge status={status.status} />

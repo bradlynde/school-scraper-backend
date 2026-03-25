@@ -1,26 +1,39 @@
 export const COLORS = {
-  sidebarBg: '#1a2540',
+  // Sidebar — dark navy
+  sidebarBg: '#0f1f38',
   sidebarText: '#e8eaf0',
-  sidebarMuted: '#6c7a9c',
-  sidebarActive: '#2a3d60',
-  sidebarBorder: '#2a3550',
-  accent: '#1a4a6e',
-  accentLight: '#5b9ec9',
-  pageBg: '#f4f5f7',
+  sidebarMuted: '#7a8baa',
+  sidebarActive: '#1e3a5f',
+  sidebarBorder: '#1a2e4a',
+  sidebarHover: '#162d4d',
+
+  // Brand
+  accent: '#1e3a5f',
+  accentLight: '#2c5282',
+  green: '#6b8e23',
+  greenLight: '#7da32a',
+
+  // Page
+  pageBg: '#f7f8fa',
   cardBg: '#ffffff',
-  cardBorder: '#e8eaed',
-  cardShadow: '0 2px 12px rgba(0,0,0,0.06)',
-  textPrimary: '#1a1a1a',
-  textSecondary: '#666',
-  textMuted: '#999',
-  success: '#2d8a4e',
-  successBg: '#e8f5e9',
-  warning: '#e6a117',
-  warningBg: '#fff8e1',
-  error: '#d32f2f',
-  errorBg: '#ffebee',
-  running: '#1a4a6e',
-  runningBg: '#e3f0fa',
+  cardBorder: '#e5e7eb',
+  cardShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06)',
+  cardShadowHover: '0 4px 12px rgba(0,0,0,0.08)',
+
+  // Text
+  textPrimary: '#111827',
+  textSecondary: '#4b5563',
+  textMuted: '#9ca3af',
+
+  // Status
+  success: '#059669',
+  successBg: '#ecfdf5',
+  warning: '#d97706',
+  warningBg: '#fffbeb',
+  error: '#dc2626',
+  errorBg: '#fef2f2',
+  running: '#1e3a5f',
+  runningBg: '#eff6ff',
 };
 
 function ensureProtocol(url: string): string {

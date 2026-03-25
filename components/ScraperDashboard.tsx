@@ -117,18 +117,18 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
   }
 
   return (
-    <div style={{ padding: "32px 48px", maxWidth: 1200, margin: "0 auto" }}>
+    <div style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
-        <h1 style={{ fontSize: 26, fontWeight: 700, color: COLORS.textPrimary, margin: 0 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, margin: 0, letterSpacing: "-0.02em" }}>
           {labels.title}
         </h1>
         <Link
           href={`/${scraperType}/new`}
           style={{
-            display: "inline-flex", alignItems: "center", gap: 8,
-            padding: "10px 20px", background: COLORS.accent, color: "#fff",
-            borderRadius: 8, textDecoration: "none", fontSize: 13, fontWeight: 600,
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "8px 16px", background: scraperType === "church" ? COLORS.accent : COLORS.green, color: "#fff",
+            borderRadius: 8, textDecoration: "none", fontSize: 12, fontWeight: 600,
           }}
         >
           + New Run
@@ -258,7 +258,7 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
       )}
 
       {/* Aggregated Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20, marginBottom: 28 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
         <StatCard label="Total Contacts" value={totalContacts} />
         <StatCard label="With Email" value={totalWithEmail} />
         <StatCard label="States Scraped" value={statesScraped} />

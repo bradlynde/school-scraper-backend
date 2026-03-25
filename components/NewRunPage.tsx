@@ -37,8 +37,8 @@ export default function NewRunPage({ scraperType }: { scraperType: ScraperType }
 
   return (
     <div style={{
-      padding: "32px 48px",
-      maxWidth: 600,
+      padding: "28px 36px",
+      maxWidth: 560,
       margin: "0 auto",
     }}>
       <Link
@@ -58,7 +58,7 @@ export default function NewRunPage({ scraperType }: { scraperType: ScraperType }
         <div style={{ fontSize: 12, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600, marginBottom: 6 }}>
           {labels.title}
         </div>
-        <h2 style={{ margin: "0 0 24px", fontSize: 22, fontWeight: 700, color: COLORS.textPrimary }}>
+        <h2 style={{ margin: "0 0 24px", fontSize: 20, fontWeight: 700, color: COLORS.textPrimary, letterSpacing: "-0.02em" }}>
           Start New Run
         </h2>
 
