@@ -1,0 +1,118 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { COLORS, US_STATES, SCRAPER_LABELS } from "../lib/constants";
+import { startPipeline } from "../lib/api";
+import type { ScraperType } from "../lib/types";
+
+export default function NewRunPage({ scraperType }: { scraperType: ScraperType }) {
+  const labels = SCRAPER_LABELS[scraperType];
+  const router = useRouter();
+  const [selectedState, setSelectedState] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleStart = async () => {
+    if (!selectedState) return;
+    setStarting(true);
+    setError(null);
+    try {
+      await startPipeline(scraperType, selectedState);
+      router.push(`/${scraperType}`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to start pipeline");
+      setStarting(false);
+    }
+  };
+
+  return (
+    <div style={{
+      padding: "32px 48px",
+      maxWidth: 600,
+      margin: "0 auto",
+    }}>
+      <Link
+        href={`/${scraperType}`}
+        style={{ fontSize: 13, color: COLORS.textMuted, textDecoration: "none", marginBottom: 20, display: "inline-block" }}
+      >
+        &larr; Back to {labels.title}
+      </Link>
+
+      <div style={{
+        background: COLORS.cardBg,
+        borderRadius: 12,
+        padding: "32px",
+        boxShadow: COLORS.cardShadow,
+        border: `1px solid ${COLORS.cardBorder}`,
+      }}>
+        <div style={{ fontSize: 12, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600, marginBottom: 6 }}>
+          {labels.title}
+        </div>
+        <h2 style={{ margin: "0 0 24px", fontSize: 22, fontWeight: 700, color: COLORS.textPrimary }}>
+          Start New Run
+        </h2>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: 13, color: COLORS.textSecondary, display: "block", marginBottom: 6, fontWeight: 500 }}>
+            Select State
+          </label>
+          <select
+            value={selectedState}
+            onChange={e => setSelectedState(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "10px 14px",
+              fontSize: 14,
+              borderRadius: 8,
+              border: `1px solid ${COLORS.cardBorder}`,
+              background: "#fff",
+              color: COLORS.textPrimary,
+              outline: "none",
+              boxSizing: "border-box",
+              appearance: "auto",
+            }}
+          >
+            <option value="">Choose a state...</option>
+            {US_STATES.map(s => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {error && (
+          <div style={{
+            background: COLORS.errorBg,
+            color: COLORS.error,
+            padding: "10px 14px",
+            borderRadius: 8,
+            fontSize: 13,
+            marginBottom: 16,
+          }}>
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={handleStart}
+          disabled={!selectedState || starting}
+          style={{
+            width: "100%",
+            padding: "12px",
+            fontSize: 14,
+            fontWeight: 600,
+            borderRadius: 8,
+            border: "none",
+            background: selectedState && !starting ? COLORS.accent : "#ccc",
+            color: "#fff",
+            cursor: selectedState && !starting ? "pointer" : "not-allowed",
+            transition: "background 0.15s ease",
+          }}
+        >
+          {starting ? "Starting..." : "Start Run"}
+        </button>
+      </div>
+    </div>
+  );
+}

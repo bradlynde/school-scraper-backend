@@ -1,1453 +1,349 @@
 "use client";
-// Force Vercel redeploy - 2025-12-13
+// @ts-nocheck
 
-import React, { useState, useEffect } from "react";
-import Sidebar, { type TabType } from "../components/Sidebar";
-import LoginForm from "../components/LoginForm";
-import LOEGenerator from "../components/LOEGenerator";
-import Homepage from "../components/Homepage";
-import { useAuth } from "../contexts/AuthContext";
-import { normalizeScraperDisplayTitle } from "../lib/scraperDisplayName";
+import { useState, useEffect } from "react";
+import Link from "next/link";
+import { COLORS } from "../lib/constants";
+import { fetchRuns } from "../lib/api";
+import StatCard from "../components/StatCard";
+import StatusBadge from "../components/StatusBadge";
+import type { RunMetadata } from "../lib/types";
 
-type StepSummary = {
-  name: string;
-  schoolsFound?: number;
-  pagesDiscovered?: number;
-  emailsFound?: number;
-  contactsWithEmails?: number;
-  contactsWithoutEmails?: number;
-  finalContactsWithEmails?: number;
-  finalContactsWithoutEmails?: number;
-  [key: string]: number | string | undefined;
-};
-
-type PipelineSummary = {
-  status: string;
-  steps: StepSummary[];
-  totalContacts: number;
-  schoolsFound: number;
-  schoolsProcessed?: number;
-  runId: string;
-  csvData?: string;
-  csvFilename?: string;
-  estimatedTimeRemaining?: number;
-  currentStep?: number;
-  totalSteps?: number;
-  countiesProcessed?: number;
-  totalCounties?: number;
-  currentCounty?: string;
-  currentCountyIndex?: number;
-  statusMessage?: string;
-  countyContacts?: number[];
-  countySchools?: number[];
-};
-
-type QueueJobRow = {
-  id: number;
-  state: string;
-  display_name?: string | null;
-  status: string;
-  run_id?: string | null;
-  created_at?: string | null;
-};
-
-function queueJobDisplayLabel(
-  j: Pick<QueueJobRow, "display_name" | "state">,
-  scraperContext: "school" | "church"
-): string {
-  if (j.display_name?.trim()) return normalizeScraperDisplayTitle(j.display_name);
-  const pretty =
-    j.state?.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) || "Unknown";
-  const kind = scraperContext === "church" ? "Churches" : "Schools";
-  return `${pretty} ${kind}`;
+function formatState(state: string): string {
+  return state.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 }
 
-type ViewState = "start" | "progress" | "summary" | "running" | "finished" | "archive";
-
-// Single source of truth for run progress/state
-type RunProgress = {
-  totalCounties: number;
-  completedCounties: number;
-  currentCountyIndex: number; // 1-based index of currently processing county
-  currentCountyName?: string;
-  schoolsProcessed: number;
-  contactsProcessed: number;
-  errorCount: number;
-  status: "idle" | "running" | "paused" | "finished" | "error";
-  elapsedMs: number;
-  etaRemainingMs?: number;
-  lastUpdatedAt?: Date;
-};
-
-// Activity log entry type
-type ActivityLogEntry = {
-  level: "info" | "success" | "warning" | "error";
-  message: string;
-  timestamp: Date;
-};
-
-const US_STATES = [
-  { value: "alabama", label: "Alabama" },
-  { value: "alaska", label: "Alaska" },
-  { value: "arizona", label: "Arizona" },
-  { value: "arkansas", label: "Arkansas" },
-  { value: "california", label: "California" },
-  { value: "colorado", label: "Colorado" },
-  { value: "connecticut", label: "Connecticut" },
-  { value: "delaware", label: "Delaware" },
-  { value: "florida", label: "Florida" },
-  { value: "georgia", label: "Georgia" },
-  { value: "hawaii", label: "Hawaii" },
-  { value: "idaho", label: "Idaho" },
-  { value: "illinois", label: "Illinois" },
-  { value: "indiana", label: "Indiana" },
-  { value: "iowa", label: "Iowa" },
-  { value: "kansas", label: "Kansas" },
-  { value: "kentucky", label: "Kentucky" },
-  { value: "louisiana", label: "Louisiana" },
-  { value: "maine", label: "Maine" },
-  { value: "maryland", label: "Maryland" },
-  { value: "massachusetts", label: "Massachusetts" },
-  { value: "michigan", label: "Michigan" },
-  { value: "minnesota", label: "Minnesota" },
-  { value: "mississippi", label: "Mississippi" },
-  { value: "missouri", label: "Missouri" },
-  { value: "montana", label: "Montana" },
-  { value: "nebraska", label: "Nebraska" },
-  { value: "nevada", label: "Nevada" },
-  { value: "new_hampshire", label: "New Hampshire" },
-  { value: "new_jersey", label: "New Jersey" },
-  { value: "new_mexico", label: "New Mexico" },
-  { value: "new_york", label: "New York" },
-  { value: "north_carolina", label: "North Carolina" },
-  { value: "north_dakota", label: "North Dakota" },
-  { value: "ohio", label: "Ohio" },
-  { value: "oklahoma", label: "Oklahoma" },
-  { value: "oregon", label: "Oregon" },
-  { value: "pennsylvania", label: "Pennsylvania" },
-  { value: "rhode_island", label: "Rhode Island" },
-  { value: "south_carolina", label: "South Carolina" },
-  { value: "south_dakota", label: "South Dakota" },
-  { value: "tennessee", label: "Tennessee" },
-  { value: "texas", label: "Texas" },
-  { value: "utah", label: "Utah" },
-  { value: "vermont", label: "Vermont" },
-  { value: "virginia", label: "Virginia" },
-  { value: "washington", label: "Washington" },
-  { value: "west_virginia", label: "West Virginia" },
-  { value: "wisconsin", label: "Wisconsin" },
-  { value: "wyoming", label: "Wyoming" },
-];
-
-// County counts per state (from assets/data/state_counties/*.txt files)
-const STATE_COUNTY_COUNTS: Record<string, number> = {
-  "alabama": 67,
-  "alaska": 29,
-  "arizona": 15,
-  "arkansas": 75,
-  "california": 58,
-  "colorado": 64,
-  "connecticut": 8,
-  "delaware": 3,
-  "florida": 67,
-  "georgia": 159,
-  "hawaii": 5,
-  "idaho": 44,
-  "illinois": 101,
-  "indiana": 92,
-  "iowa": 99,
-  "kansas": 105,
-  "kentucky": 120,
-  "louisiana": 64,
-  "maine": 16,
-  "maryland": 24,
-  "massachusetts": 14,
-  "michigan": 83,
-  "minnesota": 87,
-  "mississippi": 82,
-  "missouri": 115,
-  "montana": 56,
-  "nebraska": 93,
-  "nevada": 16,
-  "new_hampshire": 10,
-  "new_jersey": 21,
-  "new_mexico": 33,
-  "new_york": 62,
-  "north_carolina": 100,
-  "north_dakota": 53,
-  "ohio": 88,
-  "oklahoma": 77,
-  "oregon": 36,
-  "pennsylvania": 67,
-  "rhode_island": 5,
-  "south_carolina": 46,
-  "south_dakota": 66,
-  "tennessee": 95,
-  "texas": 254,
-  "utah": 29,
-  "vermont": 14,
-  "virginia": 95,
-  "washington": 39,
-  "west_virginia": 55,
-  "wisconsin": 72,
-  "wyoming": 23,
-};
-
-// School 871s/county baseline. Church: ~42h Alabama / 67 co. wall-clock ≈ 2256s/county (4 workers).
-const SECONDS_PER_COUNTY_SCHOOL = 871;
-const SECONDS_PER_COUNTY_CHURCH = 2256;
-
-// Helper function to format estimated time (minutes only, no seconds)
-function formatEstimatedTime(seconds: number): string {
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) {
-    // Less than 1 hour, show as minutes only
-    return `~${minutes}m`;
-  } else if (minutes < 1440) {
-    // Less than 1 day, show as hours (rounded to nearest minute)
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    if (remainingMinutes === 0) {
-      return `~${hours}h`;
-    } else {
-      return `~${hours}h ${remainingMinutes}m`;
-    }
-  } else {
-    // 1 day or more, show as days
-    const days = Math.floor(minutes / 1440);
-    const remainingHours = Math.floor((minutes % 1440) / 60);
-    if (remainingHours === 0) {
-      return `~${days}d`;
-    } else {
-      return `~${days}d ${remainingHours}h`;
-    }
+function formatDate(dateStr?: string): string {
+  if (!dateStr) return "-";
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  } catch {
+    return dateStr;
   }
 }
 
-// Formatting helpers for run progress
-function formatCountiesCompleted(runProgress: RunProgress): string {
-  return `${runProgress.completedCounties} / ${runProgress.totalCounties} Counties`;
-}
-
-function formatPercentComplete(runProgress: RunProgress): number {
-  if (runProgress.totalCounties === 0) return 0;
-  return Math.round((runProgress.completedCounties / runProgress.totalCounties) * 100);
-}
-
-function formatCountyPosition(runProgress: RunProgress): string {
-  const base = `County ${runProgress.currentCountyIndex} of ${runProgress.totalCounties}`;
-  if (runProgress.currentCountyName) {
-    return `${base} — ${runProgress.currentCountyName}`;
-  }
-  return base;
-}
-
-function formatStatusLabel(runProgress: RunProgress): string {
-  switch (runProgress.status) {
-    case "running":
-      return "Running";
-    case "paused":
-      return "Paused";
-    case "finished":
-      return "Complete";
-    case "error":
-      return "Attention needed";
-    case "idle":
-      return "Ready";
-    default:
-      return "Unknown";
-  }
-}
-
-// Helper function to derive runProgress from summary and state
-function deriveRunProgress(
-  summary: PipelineSummary | null,
-  elapsedTimeDisplay: number,
-  estimatedTime: number | null,
-  startTime: number | null
-): RunProgress {
-  const countiesProcessed = summary?.countiesProcessed || 0;
-  const totalCounties = summary?.totalCounties || 1;
-  const currentCountyIndex = countiesProcessed + 1;
-  
-  // Determine status from summary
-  let status: RunProgress["status"] = "idle";
-  if (summary?.status === "running") {
-    status = "running";
-  } else if (summary?.status === "paused") {
-    status = "paused";
-  } else if (summary?.status === "completed") {
-    status = "finished";
-  } else if (summary?.status === "error") {
-    status = "error";
-  }
-  
-  return {
-    totalCounties,
-    completedCounties: countiesProcessed,
-    currentCountyIndex,
-    currentCountyName: summary?.currentCounty,
-    schoolsProcessed: summary?.schoolsProcessed || summary?.schoolsFound || 0,
-    contactsProcessed: summary?.totalContacts || 0,
-    errorCount: 0, // TODO: Add error tracking from backend
-    status,
-    elapsedMs: elapsedTimeDisplay * 1000,
-    etaRemainingMs: estimatedTime ? estimatedTime * 1000 : undefined,
-    lastUpdatedAt: startTime ? new Date(startTime) : undefined,
-  };
-}
-
-// Helper function to create cumulative line graph
-function createLineGraph(data: number[], width: number = 200, height: number = 80, color: string = "#6b8e23") {
-  if (!data || data.length === 0) return null;
-  
-  // Calculate cumulative values
-  const cumulative = [];
-  let sum = 0;
-  for (const value of data) {
-    sum += value;
-    cumulative.push(sum);
-  }
-  
-  const max = Math.max(...cumulative, 1);
-  const padding = 10;
-  const graphWidth = width - padding * 2;
-  const graphHeight = height - padding * 2;
-  
-  // Generate path points
-  const points = cumulative.map((value, index) => {
-    const x = padding + (index / (cumulative.length - 1 || 1)) * graphWidth;
-    const y = padding + graphHeight - (value / max) * graphHeight;
-    return `${x},${y}`;
-  }).join(' ');
-  
-  // Create area path for fill
-  const areaPath = `M ${padding},${height - padding} L ${points} L ${width - padding},${height - padding} Z`;
-  
-  return (
-    <svg width={width} height={height} className="w-full h-full">
-      <defs>
-        <linearGradient id={`gradient-${color}`} x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={color} stopOpacity="0.05" />
-        </linearGradient>
-      </defs>
-      <path d={areaPath} fill={`url(#gradient-${color})`} />
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-export default function Home() {
-  const { isAuthenticated, token, loading, logout, username } = useAuth();
-  const isDev = username === "Koen";
-  const [viewState, setViewState] = useState<ViewState>("start");
-  const [selectedState, setSelectedState] = useState<string>("");
-  const [selectedType, setSelectedType] = useState<TabType>("home");
-  const [status, setStatus] = useState("");
-  const [summary, setSummary] = useState<PipelineSummary | null>(null);
+export default function HomePage() {
+  const [churchRuns, setChurchRuns] = useState<RunMetadata[]>([]);
+  const [schoolRuns, setSchoolRuns] = useState<RunMetadata[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const [currentStep, setCurrentStep] = useState(0);
-  const [progress, setProgress] = useState(0);
-  const [estimatedTime, setEstimatedTime] = useState<number | null>(null);
-  const [startTime, setStartTime] = useState<number | null>(null);
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
-  const [elapsedTimeDisplay, setElapsedTimeDisplay] = useState<number>(0);
-  const [completedCounties, setCompletedCounties] = useState<string[]>([]);
-  const [completedCountiesSet, setCompletedCountiesSet] = useState<Set<string>>(new Set());
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [isFinalizing, setIsFinalizing] = useState(false);
-  const [finalizingMessage, setFinalizingMessage] = useState<string | null>(null);
-  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
-  const [pipelineSubmitting, setPipelineSubmitting] = useState(false);
-  const [scraperContext, setScraperContext] = useState<'school' | 'church'>('school');
-  const [selectedQueueDetail, setSelectedQueueDetail] = useState<{
-    job: QueueJobRow;
-    position: number;
-    total: number;
-  } | null>(null);
-
-  // Keep scraperContext in sync when user switches between school/church tabs
-  useEffect(() => {
-    if (selectedType === "school" || selectedType === "church") {
-      setScraperContext(selectedType);
-    }
-  }, [selectedType]);
-
-  const getApiUrl = (override?: "school" | "church") => {
-    const ctx = override ?? scraperContext;
-    const isChurch = ctx === "church";
-    let url = isChurch
-      ? (process.env.NEXT_PUBLIC_CHURCH_API_URL || "https://church-scraper-backend-production.up.railway.app")
-      : (process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app");
-    url = url.replace(/\/+$/, "");
-    if (!url.match(/^https?:\/\//)) url = `https://${url}`;
-    return url;
-  };
 
   useEffect(() => {
-    if (selectedType !== "running" || !selectedRunId?.startsWith("queue:") || !token) {
-      setSelectedQueueDetail(null);
-      return;
-    }
-    const jobIdStr = selectedRunId.slice("queue:".length);
-    let cancelled = false;
     async function load() {
-      const apiUrl = getApiUrl();
       try {
-        const r = await fetch(`${apiUrl}/queue`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!r.ok) {
-          if (!cancelled) setSelectedQueueDetail(null);
-          return;
-        }
-        const j = await r.json();
-        const jobs = (j.jobs || []).filter((x: { status: string }) => x.status === "queued");
-        const job = jobs.find((x: { id: number }) => String(x.id) === jobIdStr);
-        if (!job) {
-          if (!cancelled) setSelectedQueueDetail(null);
-          return;
-        }
-        const sorted = [...jobs].sort((a: { id: number }, b: { id: number }) => a.id - b.id);
-        const position = sorted.findIndex((x: { id: number }) => String(x.id) === jobIdStr) + 1;
-        if (!cancelled) setSelectedQueueDetail({ job, position, total: jobs.length });
-      } catch {
-        if (!cancelled) setSelectedQueueDetail(null);
+        const [cr, sr] = await Promise.allSettled([
+          fetchRuns("church"),
+          fetchRuns("school"),
+        ]);
+        if (cr.status === "fulfilled") setChurchRuns(cr.value);
+        if (sr.status === "fulfilled") setSchoolRuns(sr.value);
+      } catch (e) {
+        setError("Failed to load dashboard data");
       }
+      setLoading(false);
     }
     load();
-    const iv = setInterval(load, 15000);
-    return () => {
-      cancelled = true;
-      clearInterval(iv);
-    };
-  }, [selectedType, selectedRunId, scraperContext, token]);
+  }, []);
 
-  // Server-side elapsed time tracking - no client-side tracking needed
-  // Elapsed time is now calculated server-side and included in API response
+  const allRuns = [...churchRuns, ...schoolRuns];
+  const totalRuns = allRuns.length;
+  const totalContacts = allRuns.reduce(
+    (s, r) => s + (r.total_contacts || 0),
+    0
+  );
+  const activeRuns = allRuns.filter(
+    (r) => r.status === "running" || r.status === "finalizing"
+  ).length;
+  const statesCompleted = new Set(
+    allRuns
+      .filter((r) => r.status === "done" || r.status === "completed")
+      .map((r) => r.state)
+  ).size;
 
-  useEffect(() => {
-    return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
-    };
-  }, [pollingInterval]);
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 
-  // Access: Koen = all. Stuart = loe, loe-archive, loe-finished, school, church, running, finished, archive. Brad = school, running, finished, archive only.
-  const canAccessCurrentTab =
-    isDev ||
-    selectedType === "home" ||
-    (username === "Stuart" && ["loe", "loe-archive", "loe-finished", "school", "church", "running", "finished", "archive"].includes(selectedType)) ||
-    (username === "Brad" && ["school", "running", "finished", "archive"].includes(selectedType));
+  const cardStyle: React.CSSProperties = {
+    background: COLORS.cardBg,
+    borderRadius: 12,
+    padding: "20px 24px",
+    boxShadow: COLORS.cardShadow,
+    border: `1px solid ${COLORS.cardBorder}`,
+  };
 
-  // Redirect Brad from restricted tabs (loe, loe-archive, loe-finished, church)
-  useEffect(() => {
-    if (isAuthenticated && username === "Brad" && ["loe", "loe-archive", "loe-finished", "church"].includes(selectedType)) {
-      setSelectedType("school");
-    }
-  }, [isAuthenticated, username, selectedType]);
+  const miniTableRow = (run: RunMetadata, type: string) => (
+    <Link
+      key={run.run_id}
+      href={`/${type}/${run.run_id}`}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "8px 0",
+        borderBottom: `1px solid ${COLORS.cardBorder}`,
+        textDecoration: "none",
+        color: COLORS.textPrimary,
+        fontSize: 13,
+      }}
+    >
+      <span style={{ fontWeight: 500 }}>
+        {run.display_name || formatState(run.state)}
+      </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <span style={{ fontSize: 12, color: COLORS.textMuted }}>
+          {(run.total_contacts || 0).toLocaleString()} contacts
+        </span>
+        <StatusBadge status={run.status} />
+      </div>
+    </Link>
+  );
 
-  // Show login form if not authenticated (after all hooks are called)
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
-        <div className="text-gray-600">Loading...</div>
+      <div style={{ padding: "40px 48px" }}>
+        <div
+          style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 40 }}
+        >
+          Loading dashboard...
+        </div>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
-    return <LoginForm />;
-  }
-
-  function downloadCSV(csvContent: string, filename: string) {
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", filename);
-    link.style.visibility = "hidden";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }
-
-  function formatTime(seconds: number): string {
-    if (seconds < 60) return `${Math.round(seconds)}s`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m`;
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hours}h ${mins}m`;
-  }
-
-  // Helper: Get activity log icon based on level
-  function getActivityIcon(level: ActivityLogEntry["level"]): string {
-    switch (level) {
-      case "success":
-        return "✔";
-      case "warning":
-        return "⚠";
-      case "error":
-        return "✖";
-      case "info":
-      default:
-        return "→";
-    }
-  }
-
-  // Helper: Format relative time
-  function formatRelativeTime(timestamp: number): string {
-    const now = Date.now();
-    const diff = Math.floor((now - timestamp) / 1000);
-    
-    if (diff < 60) return `${diff}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return `${Math.floor(diff / 86400)}d ago`;
-  }
-
-  // Helper: Truncate with ellipsis
-  function truncateText(text: string, maxLength: number): string {
-    if (text.length <= maxLength) return text;
-    return text.slice(0, maxLength) + "...";
-  }
-
-  async function handleRunSelect(runId: string, sourceOverride?: "school" | "church", statusOverride?: string) {
-    if (sourceOverride) {
-      setScraperContext(sourceOverride);
-      setSelectedType(statusOverride === "running" ? "running" : "finished");
-    }
-    setSelectedRunId(runId);
-    setSidebarOpen(false);
-    if (runId.startsWith("queue:")) {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-        setPollingInterval(null);
-      }
-      setViewState("running");
-      setIsRunning(false);
-      setSummary(null);
-      setError(null);
-      return;
-    }
-    const apiUrl = getApiUrl(sourceOverride);
-    try {
-      const runsResponse = await fetch(`${apiUrl}/runs`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      let runMetadata: any = null;
-      if (runsResponse.ok) {
-        const runsData = await runsResponse.json();
-        runMetadata = runsData.runs?.find((r: any) => r.run_id === runId);
-      }
-      const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        if (data.status === "running") {
-          setViewState("progress");
-          setIsRunning(true);
-          if (pollingInterval) clearInterval(pollingInterval);
-          const interval = setInterval(() => checkPipelineStatus(runId), 60000);
-          setPollingInterval(interval);
-          checkPipelineStatus(runId);
-        } else if (data.status === "completed" || data.status === "error") {
-          const summaryData: PipelineSummary = {
-            ...data,
-            steps: data.steps || [],
-            schoolsFound: data.schoolsFound || data.schoolsProcessed || runMetadata?.schools_processed || 0,
-            runId: data.runId || runId,
-            totalContacts: data.totalContacts || runMetadata?.total_contacts || 0,
-            schoolsProcessed: data.schoolsProcessed || data.schoolsFound || runMetadata?.schools_processed || 0,
-            countyContacts: data.countyContacts || [],
-            countySchools: data.countySchools || [],
-            csvData: data.csvData,
-            csvFilename: data.csvFilename || runMetadata?.csv_filename,
-          };
-          if (runMetadata?.created_at && runMetadata?.completed_at) {
-            const start = new Date(runMetadata.created_at).getTime();
-            const end = new Date(runMetadata.completed_at).getTime();
-            setElapsedTimeDisplay((end - start) / 1000);
-            setStartTime(start);
-          } else if (data.elapsedTime) {
-            setElapsedTimeDisplay(data.elapsedTime);
-          }
-          setSummary(summaryData);
-          setViewState("summary");
-          setIsRunning(false);
-        }
-      } else if (response.status === 401) {
-        logout();
-      } else if (response.status === 410 || response.status === 404) {
-        if (runMetadata) {
-          const summaryData: PipelineSummary = {
-            status: runMetadata.status || "completed",
-            steps: [],
-            schoolsFound: runMetadata.schools_processed || 0,
-            runId: runId,
-            totalContacts: runMetadata.total_contacts || 0,
-            schoolsProcessed: runMetadata.schools_processed || 0,
-            countyContacts: [],
-            countySchools: [],
-            csvData: undefined,
-            csvFilename: runMetadata.csv_filename,
-          };
-          if (runMetadata.created_at && runMetadata.completed_at) {
-            const start = new Date(runMetadata.created_at).getTime();
-            const end = new Date(runMetadata.completed_at).getTime();
-            setElapsedTimeDisplay((end - start) / 1000);
-            setStartTime(start);
-          }
-          setSummary(summaryData);
-          setViewState("summary");
-          setIsRunning(false);
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching run status:", error);
-    }
-  }
-
-  async function checkPipelineStatus(runId: string) {
-    try {
-      const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/pipeline-status/${runId}`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          logout();
-          return;
-        }
-        if (response.status === 404) {
-          const errorData = await response.json().catch(() => ({ error: "Run ID not found" }));
-          if (pollingInterval) {
-            clearInterval(pollingInterval);
-            setPollingInterval(null);
-          }
-          setError(errorData.error || "Pipeline failed to start. The run ID was not found on the server.");
-          setStatus("Pipeline failed");
-          setIsRunning(false);
-          setSummary(null);
-          return;
-        }
-        if (response.status === 410) {
-          // 410 Gone - run completed and status no longer available, stop polling
-          if (pollingInterval) {
-            clearInterval(pollingInterval);
-            setPollingInterval(null);
-          }
-          // If we don't have summary yet, try to get it from the response
-          try {
-            const data = await response.json();
-            if (data.status === "completed" && summary) {
-              // Keep existing summary, just stop polling
-              setIsRunning(false);
-            } else {
-              setIsRunning(false);
-              setStatus("Pipeline completed");
-            }
-          } catch {
-            setIsRunning(false);
-            setStatus("Pipeline completed");
-          }
-          return;
-        }
-        throw new Error(`Status check failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.status === "completed") {
-        if (pollingInterval) {
-          clearInterval(pollingInterval);
-          setPollingInterval(null);
-        }
-        
-        // Use server-side elapsed time if available, otherwise calculate from startTime
-        if (data.elapsedTime !== undefined) {
-          setElapsedTimeDisplay(data.elapsedTime);
-        } else if (startTime) {
-          const finalElapsed = (Date.now() - startTime) / 1000;
-          setElapsedTimeDisplay(finalElapsed);
-        }
-        
-        setSummary(data);
-        setStatus("Pipeline completed successfully!");
-        setProgress(100);
-        setEstimatedTime(0);
-        setIsRunning(false);
-        
-        // If run was selected from Finished tab, show summary; otherwise default behavior
-        if (selectedRunId === runId && selectedType === 'finished') {
-        setViewState("summary");
-        } else if (selectedRunId === runId) {
-          setViewState("summary");
-        } else {
-          setViewState("summary");
-        }
-      } else if (data.status === "error") {
-        if (pollingInterval) {
-          clearInterval(pollingInterval);
-          setPollingInterval(null);
-        }
-        
-        setError(data.error || data.statusMessage || "Pipeline failed");
-        setStatus("Pipeline failed - see error below");
-        setIsRunning(false);
-        setSummary(data);
-      } else if (data.status === "finalizing") {
-        setSummary(data);
-        setIsFinalizing(true);
-        setFinalizingMessage(data.statusMessage || "Run is finalizing. Please wait 2 minutes for the container to restart.");
-        setIsRunning(false);
-      } else if (data.status === "running") {
-        setSummary(data);
-        setCurrentStep(data.currentStep || 0);
-        
-        const countiesProcessed = data.countiesProcessed || 0;
-        const totalCounties = data.totalCounties || 1;
-        const countyProgress = Math.round((countiesProcessed / totalCounties) * 100);
-        setProgress(countyProgress);
-        
-        // Use server-side elapsed time
-        if (data.elapsedTime !== undefined) {
-          setElapsedTimeDisplay(data.elapsedTime);
-        }
-        
-        setEstimatedTime(data.estimatedTimeRemaining || null);
-        
-        // Track completed counties for activity log using Set to prevent duplicates
-        // When countiesProcessed increases, the previous county is completed
-        // We track this by comparing with previous summary state
-        if (summary && summary.countiesProcessed !== undefined) {
-          const prevCountiesProcessed = summary.countiesProcessed || 0;
-          if (countiesProcessed > prevCountiesProcessed) {
-            // A county just completed - use the previous currentCounty
-            const completedCounty = summary.currentCounty;
-            if (completedCounty && !completedCountiesSet.has(completedCounty)) {
-              setCompletedCountiesSet(prev => {
-                const newSet = new Set(prev);
-                newSet.add(completedCounty);
-                return newSet;
-              });
-              setCompletedCounties(prev => [...prev, completedCounty]);
-              
-              // Add activity log entry for county completion
-              setActivityLog(prev => [...prev, {
-                level: "success",
-                message: `County ${prevCountiesProcessed + 1} completed`,
-                timestamp: new Date(),
-              }]);
-            }
-          }
-          
-          // Check if a new county started
-          if (data.currentCounty && data.currentCounty !== summary.currentCounty) {
-            setActivityLog(prev => [...prev, {
-              level: "info",
-              message: `County ${countiesProcessed + 1} started`,
-              timestamp: new Date(),
-            }]);
-          }
-        } else if (data.currentCounty && countiesProcessed === 0) {
-          // First county starting
-          setActivityLog(prev => [...prev, {
-            level: "info",
-            message: "County 1 started",
-            timestamp: new Date(),
-          }]);
-        }
-        
-        // If run was selected from Running/Finished tab, switch to progress view
-        if (selectedRunId === runId && (selectedType === 'running' || selectedType === 'finished')) {
-          setViewState("progress");
-          setIsRunning(true);
-          // Start polling if not already polling
-          if (!pollingInterval) {
-            const interval = setInterval(() => {
-              checkPipelineStatus(runId);
-            }, 60000); // Poll every 1 minute
-            setPollingInterval(interval);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Status check error:", err);
-    }
-  }
-
-  async function runPipeline() {
-    if (!selectedState) {
-      setError("Please select a state");
-      return;
-    }
-
-    if (!token) {
-      setError("Authentication token is missing. Please log in again.");
-      logout();
-      return;
-    }
-
-    setStatus("Starting pipeline...");
-    setSummary(null);
-    setError(null);
-    setCurrentStep(0);
-    setProgress(0);
-    setEstimatedTime(null);
-
-    try {
-      setPipelineSubmitting(true);
-      const apiUrl = getApiUrl();
-      console.log("Starting pipeline with API URL:", apiUrl);
-      console.log("Request payload:", { state: selectedState.toLowerCase().replace(' ', '_'), type: selectedType });
-
-      // Optional: verify the backend is reachable (don't block if it fails)
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for health check
-        
-        const healthCheck = await fetch(`${apiUrl}/health`, {
-          method: "GET",
-          signal: controller.signal,
-          cache: 'no-cache',
-        });
-        
-        clearTimeout(timeoutId);
-        
-        if (healthCheck.ok) {
-          const healthData = await healthCheck.json().catch(() => ({}));
-          if (healthData.status === "healthy") {
-            console.log("Backend health check passed");
-          }
-        }
-      } catch (healthError: any) {
-        // Non-blocking: health check failed but we'll still try the actual request
-        // This handles cases where /health might not be deployed yet but other endpoints work
-        console.warn("Backend health check failed (non-blocking):", healthError);
-      }
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-      const response = await fetch(`${apiUrl}/run-pipeline`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-        body: JSON.stringify({ 
-          state: selectedState.toLowerCase().replace(' ', '_'),
-          type: selectedType,
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          // Unauthorized - token expired or invalid
-          logout();
-          return;
-        }
-        
-        // Read response body once and store it
-        let errorData: any = {};
-        let errorMessage = `Backend responded with ${response.status}: ${response.statusText}`;
-        
-        try {
-          // Clone the response before reading to avoid consuming the body
-          const responseClone = response.clone();
-          errorData = await responseClone.json();
-          errorMessage = errorData.error || errorData.message || errorMessage;
-          console.error("Error response data:", errorData);
-          console.error("Full error response:", {
-            status: response.status,
-            statusText: response.statusText,
-            headers: Object.fromEntries(response.headers.entries()),
-            errorData
-          });
-        } catch {
-          // If JSON parse fails, try text (but we can only read once, so use original response)
-          try {
-            const text = await response.text();
-            if (text) {
-              errorMessage = text;
-            }
-          } catch {
-            // If text also fails, use default message
-          }
-        }
-        
-        // Handle specific error codes (use already-parsed errorData)
-        if (response.status === 409) {
-          if (errorData.isFinalizing) {
-            setIsFinalizing(true);
-            setFinalizingMessage(errorMessage || "A run is currently finalizing. Please wait 2 minutes for the container to restart before starting a new run.");
-          } else {
-            errorMessage = errorMessage || "Another run is already in progress. Please wait for it to complete or stop it first.";
-          }
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      console.log("Pipeline response:", data);
-
-      const isQueued =
-        response.status === 202 ||
-        data.status === "queued" ||
-        (data.jobId != null && data.runId == null);
-
-      if (isQueued) {
-        setViewState("start");
-        setIsRunning(false);
-        setStartTime(null);
-        setStatus(
-          data.message ||
-            `Queued — job #${data.jobId} (position ${data.position ?? "?"})`
-        );
-        return;
-      }
-
-      if (data.runId) {
-        setViewState("progress");
-        setIsRunning(true);
-        const now = Date.now();
-        setStartTime(now);
-        if (typeof window !== "undefined") {
-          localStorage.setItem(`run_startTime_${data.runId}`, now.toString());
-        }
-        const interval = setInterval(() => {
-          checkPipelineStatus(data.runId);
-        }, 60000);
-        setPollingInterval(interval);
-        checkPipelineStatus(data.runId);
-        return;
-      }
-
-      console.warn("Unexpected run-pipeline response:", response.status, data);
-      setError(
-        data.error ||
-          data.message ||
-          "Unexpected response from the server. If you were at capacity, check the Running tab or try again."
-      );
-      setViewState("start");
-      setIsRunning(false);
-    } catch (err) {
-      console.error("Pipeline error:", err);
-      let errorMessage = "Unknown error occurred";
-      
-      if (err instanceof Error) {
-        errorMessage = err.message;
-        
-        // Check for timeout
-        if (err.name === 'AbortError' || err.message.includes('timeout')) {
-          errorMessage = "Request timed out. The backend may be slow to respond or unavailable. Please try again.";
-        }
-        // Check for network errors (includes CORS, connection refused, DNS, etc.)
-        else if (err.message.includes("fetch") || err.message.includes("Failed to fetch") || err.message.includes("NetworkError") || err.message.includes("Network request failed") || err.message.includes("Load failed")) {
-          const apiUrl = getApiUrl();
-          const origin = typeof window !== 'undefined' ? window.location.origin : 'unknown';
-          const apiVar = scraperContext === 'church' ? 'NEXT_PUBLIC_CHURCH_API_URL' : 'NEXT_PUBLIC_SCHOOL_API_URL';
-          const serviceName = scraperContext === 'church' ? 'church-scraper' : 'school-scraper';
-          errorMessage = `Cannot reach ${serviceName} backend at ${apiUrl}
-
-Your origin: ${origin}
-
-Common causes:
-• CORS: In Railway (${serviceName} service), set ALLOWED_ORIGIN to your frontend URL (e.g. ${origin})
-• Backend not running: Check Railway deployment status
-• Wrong URL: In Vercel, verify ${apiVar} matches your Railway public domain
-
-Test: Open ${apiUrl}/health in a new tab — if it loads, the issue is likely CORS.`;
-        }
-      }
-      
-      setError(errorMessage);
-      setStatus("Pipeline failed");
-      setViewState("start");
-      setIsRunning(false);
-      
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-        setPollingInterval(null);
-      }
-    } finally {
-      setPipelineSubmitting(false);
-    }
-  }
-
-  function resetToStart() {
-    setViewState("start");
-    setStatus("");
-    setSummary(null);
-    setError(null);
-    setCurrentStep(0);
-    setProgress(0);
-    setEstimatedTime(null);
-    setStartTime(null);
-    setElapsedTimeDisplay(0);
-    setCompletedCounties([]);
-    setCompletedCountiesSet(new Set());
-    setActivityLog([]);
-    setSelectedRunId(null);
-    setIsRunning(false);
-    
-    // Reset to the scraper start form when leaving run view
-    if (selectedType === "running" || selectedType === "finished") {
-      setSelectedType(scraperContext);
-    }
-    
-    if (pollingInterval) {
-      clearInterval(pollingInterval);
-      setPollingInterval(null);
-    }
-  }
-
-  // Derive runProgress from summary and state
-  const runProgress = deriveRunProgress(summary, elapsedTimeDisplay, estimatedTime, startTime);
-
-  // Render views with fade-in transitions
   return (
-    <div className="min-h-screen h-screen flex" style={{ backgroundColor: '#f5f5f5' }}>
-      {/* Mobile Hamburger Menu */}
-      <button
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="fixed top-4 left-4 z-50 md:hidden bg-white p-2 rounded-lg shadow-md border border-gray-200"
+    <div style={{ padding: "32px 48px", maxWidth: 1200, margin: "0 auto" }}>
+      {/* Header */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-end",
+          marginBottom: 28,
+        }}
       >
-        <svg className="w-6 h-6 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      </button>
+        <div>
+          <h1
+            style={{
+              fontSize: 26,
+              fontWeight: 700,
+              color: COLORS.textPrimary,
+              margin: 0,
+            }}
+          >
+            Dashboard
+          </h1>
+          <div
+            style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 4 }}
+          >
+            {today}
+          </div>
+        </div>
+      </div>
 
-      {/* Sidebar Overlay for Mobile */}
-      {sidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+      {error && (
+        <div
+          style={{
+            ...cardStyle,
+            background: COLORS.errorBg,
+            color: COLORS.error,
+            marginBottom: 20,
+            fontSize: 13,
+          }}
+        >
+          {error}
+        </div>
       )}
 
+      {/* Stat Cards */}
       <div
-        className={
-          "fixed left-0 top-0 h-screen z-50 transition-all duration-300 ease-out w-80 " +
-          (sidebarOpen ? "translate-x-0" : "-translate-x-full") +
-          " md:translate-x-0 md:relative md:z-auto md:h-full flex-shrink-0 " +
-          (sidebarCollapsed ? "md:w-[72px]" : "md:w-80")
-        }
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: 20,
+          marginBottom: 28,
+        }}
       >
-        <Sidebar
-          activeTab={selectedType}
-          scraperContext={scraperContext}
-          onCollapsedChange={setSidebarCollapsed}
-          onTabChange={(tab) => {
-            setSelectedType(tab);
-            setSidebarOpen(false); // Close mobile menu on tab change
-            if (tab === "home") {
-              setViewState("start");
-              setSelectedRunId(null);
-            } else if (tab === "loe" || tab === "loe-archive" || tab === "loe-finished" || tab === "school" || tab === "church") {
-              setViewState("start");
-              setSelectedRunId(null);
-            } else if (tab === "running" || tab === "finished" || tab === "archive") {
-              setViewState(tab);
-              setSelectedRunId(null);
-            }
-          }}
-          onRunSelect={(runId) => handleRunSelect(runId)}
-        />
+        <StatCard label="Total Runs" value={totalRuns} />
+        <StatCard label="Total Contacts" value={totalContacts} />
+        <StatCard label="Active Runs" value={activeRuns} />
+        <StatCard label="States Completed" value={statesCompleted} />
       </div>
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-        {/* Homepage - activity summary */}
-        {selectedType === "home" && (
-          <Homepage
-            onNavigate={(tab) => setSelectedType(tab as TabType)}
-            onViewRun={(runId, source, status) => handleRunSelect(runId, source, status)}
-          />
-        )}
 
-        {/* LOE Generator - always inline (frontend owns the UI; backend is API-only) */}
-        {viewState === "start" && selectedType === "loe" && (
-          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden relative">
-            {!canAccessCurrentTab ? (
-              <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
-                <div className="text-center bg-white rounded-2xl p-12 shadow-xl">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-2">In Development</h2>
-                  <p className="text-gray-600">This feature is coming soon. Use School Scraper in the meantime.</p>
-                </div>
-              </div>
-            ) : null}
-            <LOEGenerator />
+      {/* Two-column: Church + School */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 20,
+          marginBottom: 28,
+        }}
+      >
+        {/* Church Scraper */}
+        <div style={cardStyle}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 14,
+            }}
+          >
+            <h3
+              style={{
+                margin: 0,
+                fontSize: 16,
+                fontWeight: 700,
+                color: COLORS.textPrimary,
+              }}
+            >
+              Church Scraper
+            </h3>
+            <Link
+              href="/church"
+              style={{
+                fontSize: 12,
+                color: COLORS.accent,
+                textDecoration: "none",
+                fontWeight: 500,
+              }}
+            >
+              View All &rarr;
+            </Link>
           </div>
-        )}
-
-        {/* LOE Finished - placeholder for completed LOEs */}
-        {viewState === "start" && selectedType === "loe-finished" && (
-          <div className="animate-fade-in flex-1 flex items-center justify-center p-12">
-            <div className="text-center text-gray-500 max-w-md">
-              <p className="text-lg font-medium">LOE Finished</p>
-              <p className="text-sm mt-2">Completed LOEs will appear here. This view is coming soon.</p>
+          {churchRuns.length === 0 ? (
+            <div
+              style={{
+                fontSize: 13,
+                color: COLORS.textMuted,
+                padding: "16px 0",
+              }}
+            >
+              No runs yet
             </div>
+          ) : (
+            churchRuns.slice(0, 3).map((r) => miniTableRow(r, "church"))
+          )}
+        </div>
+
+        {/* School Scraper */}
+        <div style={cardStyle}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 14,
+            }}
+          >
+            <h3
+              style={{
+                margin: 0,
+                fontSize: 16,
+                fontWeight: 700,
+                color: COLORS.textPrimary,
+              }}
+            >
+              School Scraper
+            </h3>
+            <Link
+              href="/school"
+              style={{
+                fontSize: 12,
+                color: COLORS.accent,
+                textDecoration: "none",
+                fontWeight: 500,
+              }}
+            >
+              View All &rarr;
+            </Link>
           </div>
-        )}
-
-        {/* LOE Archive - iframe when URL set, else placeholder */}
-        {viewState === "start" && selectedType === "loe-archive" && (
-          <div className="animate-fade-in flex-1 min-h-0 overflow-hidden relative">
-            {!canAccessCurrentTab ? (
-              <div className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm z-10 flex items-center justify-center">
-                <div className="text-center bg-white rounded-2xl p-12 shadow-xl">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-2">In Development</h2>
-                  <p className="text-gray-600">This feature is coming soon. Use School Scraper in the meantime.</p>
-                </div>
-              </div>
-            ) : null}
-            {process.env.NEXT_PUBLIC_LOE_API_URL ? (
-              <iframe
-                src={`${process.env.NEXT_PUBLIC_LOE_API_URL.replace(/\/+$/, "")}/archive`}
-                className="w-full h-full border-0"
-                title="LOE Archive"
-              />
-            ) : (
-              <div className="flex items-center justify-center min-h-screen p-12">
-                <div className="text-center text-gray-500">
-                  <p className="text-lg font-medium">LOE Archive</p>
-                  <p className="text-sm mt-2">Set NEXT_PUBLIC_LOE_API_URL to an archive endpoint to load the LOE Archive.</p>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* START VIEW - Show when school/church tab is active */}
-        {viewState === "start" && (selectedType === "school" || selectedType === "church") && (
-          <div className="animate-fade-in flex-1 flex items-center justify-center p-12 min-h-0">
-            <div className="w-full max-w-2xl relative">
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-8 md:p-12">
-                <div className="flex flex-col space-y-8">
-                  <div>
-                    <h1 className="text-3xl font-bold text-gray-900 mb-3">Start New Search</h1>
-                  </div>
-
-                  {/* State Selection */}
-                  <div>
-                    <label htmlFor="state" className="block text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
-                      Select State
-                    </label>
-                    <select
-                      id="state"
-                      value={selectedState}
-                      onChange={(e) => setSelectedState(e.target.value)}
-                      className="w-full px-5 py-3.5 bg-white border border-gray-300 rounded-xl text-base text-gray-900 focus:outline-none focus:ring-2 focus:ring-[#1e3a5f] focus:border-[#1e3a5f] transition-all shadow-sm"
-                    >
-                      <option value="">-- Select a state --</option>
-                      {US_STATES.map((state) => (
-                        <option key={state.value} value={state.value}>
-                          {state.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Preview row after state selection */}
-                  {selectedState && (() => {
-                    const countyCount = STATE_COUNTY_COUNTS[selectedState] || 0;
-                    const secondsPerCounty = scraperContext === "church" ? SECONDS_PER_COUNTY_CHURCH : SECONDS_PER_COUNTY_SCHOOL;
-                    const estimatedSeconds = countyCount * secondsPerCounty;
-                    const estimatedTime = formatEstimatedTime(estimatedSeconds);
-                    
-                    return (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 border-t border-gray-200">
-                        <div>
-                          <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Counties</p>
-                          <p className="text-3xl font-bold text-gray-900">{countyCount}</p>
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Est. Time</p>
-                          <p className="text-3xl font-bold text-gray-900">{estimatedTime}</p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {error && (
-                    <div className="p-5 bg-red-50 border border-red-200 rounded-xl">
-                      <p className="text-red-700 text-base whitespace-pre-line">{error}</p>
-                      {error.includes("/health") && (
-                        <a
-                          href={`${getApiUrl()}/health`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-block mt-3 text-sm font-medium text-[#1e3a5f] hover:underline"
-                        >
-                          Open health endpoint in new tab →
-                        </a>
-                      )}
-                    </div>
-                  )}
-
-                  {isFinalizing && finalizingMessage && (
-                    <div className="p-5 bg-yellow-50 border border-yellow-200 rounded-xl">
-                      <p className="text-yellow-800 text-base font-medium">{finalizingMessage}</p>
-                    </div>
-                  )}
-                  
-                  {/* Enhanced primary CTA button (dashboard-18) */}
-                  <button
-                    onClick={runPipeline}
-                    disabled={!selectedState || isFinalizing || pipelineSubmitting}
-                    className={`w-full px-8 py-5 rounded-xl text-lg font-semibold text-white transition-all duration-200 shadow-lg flex items-center justify-center gap-3 ${
-                      !selectedState || isFinalizing || pipelineSubmitting
-                        ? "bg-gray-400 cursor-not-allowed opacity-60"
-                        : "bg-[#1e3a5f] hover:bg-[#2c5282] hover:shadow-xl transform hover:-translate-y-1"
-                    }`}
-                  >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                    </svg>
-                    {pipelineSubmitting ? "Starting…" : "Start Scan"}
-                  </button>
-
-                </div>
-              </div>
+          {schoolRuns.length === 0 ? (
+            <div
+              style={{
+                fontSize: 13,
+                color: COLORS.textMuted,
+                padding: "16px 0",
+              }}
+            >
+              No runs yet
             </div>
-          </div>
-        )}
+          ) : (
+            schoolRuns.slice(0, 3).map((r) => miniTableRow(r, "school"))
+          )}
+        </div>
+      </div>
 
-        {/* PROGRESS VIEW - Show when progress state OR when run selected from Running tab */}
-        {viewState === "progress" && summary && (
-            <div className="animate-fade-in min-h-screen flex items-center justify-center" style={{ backgroundColor: '#f5f5f5' }}>
-            <div className="w-full max-w-4xl px-4 sm:px-6 md:px-8 py-12">
-              {/* Single Card with all progress information */}
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-10" style={{ borderRadius: '16px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)' }}>
-                {/* X/Y Counties with percentage */}
-                <div className="mb-8">
-                  <div className="flex items-baseline gap-3 mb-6">
-                    <span className="text-6xl font-bold text-[#1e3a5f]">{runProgress.completedCounties}</span>
-                    <span className="text-3xl text-gray-500">/ {runProgress.totalCounties}</span>
-                    <span className="text-2xl font-semibold text-gray-600">Counties</span>
-                    <span className="text-2xl font-semibold text-gray-600 ml-auto">{formatPercentComplete(runProgress)}% complete</span>
-              </div>
-
-                  {/* Progress bar */}
-                  <div className="w-full bg-gray-200 rounded-full h-3">
-                    <div 
-                      className="bg-[#1e3a5f] h-3 rounded-full transition-all duration-500"
-                      style={{ width: `${formatPercentComplete(runProgress)}%` }}
-                    ></div>
-                      </div>
-                    </div>
-
-                {/* Stats row: Elapsed, Estimated Remaining, Status */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-8 border-t border-gray-200">
-                      <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Elapsed</p>
-                        <p className="text-3xl font-bold text-gray-900">{formatTime(elapsedTimeDisplay)}</p>
-                      </div>
-                        <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Estimated Remaining</p>
-                    {runProgress.etaRemainingMs && runProgress.etaRemainingMs > 0 ? (
-                      <p className="text-3xl font-bold text-gray-900">{formatTime(runProgress.etaRemainingMs / 1000)}</p>
-                    ) : (
-                      <p className="text-3xl font-bold text-gray-900">—</p>
-                    )}
-                        </div>
-                      <div>
-                    <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-3">Status</p>
-                    <p className="text-3xl font-bold text-[#1e3a5f]">{formatStatusLabel(runProgress)}</p>
-                      </div>
-                    </div>
-                  </div>
-          </div>
-          </div>
-        )}
-
-        {/* SUMMARY VIEW - Show when summary state */}
-        {viewState === "summary" && summary && (
-          <div className="animate-fade-in">
-              <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
-              <div className="w-full max-w-4xl">
-                {/* Header */}
-                <div className="mb-10 text-center">
-                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">Scraping Complete</h1>
-                </div>
-
-                {/* 2 Card Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 md:gap-6 mb-10">
-                  {/* Card 1: Total Contacts */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-3 md:p-4">
-                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Contacts Extracted</h3>
-                    <div className="text-6xl font-bold text-[#1e3a5f] mb-6">
-                      {summary.totalContacts || 0}
-                    </div>
-                    <div className="h-28 -mx-8 -mb-8 mt-4">
-                      {createLineGraph(summary.countyContacts || [], 400, 112, "#6b8e23")}
-                    </div>
-                  </div>
-
-                  {/* Card 2: Processing Time */}
-                  <div className="bg-white rounded-xl border border-gray-200 shadow-md hover:shadow-lg transition-shadow p-3 md:p-4">
-                    <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide mb-5">Processing Time</h3>
-                    <div className="text-6xl font-bold text-[#1e3a5f]">
-                      {formatTime(elapsedTimeDisplay || 0)}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Download Button */}
-                <div className="flex flex-col space-y-4 max-w-2xl mx-auto">
-                  {summary.totalContacts && summary.totalContacts > 0 ? (
-                    <button
-                      onClick={async () => {
-                        if (selectedRunId) {
-                          try {
-                            const apiUrl = getApiUrl();
-                            const response = await fetch(`${apiUrl}/runs/${selectedRunId}/download`, {
-                              headers: {
-                                "Authorization": `Bearer ${token}`,
-                              },
-                            });
-                            if (response.ok) {
-                              const blob = await response.blob();
-                              const url = window.URL.createObjectURL(blob);
-                              const link = document.createElement("a");
-                              link.href = url;
-                              link.download = summary.csvFilename || `run_${selectedRunId}.csv`;
-                              document.body.appendChild(link);
-                              link.click();
-                              document.body.removeChild(link);
-                              window.URL.revokeObjectURL(url);
-                            } else {
-                              alert("Failed to download CSV");
-                            }
-                          } catch (error) {
-                            console.error("Error downloading CSV:", error);
-                            alert("Failed to download CSV");
-                          }
-                        } else if (summary.csvData && summary.csvFilename) {
-                          downloadCSV(summary.csvData, summary.csvFilename);
-                        }
-                      }}
-                      className="w-full px-8 py-5 bg-[#1e3a5f] hover:bg-[#2c5282] text-white rounded-xl text-lg font-semibold transition-all duration-200 shadow-md hover:shadow-lg transform hover:-translate-y-0.5"
-                    >
-                      Download Leads ({summary.totalContacts || 0} contacts)
-                    </button>
-                  ) : (
-                    <div className="w-full px-8 py-5 bg-yellow-50 border border-yellow-200 rounded-xl text-center shadow-sm">
-                      <p className="text-yellow-800 text-base font-medium">
-                        {selectedType === "church"
-                          ? "No contacts were found. This may be normal if no churches were discovered or no contacts were extracted."
-                          : "No contacts were found. This may be normal if no schools were discovered or no contacts were extracted."}
-                      </p>
-                    </div>
-                  )}
-                  
-                  <button
-                    onClick={resetToStart}
-                    className="w-full px-8 py-5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-xl text-lg font-semibold transition-all duration-200 shadow-sm hover:shadow-md"
-                  >
-                    Run Another Search
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* RUNNING TAB VIEW - Queued job */}
-        {selectedType === "running" && selectedRunId?.startsWith("queue:") && (
-          <div className="animate-fade-in">
-            <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
-              <div className="w-full max-w-2xl">
-                <div className="mb-8">
-                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">In Progress</h1>
-                  <p className="text-base sm:text-lg text-gray-600 mt-2">This scrape is waiting in the queue</p>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 md:p-10">
-                  <div className="flex items-center gap-3 mb-6">
-                    <span className="px-3 py-1 rounded-full text-xs font-semibold text-amber-800 bg-amber-50">
-                      Queued
-                    </span>
-                    {selectedQueueDetail && (
-                      <span className="text-sm text-gray-600">
-                        Position {selectedQueueDetail.position} of {selectedQueueDetail.total} in queue
-                      </span>
-                    )}
-                  </div>
-                  <h2 className="text-xl font-semibold text-gray-900">
-                    {selectedQueueDetail
-                      ? queueJobDisplayLabel(selectedQueueDetail.job, scraperContext)
-                      : "Queued scrape"}
-                  </h2>
-                  <p className="text-gray-600 mt-4">
-                    It will start automatically when a worker slot opens. You can remove it from the queue using the trash
-                    icon in the sidebar.
-                  </p>
-                  {!selectedQueueDetail && (
-                    <p className="text-sm text-gray-500 mt-4">Loading queue status…</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* RUNNING TAB VIEW - Show empty state when no run selected */}
-        {selectedType === "running" && !selectedRunId && (
-          <div className="animate-fade-in">
-            <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
-              <div className="w-full max-w-7xl">
-                <div className="mb-10">
-                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">In Progress</h1>
-                  <p className="text-base sm:text-lg text-gray-600 mt-2">Select a run from the sidebar to view its progress</p>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 md:p-12 text-center">
-                  <p className="text-gray-500 text-base sm:text-lg">No run selected. Choose a run from the sidebar to view its progress.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* FINISHED TAB VIEW - Show empty state when no run selected */}
-        {selectedType === "finished" && !selectedRunId && (
-          <div className="animate-fade-in">
-            <div className="flex items-center justify-center min-h-screen py-12 px-4 sm:px-6 md:px-8">
-              <div className="w-full max-w-7xl">
-                <div className="mb-10">
-                  <h1 className="text-3xl sm:text-4xl font-bold text-gray-900">Finished Runs</h1>
-                  <p className="text-base sm:text-lg text-gray-600 mt-2">Select a run from the sidebar to view its results</p>
-                </div>
-                <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8 md:p-12 text-center">
-                  <p className="text-gray-500 text-base sm:text-lg">No run selected. Choose a run from the sidebar to view its results.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+      {/* Quick Actions */}
+      <div style={cardStyle}>
+        <h3
+          style={{
+            margin: "0 0 14px",
+            fontSize: 16,
+            fontWeight: 700,
+            color: COLORS.textPrimary,
+          }}
+        >
+          Quick Actions
+        </h3>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Link
+            href="/church/new"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 20px",
+              background: COLORS.accent,
+              color: "#fff",
+              borderRadius: 8,
+              textDecoration: "none",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            + New Church Run
+          </Link>
+          <Link
+            href="/school/new"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 20px",
+              background: COLORS.accent,
+              color: "#fff",
+              borderRadius: 8,
+              textDecoration: "none",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            + New School Run
+          </Link>
+          <Link
+            href="/loe"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 20px",
+              background: "#fff",
+              color: COLORS.accent,
+              border: `1px solid ${COLORS.cardBorder}`,
+              borderRadius: 8,
+              textDecoration: "none",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            LOE Generator
+          </Link>
+        </div>
       </div>
     </div>
   );
