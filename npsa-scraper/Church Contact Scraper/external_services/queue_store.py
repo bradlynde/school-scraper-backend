@@ -937,6 +937,29 @@ def list_dispatch_pending_aggregation(scraper_type: str = "church") -> list[str]
             conn.close()
 
 
+def list_dispatch_runs(scraper_type: str = "church") -> list[dict[str, Any]]:
+    """List all dispatch runs for a scraper type (for /runs endpoint cross-replica visibility)."""
+    if not is_enabled():
+        return []
+    p = _p()
+    with _lock:
+        conn = _conn()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT run_id, scraper_type, state, total_counties,
+                       cancelled, aggregation_done, meta_json, created_at
+                FROM county_dispatch
+                WHERE scraper_type = {p}
+                ORDER BY created_at DESC
+                """,
+                (scraper_type,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+
 # ---------------------------------------------------------------------------
 # County results storage (Postgres multi-service: CSV rows stored in DB)
 # ---------------------------------------------------------------------------
