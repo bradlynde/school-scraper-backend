@@ -577,21 +577,23 @@ not_found_runs = {}
 # Container restart logic removed - container stays running after completion (matches backup branch)
 
 # Storage configuration
-# Ephemeral: runs, checkpoints, metadata during processing (cleaned up at run end)
+# Ephemeral: runs, checkpoints during processing (cleaned up at run end)
 EPHEMERAL_DATA_DIR = Path(os.getenv("EPHEMERAL_DATA_DIR", "/tmp/npsa_data"))
 EPHEMERAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 RUNS_DIR = EPHEMERAL_DATA_DIR / "runs"
 CHECKPOINTS_DIR = EPHEMERAL_DATA_DIR / "checkpoints"
-METADATA_DIR = VOLUME_DIR / "metadata"
 
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
-METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Volume: only the final state CSV is persisted here
+# Volume: persistent storage shared across replicas
 VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
 VOLUME_DIR.mkdir(parents=True, exist_ok=True)
+
+# Metadata on volume so all replicas can see run state
+METADATA_DIR = VOLUME_DIR / "metadata"
+METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Automatic cleanup configuration
 # Delete runs older than this many days (default: 7 days)
