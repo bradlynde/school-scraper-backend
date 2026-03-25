@@ -858,7 +858,7 @@ export default function App() {
           </div>
           <div style={{flex:1,overflowY:"auto",padding:"32px 40px"}}>
             {!activeEdit?(
-              <div style={{textAlign:"center",color:"#aaa",marginTop:80,fontSize:14}}>← Select a section from the sidebar to edit</div>
+              <div style={{textAlign:"center",color:"#aaa",marginTop:80,fontSize:14}}>Select a section from the sidebar to edit</div>
             ):(() => {
               const sec=editingSections.find(s=>s.id===activeEdit.sectionId);
               const sub=activeEdit.subId?sec?.subsections?.find(s=>s.id===activeEdit.subId):null;
@@ -1497,7 +1497,7 @@ export default function App() {
                   else { setF("npsa2Selected", [...cur, {name:rep.name,email:rep.email,phone:rep.phone}]); }
                 }}
                   style={{textAlign:"left",background:selected?"#1a4a6e":"#222e4a",border:`1px solid ${selected?"#5b9ec9":"#2e3d60"}`,borderRadius:6,padding:"7px 10px",color:selected?"#fff":"#b0b8cc",fontSize:12,cursor:"pointer"}}>
-                  <span style={{fontWeight:selected?700:400}}>{selected?"✔ ":""}{rep.name}</span>
+                  <span style={{fontWeight:selected?700:400}}>{selected?"[x] ":""}{rep.name}</span>
                 </button>
               );
             })}
@@ -1549,7 +1549,7 @@ export default function App() {
         <button onClick={()=>polish(isPre?form.customClause:form.postCustomClause,r=>setF(isPre?"polishedClause":"postPolishedClause",r))}
           disabled={loading||(isPre?!form.customClause.trim():!form.postCustomClause.trim())}
           style={{marginTop:7,width:"100%",background:loading?"#2e3d60":"#1a4a6e",color:"#fff",border:"none",borderRadius:6,padding:"7px 0",fontSize:12,fontWeight:600,cursor:loading?"default":"pointer"}}>
-          {loading?"Polishing...":"✨ Polish with AI"}
+          {loading?"Polishing...":"Polish with AI"}
         </button>
         {(isPre?form.polishedClause:form.postPolishedClause)&&(
           <div style={{marginTop:9,background:"#1e3a2f",border:"1px solid #2d5c42",borderRadius:6,padding:10,fontSize:11,color:"#7edca8",lineHeight:1.6}}>
@@ -1673,7 +1673,7 @@ ${form.npsa1Name||"NPSA"}`
                   const doc = reviewIframeRef.current.contentDocument;
                   if(doc) { const orig = previewRef.current ? previewRef.current.innerHTML : ""; doc.getElementById("editable-body").innerHTML = orig; }
                 }
-              }} style={{background:"#555",color:"#fff",border:"none",padding:"7px 16px",borderRadius:5,cursor:"pointer",fontSize:12,fontWeight:600}}>↺ Reset Edits</button>
+              }} style={{background:"#555",color:"#fff",border:"none",padding:"7px 16px",borderRadius:5,cursor:"pointer",fontSize:12,fontWeight:600}}>Reset Edits</button>
               <button onClick={()=>{
                 if(reviewIframeRef.current){
                   const doc = reviewIframeRef.current.contentDocument;
@@ -2037,7 +2037,7 @@ ${form.npsa1Name||"NPSA"}`
             );
             const Check = ({checked,label}) => (
               <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:10,fontFamily:"Georgia,serif",fontSize:13,lineHeight:1.5}}>
-                <span style={{fontSize:15,flexShrink:0,marginTop:1}}>{checked?"☒":"☐"}</span>
+                <span style={{fontSize:15,flexShrink:0,marginTop:1}}>{checked?"[X]":"[ ]"}</span>
                 <span style={{color:checked?"#1a1a1a":"#555"}}>{label}</span>
               </div>
             );
