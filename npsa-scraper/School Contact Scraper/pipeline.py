@@ -19,8 +19,20 @@ from pathlib import Path
 import traceback
 import importlib.util
 
+
+def _maybe_traceback():
+    if os.environ.get("SCHOOL_LOG_TRACEBACK", "").strip() in ("1", "true", "yes"):
+        traceback.print_exc()
+
 # Import shared models
 from assets.shared.models import School, Page, PageContent, Contact
+from school_run_log import (
+    log_school_skip,
+    log_school_success,
+    log_county_done,
+    log_err,
+    log_warn,
+)
 
 # Import streaming steps
 # Handle hyphens in filenames using importlib.util
@@ -136,7 +148,7 @@ class StreamingPipeline:
                     batch_size=20
                 )
             except Exception as e:
-                print(f"WARNING: Could not initialize LLM school filter: {e}")
+                log_warn(f"Could not initialize LLM school filter: {e}")
                 self.llm_school_filter = None
         else:
             self.llm_school_filter = None
@@ -204,46 +216,39 @@ class StreamingPipeline:
         Process one school through all steps.
         Returns list of Contact objects extracted from this school.
         """
-        print(f"Processing: {school.name} ({school.county})")
-        
         # Step 2: Filter school
         filter_result = filter_school(school, target_state=self._state, llm_filter=self.llm_school_filter)
         if isinstance(filter_result, tuple):
             filtered_school, filter_reason = filter_result
         else:
-            # Backward compatibility
             filtered_school, filter_reason = filter_result, None
-        
+
         if not filtered_school:
-            # Format filter reason as key/value
-            if filter_reason:
-                if "LLM rejected" in filter_reason:
-                    print(f"  [FILTER] reason=\"LLM rejected\" detail=\"{filter_reason.replace('LLM rejected (', '').replace(')', '')}\"")
-                elif "failed pre-filters" in filter_reason:
-                    detail = filter_reason.replace("failed pre-filters (", "").replace(")", "")
-                    print(f"  [FILTER] reason=\"pre-filter failed\" detail=\"{detail}\"")
-                else:
-                    print(f"  [FILTER] reason=\"{filter_reason}\"")
+            reason = filter_reason or "unknown"
+            if "LLM rejected" in reason:
+                log_school_skip(school.name, "filtered (LLM)")
+            elif "failed pre-filters" in reason:
+                log_school_skip(school.name, "filtered (pre-filter)")
             else:
-                print(f"  [FILTER] reason=\"unknown\"")
+                log_school_skip(school.name, f"filtered ({reason[:40]})")
             self.stats['schools_filtered_out'] += 1
             return []
-        
+
         if not filtered_school.website:
-            print("  [SKIP] No website")
+            log_school_skip(school.name, "no website")
             return []
-        
+
         # Step 3: Discover pages
         try:
             pages = self._discover_pages_for_school(filtered_school)
             self.stats['pages_discovered'] += len(pages)
-            
+
             if not pages:
-                print("  [SKIP] No pages found")
+                log_school_skip(school.name, "no pages found")
                 return []
         except Exception as e:
-            print(f"  [ERROR] Error: {e}")
-            traceback.print_exc()
+            log_err(f"Page discovery: {school.name}: {e}")
+            _maybe_traceback()
             return []
         
         # Step 4: Collect content
@@ -258,7 +263,7 @@ class StreamingPipeline:
                 continue
         
         if not page_contents:
-            print("  [SKIP] No content collected")
+            log_school_skip(school.name, "no content collected")
             return []
         
         # Step 5: Parse content with LLM
@@ -271,9 +276,9 @@ class StreamingPipeline:
                 continue
         
         if all_contacts:
-            print(f"  [SUCCESS] Contacts extracted: {len(all_contacts)}")
+            log_school_success(school.name, len(all_contacts))
         else:
-            print("  [SKIP] No contacts")
+            log_school_skip(school.name, "no contacts")
         
         self.stats['schools_processed'] += 1
         return all_contacts
@@ -308,7 +313,8 @@ class StreamingPipeline:
                     discovered_via=page_dict.get('url')  # Could enhance this
                 ))
         except Exception as e:
-            print(f"    Error in page discovery: {e}")
+            log_err(f"Page discovery inner: {e}")
+            _maybe_traceback()
             import traceback
             traceback.print_exc()
         
@@ -339,7 +345,8 @@ class StreamingPipeline:
                 collection_method=fetch_method
             )
         except Exception as e:
-            print(f"    Error collecting content: {e}")
+            log_err(f"Content collection: {e}")
+            _maybe_traceback()
             import traceback
             traceback.print_exc()
             return None
@@ -412,7 +419,8 @@ class StreamingPipeline:
             
             return filtered_contacts
         except Exception as e:
-            print(f"  [ERROR] LLM parsing error: {e}")
+            log_err(f"LLM parsing: {e}")
+            _maybe_traceback()
             import traceback
             traceback.print_exc()
             return []

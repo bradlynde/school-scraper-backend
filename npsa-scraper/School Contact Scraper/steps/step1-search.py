@@ -318,7 +318,7 @@ class SchoolSearcher:
                     next_page_token = data.get('nextPageToken')
                     while next_page_token and not self._hit_global_limit():
                         # Wait 2 seconds before next page (Google requirement)
-                        time.sleep(2)
+                        time.sleep(1)
                         self.stats['total_api_calls'] += 1
                         
                         # Pagination request

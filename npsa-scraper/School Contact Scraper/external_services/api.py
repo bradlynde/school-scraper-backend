@@ -26,6 +26,8 @@ import platform  # For OS detection
 import multiprocessing  # For subprocess isolation
 import re  # For regex validation
 import shutil
+import socket
+import random
 from typing import Optional
 
 # Try to import psutil for process tree killing (optional)
@@ -49,6 +51,13 @@ from assets.shared.models import Contact
 from external_services.auth import require_auth, verify_password, generate_token
 from external_services.notify import send_run_complete_email, send_test_notification_email
 from external_services import queue_store
+from external_services import db
+from school_run_log import (
+    log_startup, log_county_header, log_school_success, log_school_skip,
+    log_warn, log_err, log_county_done, log_progress_counties,
+    log_aggregation, log_cost_estimate, log_state_complete,
+    configure_worker_log_queue, clear_worker_log_queue, start_stdout_drain_thread,
+)
 
 SCRAPER_TYPE = "school"
 
@@ -206,6 +215,391 @@ def _school_queue_worker_loop():
             traceback.print_exc()
 
 
+def _effective_school_parallelism() -> float:
+    """Parallel slots for ETA when Postgres county queue + multiple Railway replicas are used."""
+    return max(1.0, float(WORKERS_PER_REPLICA) * float(SCHOOL_REPLICA_COUNT))
+
+
+def _school_log_worker_count() -> int:
+    """Workers per container for startup banner."""
+    return WORKERS_PER_REPLICA if queue_store.is_enabled() else MAX_WORKERS
+
+
+def _hydrate_pipeline_run_from_dispatch(run_id: str) -> bool:
+    """If this replica missed run_streaming_pipeline init, rebuild minimal pipeline_runs from dispatch."""
+    if run_id in pipeline_runs:
+        return True
+    row = queue_store.get_dispatch_row(run_id)
+    if not row:
+        return False
+    try:
+        meta = json.loads(row["meta_json"] or "{}")
+    except json.JSONDecodeError:
+        meta = {}
+    st = (row["state"] or "").lower()
+    pipeline_runs[run_id] = {
+        "status": "running",
+        "state": st,
+        "progress": 0,
+        "currentStep": 1,
+        "totalSteps": 7,
+        "statusMessage": "Restored run (multi-replica)",
+        "steps": [],
+        "totalContacts": 0,
+        "totalContactsNoEmails": 0,
+        "schoolsFound": 0,
+        "schoolsProcessed": 0,
+        "csvData": None,
+        "csvFilename": None,
+        "csvNoEmailsData": None,
+        "csvNoEmailsFilename": None,
+        "error": None,
+        "countiesProcessed": 0,
+        "totalCounties": int(row["total_counties"] or 0),
+        "currentCounty": None,
+        "currentCountyIndex": 0,
+        "countyTimes": [],
+        "countyContacts": [],
+        "countySchools": [],
+        "startTime": float(meta.get("startTime") or time.time()),
+        "initialEstimatedTimeRemaining": meta.get("initialEstimatedTimeRemaining"),
+        "queue_job_id": meta.get("queue_job_id"),
+        "places_api_calls_total": 0,
+        "openai_calls_total": 0,
+        "openai_prompt_tokens_total": 0,
+        "openai_completion_tokens_total": 0,
+    }
+    return True
+
+
+def _merge_county_result_into_pipeline_runs(
+    run_id: str,
+    county: str,
+    result: dict,
+    county_index: int,
+    total_counties: int,
+    processing_time: float,
+) -> None:
+    """Apply one county result to in-memory progress (starter replica only)."""
+    if run_id not in pipeline_runs:
+        return
+    done = int(queue_store.get_run_progress(run_id).get("terminal") or 0)
+    with progress_lock:
+        pr = pipeline_runs[run_id]
+        progress_pct = int((done / max(1, total_counties)) * 100) if total_counties else 0
+        pr["progress"] = progress_pct
+        pr["statusMessage"] = f"Processing {done}/{total_counties} counties..."
+        pr["countiesProcessed"] = done
+        if done < total_counties:
+            pr["currentCounty"] = f"Processing {done}/{total_counties} counties"
+        else:
+            pr["currentCounty"] = f"All {total_counties} counties completed"
+        if result.get("success"):
+            pr["schoolsFound"] = pr.get("schoolsFound", 0) + int(result.get("schools") or 0)
+            pr["schoolsProcessed"] = pr.get("schoolsProcessed", 0) + int(result.get("schools") or 0)
+            if "countyTimes" not in pr:
+                pr["countyTimes"] = []
+            pr["countyTimes"].append(processing_time)
+            if "countyContacts" not in pr:
+                pr["countyContacts"] = []
+            if "countySchools" not in pr:
+                pr["countySchools"] = []
+            pr["countyContacts"].append(int(result.get("contacts") or 0))
+            pr["countySchools"].append(int(result.get("schools") or 0))
+            pr["places_api_calls_total"] = pr.get("places_api_calls_total", 0) + int(
+                result.get("places_api_calls") or 0
+            )
+            pr["openai_calls_total"] = pr.get("openai_calls_total", 0) + int(result.get("openai_calls") or 0)
+            pr["openai_prompt_tokens_total"] = pr.get("openai_prompt_tokens_total", 0) + int(
+                result.get("openai_prompt_tokens") or 0
+            )
+            pr["openai_completion_tokens_total"] = pr.get("openai_completion_tokens_total", 0) + int(
+                result.get("openai_completion_tokens") or 0
+            )
+    tc = sum(pipeline_runs[run_id].get("countyContacts") or [])
+    log_progress_counties(done, total_counties, tc)
+    if done % CHECKPOINT_BATCH_SIZE == 0 or done == total_counties:
+        names = queue_store.terminal_county_names_ordered(run_id)
+        st = pipeline_runs[run_id]["state"]
+        next_index = 0
+        for i, c in enumerate(load_counties_from_state(st)):
+            if c in names:
+                next_index = i + 1
+            else:
+                break
+        save_checkpoint(
+            run_id,
+            st,
+            names,
+            next_index,
+            total_counties,
+        )
+        metadata = load_run_metadata(run_id) or {}
+        metadata.update(
+            {
+                "status": "running",
+                "completed_counties": names,
+                "progress": progress_pct,
+                "last_checkpoint": time.time(),
+            }
+        )
+        if not metadata.get("display_name"):
+            metadata["display_name"] = _run_display_name(pipeline_runs[run_id]["state"], "school")
+        save_run_metadata(run_id, metadata)
+    check_health()
+    log_resource_usage()
+    gc.collect()
+    if done < total_counties:
+        time.sleep(2.0)
+
+
+def _county_processor_worker_loop(worker_tag: str) -> None:
+    """Daemon thread: claim county_tasks rows and run one isolated Process per county."""
+    while True:
+        time.sleep(0.35 + random.random() * 0.4)
+        if not queue_store.is_enabled():
+            time.sleep(5)
+            continue
+        try:
+            task = queue_store.claim_next_county_task(worker_tag, SCRAPER_TYPE)
+            if not task:
+                continue
+            run_id = task["run_id"]
+            state = task["state"]
+            county = task["county"]
+            idx = int(task["county_index"])
+            total = int(task["total_counties"])
+            if queue_store.is_dispatch_cancelled(run_id):
+                continue
+            if run_id in running_threads and running_threads[run_id].get("cancelled"):
+                queue_store.mark_county_failed(run_id, county, "cancelled")
+                continue
+            start_time = time.time()
+            run_dir = RUNS_DIR / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            result_file = str(run_dir / f"{county.replace(' ', '_')}_result.json")
+            proc = multiprocessing.Process(
+                target=_county_worker,
+                args=(state, county, run_id, idx, total, result_file),
+            )
+            proc.start()
+            proc.join()
+            try:
+                if os.path.exists(result_file):
+                    with open(result_file, "r") as f:
+                        result = json.load(f)
+                    try:
+                        os.remove(result_file)
+                    except OSError:
+                        pass
+                else:
+                    result = {"success": False, "error": "Worker did not write results file"}
+            except Exception as e:
+                result = {"success": False, "error": str(e)}
+            elapsed = time.time() - start_time
+            if not result.get("success"):
+                err = result.get("error", "Unknown error")
+                log_err(f"{county} County: {err}")
+                queue_store.mark_county_failed(run_id, county, str(err))
+            else:
+                queue_store.mark_county_done(run_id, county, result)
+                # In Postgres mode, store county CSV rows in DB so any service can aggregate
+                if db.is_postgres():
+                    csv_path = result.get("csv_path")
+                    if csv_path and os.path.exists(csv_path):
+                        try:
+                            with open(csv_path, "r") as cf:
+                                csv_text = cf.read()
+                            row_count = max(0, csv_text.count("\n") - 1)
+                            queue_store.store_county_results(run_id, county, csv_text, row_count)
+                        except Exception as e:
+                            log_warn(f"Could not store county CSV in Postgres: {e}")
+            _merge_county_result_into_pipeline_runs(
+                run_id, county, result, idx, total, elapsed
+            )
+        except Exception as e:
+            print(f"[COUNTY-Q] worker {worker_tag}: {e}")
+            import traceback
+            traceback.print_exc()
+
+
+def _watch_county_queue_until_aggregated(
+    run_id: str,
+    state: str,
+    counties: list,
+    completed_counties: list,
+) -> None:
+    """
+    Starter-replica loop: sync task progress into pipeline_runs, then aggregate when done.
+    County execution happens in _county_processor_worker_loop threads on all replicas.
+    """
+    reclaim_every = 0
+    wait_loops = 0
+    while True:
+        time.sleep(3.0)
+        reclaim_every += 1
+        if reclaim_every >= 20:
+            reclaim_every = 0
+            try:
+                queue_store.reclaim_stale_county_tasks(7200)
+            except Exception as e:
+                log_warn(f"reclaim stale county tasks: {e}")
+
+        if running_threads.get(run_id, {}).get("cancelled") or queue_store.is_dispatch_cancelled(run_id):
+            pipeline_runs[run_id]["status"] = "cancelled"
+            pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+            queue_store.cancel_dispatch_run(run_id)
+            return
+
+        prog = queue_store.get_run_progress(run_id)
+        total = len(counties)
+        terminal = int(prog.get("terminal") or 0)
+        with progress_lock:
+            pipeline_runs[run_id]["progress"] = int((terminal / max(1, total)) * 100)
+            pipeline_runs[run_id]["countiesProcessed"] = terminal
+            pipeline_runs[run_id]["schoolsFound"] = int(prog.get("schools_found") or 0)
+            pipeline_runs[run_id]["schoolsProcessed"] = int(prog.get("schools_found") or 0)
+            pipeline_runs[run_id]["places_api_calls_total"] = int(prog.get("places_api_calls_total") or 0)
+            pipeline_runs[run_id]["openai_calls_total"] = int(prog.get("openai_calls_total") or 0)
+            pipeline_runs[run_id]["openai_prompt_tokens_total"] = int(
+                prog.get("openai_prompt_tokens_total") or 0
+            )
+            pipeline_runs[run_id]["openai_completion_tokens_total"] = int(
+                prog.get("openai_completion_tokens_total") or 0
+            )
+            if terminal < total:
+                pipeline_runs[run_id]["statusMessage"] = (
+                    f"Processing {terminal}/{total} counties (distributed queue)..."
+                )
+            else:
+                pipeline_runs[run_id]["statusMessage"] = "All counties finished; aggregating..."
+
+        if not queue_store.all_county_tasks_terminal(run_id):
+            wait_loops = 0
+            continue
+
+        # All county rows terminal (done or failed)
+        claimer = f"{_SCHOOL_PROCESS_ID}-agg"
+        if queue_store.try_claim_aggregation(run_id, claimer):
+            try:
+                aggregate_final_results(run_id, state, skip_wait=True)
+                queue_store.mark_aggregation_done(run_id)
+            except Exception as e:
+                log_err(f"Aggregation after county queue: {e}")
+                queue_store.clear_aggregation_claim(run_id)
+                if run_id in pipeline_runs:
+                    pipeline_runs[run_id]["status"] = "error"
+                    pipeline_runs[run_id]["error"] = str(e)
+                    pipeline_runs[run_id]["statusMessage"] = f"Aggregation failed: {e}"
+            return
+
+        # Another replica holds the lease or will run recovery — wait for completion
+        row = queue_store.get_dispatch_row(run_id)
+        if row and row.get("aggregation_done"):
+            return
+        wait_loops += 1
+        if wait_loops > 4800:  # ~4h at 3s sleep
+            log_warn("County queue watcher: aggregation wait timeout")
+            return
+
+
+def _school_aggregation_recovery_loop() -> None:
+    """Pick up aggregation if the starter replica died after all counties finished."""
+    while True:
+        time.sleep(45.0)
+        if not queue_store.is_enabled():
+            continue
+        try:
+            queue_store.reclaim_stale_county_tasks(7200)
+            pending = queue_store.list_dispatch_pending_aggregation(SCRAPER_TYPE)
+            for rid in pending:
+                claimer = f"{_SCHOOL_PROCESS_ID}-recover"
+                if not queue_store.try_claim_aggregation(rid, claimer):
+                    continue
+                row = queue_store.get_dispatch_row(rid)
+                if not row:
+                    queue_store.clear_aggregation_claim(rid)
+                    continue
+                st = (row["state"] or "").lower()
+                try:
+                    if not _hydrate_pipeline_run_from_dispatch(rid):
+                        queue_store.clear_aggregation_claim(rid)
+                        continue
+                    aggregate_final_results(rid, st, skip_wait=True)
+                    queue_store.mark_aggregation_done(rid)
+                except Exception as e:
+                    log_err(f"[RECOVER] aggregation {rid}: {e}")
+                    queue_store.clear_aggregation_claim(rid)
+        except Exception as e:
+            print(f"[RECOVER] loop error: {e}")
+            import traceback
+            traceback.print_exc()
+
+
+def _synthetic_pipeline_status_from_dispatch(run_id: str) -> Optional[dict]:
+    """When polling hits a replica that did not start the run, rebuild status from dispatch."""
+    if not validate_run_id(run_id) or not queue_store.is_enabled():
+        return None
+    if not queue_store.dispatch_exists(run_id):
+        return None
+    row = queue_store.get_dispatch_row(run_id)
+    if not row:
+        return None
+    prog = queue_store.get_run_progress(run_id)
+    try:
+        meta = json.loads(row["meta_json"] or "{}")
+    except (json.JSONDecodeError, TypeError):
+        meta = {}
+    total = int(row["total_counties"] or 0)
+    terminal = int(prog.get("terminal") or 0)
+    st = (row["state"] or "").lower()
+    if bool(row["cancelled"]):
+        pstatus = "cancelled"
+    elif bool(row["aggregation_done"]):
+        pstatus = "completed"
+    else:
+        pstatus = "running"
+    start_time = float(meta.get("startTime") or time.time())
+    progress = (
+        100
+        if total and terminal >= total and pstatus != "running"
+        else int((terminal / max(1, total)) * 100)
+    )
+    return {
+        "status": pstatus,
+        "state": st,
+        "progress": progress,
+        "currentStep": 1,
+        "totalSteps": 7,
+        "statusMessage": (
+            f"County queue {terminal}/{total} (multi-replica)"
+            if pstatus == "running"
+            else pstatus
+        ),
+        "steps": [],
+        "totalContacts": 0,
+        "totalContactsNoEmails": 0,
+        "schoolsFound": int(prog.get("schools_found") or 0),
+        "schoolsProcessed": int(prog.get("schools_found") or 0),
+        "csvData": None,
+        "csvFilename": None,
+        "error": None,
+        "countiesProcessed": terminal,
+        "totalCounties": total,
+        "currentCounty": None,
+        "currentCountyIndex": 0,
+        "countyTimes": [],
+        "countyContacts": [],
+        "countySchools": [],
+        "startTime": start_time,
+        "initialEstimatedTimeRemaining": meta.get("initialEstimatedTimeRemaining"),
+        "places_api_calls_total": int(prog.get("places_api_calls_total") or 0),
+        "openai_calls_total": int(prog.get("openai_calls_total") or 0),
+        "openai_prompt_tokens_total": int(prog.get("openai_prompt_tokens_total") or 0),
+        "openai_completion_tokens_total": int(prog.get("openai_completion_tokens_total") or 0),
+    }
+
+
 # Track 404 requests for non-existent run IDs to prevent spam from stale browser tabs
 # Format: {run_id: (first_404_time, count)}
 not_found_runs = {}
@@ -354,9 +748,21 @@ CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "1"))
 # Default to 4 for parallel processing
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
 
+WORKERS_PER_REPLICA = int(os.getenv("WORKERS_PER_REPLICA", os.getenv("MAX_WORKERS", "8")))
+# Set to your Railway replica count for ETA math when using the Postgres county queue.
+SCHOOL_REPLICA_COUNT = max(1, int(os.getenv("SCHOOL_REPLICA_COUNT", "3")))
+
+# Estimated seconds per "parallel slot" for ETA math
+SCHOOL_AVG_SECONDS_PER_COUNTY_SLOT = int(
+    os.getenv("SCHOOL_AVG_SECONDS_PER_COUNTY_SLOT", "871")
+)
+
 # Thread locks for thread-safe operations
 checkpoint_lock = threading.Lock()
 progress_lock = threading.Lock()
+
+# Unique ID for this process (county workers + aggregation lease)
+_SCHOOL_PROCESS_ID = f"{socket.gethostname()}-{os.getpid()}-{random.randint(1, 999_999)}"
 
 # ANSI escape codes for bold text
 BOLD = '\033[1m'
@@ -1568,24 +1974,68 @@ def run_streaming_pipeline(
             pipeline_runs[run_id]["countiesProcessed"] = len(completed_counties)
             
             # Calculate static initial estimated time remaining (only if not already set)
-            # Average county time: 871 seconds (~14.5 minutes) based on Arkansas run analysis
+            eff_parallel = (
+                _effective_school_parallelism() if queue_store.is_enabled() else float(MAX_WORKERS)
+            )
             if pipeline_runs[run_id].get("initialEstimatedTimeRemaining") is None:
-                remaining_counties = total_counties - len(completed_counties)
-                avg_time_per_county = 871  # 14.5 minutes average from log analysis
-                # Account for parallel processing (MAX_WORKERS)
-                effective_remaining = max(1, remaining_counties / MAX_WORKERS)
+                remaining_counties_count = total_counties - len(completed_counties)
+                avg_time_per_county = SCHOOL_AVG_SECONDS_PER_COUNTY_SLOT
+                effective_remaining = max(1, remaining_counties_count / eff_parallel)
                 initial_estimate = effective_remaining * avg_time_per_county
                 pipeline_runs[run_id]["initialEstimatedTimeRemaining"] = int(initial_estimate)
-            
+
+            # Process remaining counties (skip completed ones if resuming)
+            remaining_counties = [(idx, county) for idx, county in enumerate(counties) if county not in completed_counties]
+            use_dispatch_queue = queue_store.is_enabled() and db.is_postgres()
+
+            if use_dispatch_queue:
+                # Multi-replica: county_tasks in Postgres; Process workers on each replica claim tasks.
+                if not queue_store.get_dispatch_row(run_id):
+                    queue_store.register_dispatch_run(
+                        run_id,
+                        state,
+                        total_counties,
+                        SCRAPER_TYPE,
+                        meta={
+                            "startTime": pipeline_runs[run_id]["startTime"],
+                            "initialEstimatedTimeRemaining": pipeline_runs[run_id].get(
+                                "initialEstimatedTimeRemaining"
+                            ),
+                            "queue_job_id": queue_job_id,
+                        },
+                    )
+                else:
+                    queue_store.update_dispatch_meta(
+                        run_id,
+                        {
+                            "startTime": pipeline_runs[run_id]["startTime"],
+                            "queue_job_id": queue_job_id,
+                        },
+                    )
+                if remaining_counties:
+                    queue_store.seed_county_tasks(
+                        run_id,
+                        state,
+                        SCRAPER_TYPE,
+                        remaining_counties,
+                        total_counties,
+                    )
+                if not remaining_counties:
+                    pipeline_runs[run_id]["progress"] = 100
+                    pipeline_runs[run_id]["countiesProcessed"] = total_counties
+                    pipeline_runs[run_id]["statusMessage"] = (
+                        f"All {total_counties} counties already completed"
+                    )
+                log_startup(run_id, state, total_counties, _school_log_worker_count())
+                _watch_county_queue_until_aggregated(run_id, state, counties, completed_counties)
+                return  # dispatch path handles aggregation internally
+
             # Determine processing mode message
             remaining_count = total_counties - len(completed_counties)
             if MAX_WORKERS == 1:
                 print(f"[{run_id}] Processing {remaining_count} remaining counties sequentially...")
             else:
                 print(f"[{run_id}] Processing {remaining_count} remaining counties with {MAX_WORKERS} parallel workers...")
-            
-            # Process remaining counties (skip completed ones if resuming)
-            remaining_counties = [(idx, county) for idx, county in enumerate(counties) if county not in completed_counties]
             
             if not remaining_counties:
                 print(f"[{run_id}] All counties already completed!")
@@ -2310,35 +2760,32 @@ def pipeline_status(run_id):
             "error": "Invalid run ID format"
         }), 400
     
-    if run_id not in pipeline_runs:
+    if run_id in pipeline_runs:
+        run_data = pipeline_runs[run_id].copy()
+    elif (syn := _synthetic_pipeline_status_from_dispatch(run_id)):
+        run_data = syn
+    else:
         # Track repeated 404 requests to prevent spam from stale browser tabs
         current_time = time.time()
         if run_id in not_found_runs:
             first_time, count = not_found_runs[run_id]
-            # If we've seen 3+ requests for this non-existent run ID within 30 seconds, return 410 Gone
-            # This stops polling spam from stale browser tabs quickly
             if count >= 3 and (current_time - first_time) < 30:
                 return jsonify({
                     "status": "error",
                     "error": "Run ID not found. This run no longer exists."
-                }), 410  # Gone - stop polling
-            # Increment count
+                }), 410
             not_found_runs[run_id] = (first_time, count + 1)
         else:
-            # First time seeing this non-existent run ID
             not_found_runs[run_id] = (current_time, 1)
-        
-        # Clean up old entries (older than 5 minutes)
+
         to_remove = [rid for rid, (ft, _) in not_found_runs.items() if current_time - ft > 300]
         for rid in to_remove:
             not_found_runs.pop(rid, None)
-        
+
         return jsonify({
             "status": "error",
             "error": "Run ID not found"
         }), 404
-    
-    run_data = pipeline_runs[run_id].copy()
     
     # If run is completed, return 410 Gone after grace period to stop polling
     # Allow a 2-minute grace period for the final status fetch, then return 410 Gone
@@ -3005,7 +3452,18 @@ cleanup_old_runs()
 if queue_store.init_db():
     _school_q_thread = threading.Thread(target=_school_queue_worker_loop, daemon=True)
     _school_q_thread.start()
-    print("[STARTUP] Queue worker thread started")
+    # Launch county processor worker threads (one per WORKERS_PER_REPLICA)
+    n_proc = max(1, WORKERS_PER_REPLICA)
+    for _i in range(n_proc):
+        _tag = f"{_SCHOOL_PROCESS_ID}-w{_i}"
+        threading.Thread(
+            target=_county_processor_worker_loop,
+            args=(_tag,),
+            daemon=True,
+        ).start()
+    # Launch aggregation recovery thread
+    threading.Thread(target=_school_aggregation_recovery_loop, daemon=True).start()
+    print(f"[STARTUP] Queue worker + {n_proc} county processors + aggregation recovery started")
 
 # Production: Use Waitress server
 # NOTE: If Railway runs this file directly (bypassing Dockerfile ENTRYPOINT),

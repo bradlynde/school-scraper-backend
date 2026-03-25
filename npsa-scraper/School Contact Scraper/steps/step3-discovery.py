@@ -26,8 +26,8 @@ def bold(text: str) -> str:
 
 
 class PageDiscoverer:
-    def __init__(self, timeout: int = 10, max_retries: int = 3):
-        self.timeout = timeout  # 10 second timeout
+    def __init__(self, timeout: int = 7, max_retries: int = 3):
+        self.timeout = timeout  # 7 second timeout
         self.max_retries = max_retries  # 1 retry only
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'

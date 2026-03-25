@@ -32,14 +32,14 @@ class HunterIOEnricher:
     Enrich contacts without emails using Hunter.io Email Finder API.
     """
     
-    def __init__(self, api_key: str, verify_emails: bool = True, score_threshold: int = 70):
+    def __init__(self, api_key: str, verify_emails: bool = True, score_threshold: int = 60):
         """
         Initialize Hunter.io enricher.
         
         Args:
             api_key: Hunter.io API key
             verify_emails: Whether to verify found emails (uses 0.5 credits per verification)
-            score_threshold: Minimum email score to accept (0-100, default: 70)
+            score_threshold: Minimum email score to accept (0-100, default: 60)
         """
         self.api_key = api_key
         self.verify_emails = verify_emails
