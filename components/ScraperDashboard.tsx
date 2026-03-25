@@ -1,19 +1,20 @@
 "use client";
 // @ts-nocheck
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { COLORS, SCRAPER_LABELS } from "../lib/constants";
-import { fetchRuns, fetchPipelineStatus, stopRun } from "../lib/api";
+import { fetchRuns, fetchPipelineStatus, stopRun, fetchQueue, cancelQueueJob } from "../lib/api";
 import StatCard from "./StatCard";
 import ProgressBar from "./ProgressBar";
 import RunsTable from "./RunsTable";
 import StatusBadge from "./StatusBadge";
-import type { RunMetadata, ScraperType, PipelineStatus } from "../lib/types";
+import type { RunMetadata, ScraperType, PipelineStatus, QueueJob } from "../lib/types";
 
 export default function ScraperDashboard({ scraperType }: { scraperType: ScraperType }) {
   const labels = SCRAPER_LABELS[scraperType];
   const [runs, setRuns] = useState<RunMetadata[]>([]);
+  const [queueJobs, setQueueJobs] = useState<QueueJob[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeStatus, setActiveStatus] = useState<PipelineStatus | null>(null);
@@ -29,8 +30,18 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
     setLoading(false);
   };
 
+  const loadQueue = useCallback(async () => {
+    try {
+      const jobs = await fetchQueue(scraperType);
+      setQueueJobs(jobs);
+    } catch {
+      setQueueJobs([]);
+    }
+  }, [scraperType]);
+
   useEffect(() => {
     loadRuns();
+    loadQueue();
   }, [scraperType, showArchived]);
 
   // Find active run and poll for updates
@@ -56,14 +67,30 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeRun?.run_id, scraperType]);
 
+  // Poll queue every 30s
+  useEffect(() => {
+    const interval = setInterval(loadQueue, 30000);
+    return () => clearInterval(interval);
+  }, [loadQueue]);
+
   const handleStop = async () => {
     if (!activeRun) return;
     if (!confirm("Stop this run? This cannot be undone.")) return;
     try {
       await stopRun(scraperType, activeRun.run_id);
       loadRuns();
+      loadQueue();
     } catch (e) {
       alert(e instanceof Error ? e.message : "Failed to stop run");
+    }
+  };
+
+  const handleCancelJob = async (jobId: number) => {
+    try {
+      await cancelQueueJob(scraperType, jobId);
+      loadQueue();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Failed to remove from queue");
     }
   };
 
@@ -152,6 +179,80 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
             >
               View Details &rarr;
             </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Queue */}
+      {queueJobs.length > 0 && (
+        <div style={{
+          background: COLORS.cardBg, borderRadius: 12, padding: "20px 24px",
+          boxShadow: COLORS.cardShadow, border: `1px solid ${COLORS.cardBorder}`,
+          marginBottom: 20,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: COLORS.textPrimary }}>
+              Queue
+            </h3>
+            <span style={{
+              fontSize: 11, fontWeight: 600, background: COLORS.warningBg, color: COLORS.warning,
+              padding: "2px 8px", borderRadius: 12,
+            }}>
+              {queueJobs.length} {queueJobs.length === 1 ? 'job' : 'jobs'}
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {queueJobs.map((job, idx) => (
+              <div key={job.id} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "12px 16px", borderRadius: 8,
+                background: "#fafafa", border: "1px solid #eee",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{
+                    width: 22, height: 22, borderRadius: "50%", background: COLORS.warningBg,
+                    color: COLORS.warning, fontSize: 11, fontWeight: 700,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {idx + 1}
+                  </span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: COLORS.textPrimary }}>
+                    {job.display_name || job.state?.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}
+                  </span>
+                  <StatusBadge status="queued" />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {job.created_at && (
+                    <span style={{ fontSize: 11, color: COLORS.textMuted }}>
+                      {new Date(job.created_at).toLocaleString("en-US", {
+                        timeZone: "America/Chicago", month: "short", day: "numeric",
+                        hour: "numeric", minute: "2-digit", hour12: true,
+                      })}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleCancelJob(job.id)}
+                    title="Remove from queue"
+                    style={{
+                      background: "none", border: "none", cursor: "pointer", padding: 4,
+                      color: COLORS.textMuted, transition: "color 0.15s",
+                      display: "flex", alignItems: "center",
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.color = COLORS.error)}
+                    onMouseLeave={e => (e.currentTarget.style.color = COLORS.textMuted)}
+                  >
+                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 10, fontSize: 11, color: COLORS.textMuted }}>
+            Jobs run automatically in order when the current run finishes.
           </div>
         </div>
       )}

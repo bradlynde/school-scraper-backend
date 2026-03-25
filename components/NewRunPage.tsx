@@ -13,14 +13,22 @@ export default function NewRunPage({ scraperType }: { scraperType: ScraperType }
   const [selectedState, setSelectedState] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [queued, setQueued] = useState<{ jobId: number; position: number } | null>(null);
 
   const handleStart = async () => {
     if (!selectedState) return;
     setStarting(true);
     setError(null);
+    setQueued(null);
     try {
-      await startPipeline(scraperType, selectedState);
-      router.push(`/${scraperType}`);
+      const result = await startPipeline(scraperType, selectedState);
+
+      if (result.status === "queued") {
+        setQueued({ jobId: result.jobId!, position: result.position! });
+        setStarting(false);
+      } else {
+        router.push(`/${scraperType}`);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to start pipeline");
       setStarting(false);
@@ -60,7 +68,7 @@ export default function NewRunPage({ scraperType }: { scraperType: ScraperType }
           </label>
           <select
             value={selectedState}
-            onChange={e => setSelectedState(e.target.value)}
+            onChange={e => { setSelectedState(e.target.value); setQueued(null); }}
             style={{
               width: "100%",
               padding: "10px 14px",
@@ -94,6 +102,34 @@ export default function NewRunPage({ scraperType }: { scraperType: ScraperType }
           </div>
         )}
 
+        {queued && (
+          <div style={{
+            background: COLORS.warningBg,
+            color: COLORS.warning,
+            padding: "14px 16px",
+            borderRadius: 8,
+            fontSize: 13,
+            marginBottom: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>
+              Queued — Position {queued.position}
+            </div>
+            <div>
+              Another run is currently active. This job has been added to the queue
+              and will start automatically when a slot opens.
+            </div>
+            <Link
+              href={`/${scraperType}`}
+              style={{ color: COLORS.accent, fontWeight: 500, textDecoration: "none", marginTop: 4 }}
+            >
+              View dashboard &rarr;
+            </Link>
+          </div>
+        )}
+
         <button
           onClick={handleStart}
           disabled={!selectedState || starting}
@@ -110,7 +146,7 @@ export default function NewRunPage({ scraperType }: { scraperType: ScraperType }
             transition: "background 0.15s ease",
           }}
         >
-          {starting ? "Starting..." : "Start Run"}
+          {starting ? "Starting..." : queued ? "Queue Another State" : "Start Run"}
         </button>
       </div>
     </div>
