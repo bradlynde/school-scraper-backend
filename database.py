@@ -36,32 +36,24 @@ def init_db():
             """)
             conn.commit()
 
-            # Seed users if table is empty
-            cur.execute("SELECT COUNT(*) FROM users")
-            if cur.fetchone()[0] == 0:
-                users = [
-                    ("Koen", "admin"),
-                    ("Brad", "user1"),
-                    ("Stuart", "user2"),
-                ]
-                for username, password in users:
+            # Ensure all users exist (idempotent — safe to run on every startup)
+            all_users = [
+                ("Koen", "admin"),
+                ("Brad", "user1"),
+                ("Stuart", "user2"),
+                ("Josh", "user3"),
+                ("Chad", "user4"),
+                ("Steven", "user5"),
+            ]
+            for username, password in all_users:
+                cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
+                if cur.fetchone() is None:
                     pw_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
                     cur.execute(
                         "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
                         (username, pw_hash),
                     )
-                conn.commit()
-            else:
-                # Ensure Brad and Stuart exist (for existing DBs that only had Koen)
-                for username, password in [("Brad", "user1"), ("Stuart", "user2")]:
-                    cur.execute("SELECT 1 FROM users WHERE username = %s", (username,))
-                    if cur.fetchone() is None:
-                        pw_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
-                        cur.execute(
-                            "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
-                            (username, pw_hash),
-                        )
-                conn.commit()
+            conn.commit()
 
 
 def get_user_by_username(username: str) -> dict | None:
