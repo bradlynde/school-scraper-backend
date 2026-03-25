@@ -23,12 +23,17 @@ export const COLORS = {
   runningBg: '#e3f0fa',
 };
 
+function ensureProtocol(url: string): string {
+  if (!url) return url;
+  return url.match(/^https?:\/\//) ? url : `https://${url}`;
+}
+
 export const API_URLS: Record<string, string> = {
-  church: process.env.NEXT_PUBLIC_CHURCH_API_URL || 'https://church-scraper-production.up.railway.app',
-  school: process.env.NEXT_PUBLIC_SCHOOL_API_URL || 'https://npsa-scraper.up.railway.app',
+  church: ensureProtocol(process.env.NEXT_PUBLIC_CHURCH_API_URL || 'https://church-scraper-production.up.railway.app'),
+  school: ensureProtocol(process.env.NEXT_PUBLIC_SCHOOL_API_URL || 'https://npsa-scraper.up.railway.app'),
 };
 
-export const LOE_URL = process.env.NEXT_PUBLIC_LOE_URL || 'https://loe-generator-production.up.railway.app';
+export const LOE_URL = ensureProtocol(process.env.NEXT_PUBLIC_LOE_URL || 'https://loe-generator-production.up.railway.app');
 
 export const US_STATES = [
   { value: 'alabama', label: 'Alabama' },
