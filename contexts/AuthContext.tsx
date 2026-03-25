@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 
 // Resolve auth API URL once (env vars are baked in at build time)
 function getAuthApiUrl(): string {
-  let url = process.env.NEXT_PUBLIC_AUTH_API_URL || process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://school-scraper-backend-production.up.railway.app";
+  let url = process.env.NEXT_PUBLIC_AUTH_API_URL || process.env.NEXT_PUBLIC_SCHOOL_API_URL || "https://npsa-scraper.up.railway.app";
   url = url.replace(/\/+$/, "");
   if (!url.match(/^https?:\/\//)) url = `https://${url}`;
   return url;
