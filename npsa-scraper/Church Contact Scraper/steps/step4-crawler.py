@@ -59,8 +59,8 @@ def bold(text: str) -> str:
 
 
 class ContentCollector:
-    def __init__(self, timeout: int = 10, max_retries: int = 3, use_selenium: bool = True, chrome_user_data_dir: Optional[str] = None):
-        self.timeout = timeout  # HTTP request timeout (10 seconds)
+    def __init__(self, timeout: int = 7, max_retries: int = 3, use_selenium: bool = True, chrome_user_data_dir: Optional[str] = None):
+        self.timeout = timeout  # HTTP request timeout (7 seconds)
         self.max_retries = max_retries  # 1 retry only
         self.use_selenium = use_selenium
         self.chrome_user_data_dir = chrome_user_data_dir  # Use volume path to avoid ephemeral storage exhaustion

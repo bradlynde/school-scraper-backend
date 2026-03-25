@@ -141,7 +141,7 @@ class StreamingPipeline:
         self.llm_parser = step7.LLMParser(openai_api_key, model="gpt-4o-mini")
         self.csv_parser = step8.CSVParser()
         self.deduplicator = step9.ContactDeduplicator(email_cleaner=self.csv_parser.clean_email)
-        self.title_filter = step10.TitleFilter(openai_api_key, model="gpt-4o-mini")
+        self.title_filter = step10.TitleFilter(openai_api_key, model="gpt-4o-mini", batch_size=10)
         self.contact_splitter = step11_contact_splitter.ContactSplitter()
         self.final_compiler = step13_final_compiler.FinalCompiler()
         self.enable_hunter_io = os.getenv('HUNTER_IO_API_KEY') is not None
@@ -354,17 +354,22 @@ class StreamingPipeline:
             
             deduped_contacts = self.deduplicator.deduplicate_contacts(page_contacts_dicts)
             
-            filtered_contacts = []
-            for contact_dict in deduped_contacts:
-                filter_payload = {
-                    'first_name': contact_dict.get('first_name', ''),
-                    'last_name': contact_dict.get('last_name', ''),
-                    'title': contact_dict.get('title', ''),
-                    'email': contact_dict.get('email', ''),
-                    'phone': contact_dict.get('phone', '')
+            # Use batched LLM filtering for speed (~8x faster at batch_size=10)
+            filter_payloads = [
+                {
+                    'first_name': cd.get('first_name', ''),
+                    'last_name': cd.get('last_name', ''),
+                    'title': cd.get('title', ''),
+                    'email': cd.get('email', ''),
+                    'phone': cd.get('phone', '')
                 }
-                
-                should_keep = self.title_filter.filter_contact(filter_payload, max_retries=1)
+                for cd in deduped_contacts
+            ]
+
+            batch_results = self.title_filter.filter_contacts_batch(filter_payloads, max_retries=1)
+
+            filtered_contacts = []
+            for contact_dict, should_keep in zip(deduped_contacts, batch_results):
                 if should_keep:
                     contact = Contact(
                         first_name=contact_dict.get('first_name', '').strip(),
@@ -398,7 +403,7 @@ class StreamingPipeline:
                 raise ValueError("--state parameter is required for county-based search")
             counties = load_counties_from_state(self._state)
         
-        max_search_terms_per_county = 20
+        max_search_terms_per_county = 16
         
         church_generator = self.church_searcher.discover_churches(
             counties=counties,
