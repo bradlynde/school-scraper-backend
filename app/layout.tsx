@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Sidebar from "../components/Sidebar";
+import AppShell from "../components/AppShell";
 
 export const metadata: Metadata = {
   title: "NPSA Tools",
@@ -20,12 +20,7 @@ export default function RootLayout({
         />
       </head>
       <body style={{ margin: 0, fontFamily: "Inter, system-ui, sans-serif" }}>
-        <div style={{ display: "flex", height: "100vh" }}>
-          <Sidebar />
-          <main style={{ flex: 1, overflowY: "auto", background: "#f4f5f7" }}>
-            {children}
-          </main>
-        </div>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

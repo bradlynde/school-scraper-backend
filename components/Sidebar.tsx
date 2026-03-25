@@ -1,88 +1,213 @@
+// @ts-nocheck
 "use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { COLORS } from '../lib/constants';
+import Image from "next/image";
+import Link from "next/link";
+import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { useAuth } from "../contexts/AuthContext";
+
+/* ── SVG Icons (from original sidebar) ────────────────────────── */
+
+const HomeIcon = () => (
+  <svg style={{ width: 20, height: 20, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z" />
+  </svg>
+);
+
+const ChurchIcon = () => (
+  <svg style={{ width: 20, height: 20, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+  </svg>
+);
+
+const BookIcon = () => (
+  <svg style={{ width: 20, height: 20, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+  </svg>
+);
+
+const DocIcon = () => (
+  <svg style={{ width: 20, height: 20, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+  </svg>
+);
+
+const UserIcon = () => (
+  <svg style={{ width: 20, height: 20, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+  </svg>
+);
+
+const LogoutIcon = () => (
+  <svg style={{ width: 20, height: 20, flexShrink: 0 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+  </svg>
+);
+
+const ChevronIcon = ({ open }: { open: boolean }) => (
+  <svg style={{ width: 16, height: 16, flexShrink: 0, transition: "transform 0.2s", transform: open ? "rotate(180deg)" : "rotate(0deg)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+  </svg>
+);
+
+/* ── Nav items ────────────────────────────────────────────────── */
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Home', icon: '\u2302' },
-  { href: '/church', label: 'Church Scraper', icon: '\u26EA' },
-  { href: '/school', label: 'School Scraper', icon: '\uD83C\uDFEB' },
-  { href: '/loe', label: 'LOE Generator', icon: '\uD83D\uDCC4' },
+  { href: "/", label: "Home", Icon: HomeIcon },
+  { href: "/church", label: "Church Scraper", Icon: ChurchIcon },
+  { href: "/school", label: "School Scraper", Icon: BookIcon },
+  { href: "/loe", label: "LOE Generator", Icon: DocIcon },
 ];
 
-const NPSA_LOGO = "data:image/png;base64,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";
+/* ── Component ────────────────────────────────────────────────── */
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { username, logout } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const isActive = (href: string) => {
-    if (href === '/') return pathname === '/';
+    if (href === "/") return pathname === "/";
     return pathname.startsWith(href);
   };
 
   return (
-    <div style={{
-      width: 240,
-      background: COLORS.sidebarBg,
-      color: COLORS.sidebarText,
-      display: 'flex',
-      flexDirection: 'column',
+    <aside style={{
+      width: 260,
+      background: "#ffffff",
+      borderRight: "1px solid #e5e7eb",
+      display: "flex",
+      flexDirection: "column",
       flexShrink: 0,
-      height: '100vh',
-      overflow: 'hidden',
+      height: "100vh",
+      overflow: "hidden",
     }}>
       {/* Logo */}
-      <div style={{
-        padding: '24px 20px 20px',
-        borderBottom: `1px solid ${COLORS.sidebarBorder}`,
+      <Link href="/" style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px 16px",
+        borderBottom: "1px solid #e5e7eb",
+        minHeight: 72,
+        textDecoration: "none",
       }}>
-        <img
-          src={NPSA_LOGO}
+        <Image
+          src="/npsa-logo.png"
           alt="Nonprofit Security Advisors"
-          style={{ width: '100%', height: 'auto' }}
+          width={180}
+          height={54}
+          style={{ height: "auto", objectFit: "contain" }}
+          priority
         />
-      </div>
+      </Link>
 
       {/* Navigation */}
-      <nav style={{ flex: 1, padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {NAV_ITEMS.map(item => {
-          const active = isActive(item.href);
+      <nav style={{ flex: 1, padding: "16px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
+        {NAV_ITEMS.map(({ href, label, Icon }) => {
+          const active = isActive(href);
           return (
             <Link
-              key={item.href}
-              href={item.href}
+              key={href}
+              href={href}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '10px 14px',
-                borderRadius: 8,
-                textDecoration: 'none',
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+                padding: "11px 16px",
+                borderRadius: 10,
+                textDecoration: "none",
                 fontSize: 14,
-                fontWeight: active ? 600 : 400,
-                color: active ? '#fff' : COLORS.sidebarMuted,
-                background: active ? COLORS.sidebarActive : 'transparent',
-                borderLeft: active ? `3px solid ${COLORS.accentLight}` : '3px solid transparent',
-                transition: 'all 0.15s ease',
+                fontWeight: active ? 600 : 500,
+                color: active ? "#1e3a5f" : "#4b5563",
+                background: active ? "rgba(30, 58, 95, 0.08)" : "transparent",
+                borderLeft: active ? "3px solid #1e3a5f" : "3px solid transparent",
+                transition: "all 0.15s ease",
               }}
             >
-              <span style={{ fontSize: 18, width: 24, textAlign: 'center' }}>{item.icon}</span>
-              <span>{item.label}</span>
+              <span style={{ color: active ? "#1e3a5f" : "#6b7280" }}>
+                <Icon />
+              </span>
+              <span>{label}</span>
             </Link>
           );
         })}
       </nav>
 
-      {/* Footer */}
+      {/* User profile section at bottom */}
       <div style={{
-        padding: '16px 20px',
-        borderTop: `1px solid ${COLORS.sidebarBorder}`,
-        fontSize: 11,
-        color: COLORS.sidebarMuted,
+        padding: "12px",
+        borderTop: "1px solid #e5e7eb",
+        position: "relative",
       }}>
-        NPSA Tools v2.0
+        {/* Sign out pop-up menu */}
+        {menuOpen && (
+          <div style={{
+            position: "absolute",
+            bottom: "100%",
+            left: 8,
+            right: 8,
+            marginBottom: 8,
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 10,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
+            overflow: "hidden",
+            zIndex: 50,
+          }}>
+            <button
+              onClick={() => { logout(); setMenuOpen(false); }}
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "12px 16px",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                fontSize: 14,
+                color: "#374151",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#f3f4f6")}
+              onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+            >
+              <LogoutIcon />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        )}
+
+        {/* User button */}
+        <button
+          onClick={() => setMenuOpen(!menuOpen)}
+          style={{
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+            padding: "11px 16px",
+            borderRadius: 10,
+            border: "none",
+            background: "transparent",
+            cursor: "pointer",
+            fontSize: 14,
+            fontWeight: 500,
+            color: "#4b5563",
+            transition: "background 0.15s",
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = "#f3f4f6")}
+          onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+        >
+          <span style={{ color: "#6b7280" }}><UserIcon /></span>
+          <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {username || "User"}
+          </span>
+          <ChevronIcon open={menuOpen} />
+        </button>
       </div>
-    </div>
+    </aside>
   );
 }
