@@ -583,7 +583,7 @@ EPHEMERAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 RUNS_DIR = EPHEMERAL_DATA_DIR / "runs"
 CHECKPOINTS_DIR = EPHEMERAL_DATA_DIR / "checkpoints"
-METADATA_DIR = EPHEMERAL_DATA_DIR / "metadata"
+METADATA_DIR = VOLUME_DIR / "metadata"
 
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1208,15 +1208,14 @@ def load_run_metadata(run_id: str) -> dict:
 
 
 def _run_display_name(state: str, scraper_type: str) -> str:
-    """Human-readable label for UI, e.g. 'Alabama churches' / 'Iowa schools'."""
-    suffix = "churches" if scraper_type == "church" else "schools"
+    """Human-readable label for UI, e.g. 'Alabama' / 'Iowa'."""
     if not state:
-        return f"Unknown {suffix}"
+        return "Unknown"
     pretty = str(state).replace("_", " ").strip()
     if not pretty:
-        return f"Unknown {suffix}"
+        return "Unknown"
     pretty = " ".join(w.capitalize() for w in pretty.split())
-    return f"{pretty} {suffix}"
+    return pretty
 
 
 def _backfill_run_list_fields(metadata: dict, default_scraper_type: str) -> None:
@@ -1279,7 +1278,40 @@ def list_all_runs() -> list:
                 _backfill_run_list_fields(parsed, "church")
                 seen_ids.add(parsed["run_id"])
                 runs.append(parsed)
-        
+
+        # Include dispatch runs from Postgres (visible across all replicas)
+        if queue_store.is_enabled():
+            try:
+                for dr in queue_store.list_dispatch_runs(SCRAPER_TYPE):
+                    rid = dr["run_id"]
+                    if rid in seen_ids:
+                        continue
+                    seen_ids.add(rid)
+                    try:
+                        meta = json.loads(dr.get("meta_json") or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        meta = {}
+                    prog = queue_store.get_run_progress(rid)
+                    terminal = int(prog.get("terminal") or 0)
+                    total = int(dr.get("total_counties") or 0)
+                    is_done = bool(dr.get("aggregation_done"))
+                    is_cancelled = bool(dr.get("cancelled"))
+                    status = "completed" if is_done else ("cancelled" if is_cancelled else "running")
+                    runs.append({
+                        "run_id": rid,
+                        "state": dr.get("state", ""),
+                        "status": status,
+                        "scraper_type": "church",
+                        "display_name": meta.get("display_name", _run_display_name(dr.get("state", ""), "church")),
+                        "created_at": dr.get("created_at", ""),
+                        "total_counties": total,
+                        "progress": int((terminal / max(1, total)) * 100) if total else 0,
+                        "total_contacts": int(prog.get("total_contacts") or 0),
+                        "archived": False,
+                    })
+            except Exception as e:
+                log_warn(f"Could not load dispatch runs: {e}")
+
         # Sort by created_at (newest first)
         runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return runs
@@ -3387,11 +3419,16 @@ def delete_run(run_id: str):
         # Load metadata to check if run exists
         metadata = load_run_metadata(run_id)
         if not metadata:
+            # Fallback: check if it's a volume-only run (parsed from CSV filename)
+            for f in VOLUME_DIR.glob(f"*_{run_id}_*.csv"):
+                metadata = {"run_id": run_id, "status": "completed", "final_csv_path": str(f)}
+                break
+        if not metadata:
             return jsonify({
                 "status": "error",
                 "error": "Run not found"
             }), 404
-        
+
         # If run is running, stop it first
         status = metadata.get("status")
         if status == "running":
