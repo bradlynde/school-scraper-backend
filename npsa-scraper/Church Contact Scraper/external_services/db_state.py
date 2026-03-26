@@ -517,6 +517,189 @@ def release_queue_leader() -> None:
         pass
 
 
+# ─── Distributed county dispatch ─────────────────────────────────────────────
+
+REPLICA_ID = os.getenv("RAILWAY_REPLICA_ID") or os.getenv("HOSTNAME") or f"replica-{os.getpid()}"
+
+
+def dispatch_counties(run_id: str, state: str, counties: list, scraper_type: str = "church") -> None:
+    """
+    Publish all counties for a run into county_tasks as 'pending'.
+    Also create a county_dispatch row to track the overall dispatch.
+    Called by the leader replica that starts the run.
+    """
+    now = datetime.now().isoformat()
+    total = len(counties)
+    conn = _get_conn()
+    with conn.cursor() as cur:
+        # Create dispatch record
+        cur.execute("""
+            INSERT INTO county_dispatch (run_id, scraper_type, state, total_counties, cancelled, created_at, aggregation_done)
+            VALUES (%s, %s, %s, %s, 0, %s, 0)
+            ON CONFLICT (run_id) DO UPDATE SET total_counties = %s, cancelled = 0, aggregation_done = 0
+        """, (run_id, scraper_type, state, total, now, total))
+        # Insert all county tasks
+        for idx, county in enumerate(counties):
+            cur.execute("""
+                INSERT INTO county_tasks (run_id, scraper_type, state, county, county_index, total_counties, status)
+                VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+            """, (run_id, scraper_type, state, county, idx, total))
+        conn.commit()
+    print(f"[DISPATCH] Published {total} counties for {state} (run {run_id[:8]})")
+
+
+def claim_county_task(scraper_type: str = "church") -> Optional[dict]:
+    """
+    Claim the next pending county task using FOR UPDATE SKIP LOCKED.
+    Returns the task row dict or None if nothing available.
+    """
+    conn = _get_conn()
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            SELECT id, run_id, state, county, county_index, total_counties
+            FROM county_tasks
+            WHERE scraper_type = %s AND status = 'pending'
+            ORDER BY run_id, county_index
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+        """, (scraper_type,))
+        row = cur.fetchone()
+        if not row:
+            conn.commit()
+            return None
+        # Mark as claimed
+        cur.execute("""
+            UPDATE county_tasks SET status = 'running', claimed_by = %s, claimed_at = %s
+            WHERE id = %s
+        """, (REPLICA_ID, datetime.now().isoformat(), row["id"]))
+        conn.commit()
+    return dict(row)
+
+
+def complete_county_task(task_id: int, result: dict, csv_data: Optional[str] = None,
+                         row_count: int = 0) -> dict:
+    """
+    Mark a county task as completed and store results.
+    Returns summary dict with completion status.
+    """
+    now = datetime.now().isoformat()
+    result_json = json.dumps(result)
+    conn = _get_conn()
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            UPDATE county_tasks SET status = 'completed', completed_at = %s, result_json = %s
+            WHERE id = %s
+            RETURNING run_id, county
+        """, (now, result_json, task_id))
+        updated = cur.fetchone()
+        # Store CSV data in county_results if available
+        if csv_data and updated:
+            cur.execute("""
+                INSERT INTO county_results (run_id, county, csv_rows, row_count, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (updated["run_id"], updated["county"], csv_data, row_count, now))
+        conn.commit()
+    return dict(updated) if updated else {}
+
+
+def fail_county_task(task_id: int, error: str) -> None:
+    """Mark a county task as failed."""
+    _execute("""
+        UPDATE county_tasks SET status = 'failed', completed_at = %s, error = %s
+        WHERE id = %s
+    """, (datetime.now().isoformat(), error, task_id))
+
+
+def get_dispatch_progress(run_id: str) -> dict:
+    """Get progress for a dispatched run: how many counties pending/running/completed/failed."""
+    rows = _execute("""
+        SELECT status, COUNT(*) as cnt FROM county_tasks
+        WHERE run_id = %s GROUP BY status
+    """, (run_id,), fetch="all")
+    counts = {r["status"]: r["cnt"] for r in (rows or [])}
+    total = sum(counts.values())
+    completed = counts.get("completed", 0) + counts.get("failed", 0)
+    return {
+        "total": total,
+        "pending": counts.get("pending", 0),
+        "running": counts.get("running", 0),
+        "completed": counts.get("completed", 0),
+        "failed": counts.get("failed", 0),
+        "done": completed >= total and total > 0,
+    }
+
+
+def try_claim_aggregation(run_id: str) -> bool:
+    """
+    Atomically claim aggregation for a run. Returns True if this replica got it.
+    Only one replica should aggregate results.
+    """
+    now = datetime.now().isoformat()
+    count = _execute("""
+        UPDATE county_dispatch
+        SET aggregation_owner = %s, aggregation_started_at = %s
+        WHERE run_id = %s AND aggregation_owner IS NULL AND aggregation_done = 0
+    """, (REPLICA_ID, now, run_id))
+    return count > 0
+
+
+def mark_aggregation_done(run_id: str) -> None:
+    """Mark aggregation as complete for a run."""
+    _execute("""
+        UPDATE county_dispatch SET aggregation_done = 1
+        WHERE run_id = %s
+    """, (run_id,))
+
+
+def get_county_results(run_id: str) -> list:
+    """Get all county CSV results for a run."""
+    rows = _execute("""
+        SELECT county, csv_rows, row_count FROM county_results
+        WHERE run_id = %s ORDER BY county
+    """, (run_id,), fetch="all")
+    return [dict(r) for r in (rows or [])]
+
+
+def get_completed_county_tasks(run_id: str) -> list:
+    """Get all completed county tasks with their results."""
+    rows = _execute("""
+        SELECT county, county_index, result_json, completed_at
+        FROM county_tasks
+        WHERE run_id = %s AND status IN ('completed', 'failed')
+        ORDER BY county_index
+    """, (run_id,), fetch="all")
+    return [dict(r) for r in (rows or [])]
+
+
+def cancel_dispatch(run_id: str) -> None:
+    """Cancel all pending county tasks for a run."""
+    _execute("""
+        UPDATE county_tasks SET status = 'cancelled'
+        WHERE run_id = %s AND status IN ('pending', 'running')
+    """, (run_id,))
+    _execute("""
+        UPDATE county_dispatch SET cancelled = 1
+        WHERE run_id = %s
+    """, (run_id,))
+
+
+def cleanup_dispatch(run_id: str) -> None:
+    """Clean up dispatch tables for a run after aggregation."""
+    _execute("DELETE FROM county_tasks WHERE run_id = %s", (run_id,))
+    _execute("DELETE FROM county_results WHERE run_id = %s", (run_id,))
+    _execute("DELETE FROM county_dispatch WHERE run_id = %s", (run_id,))
+
+
+def is_dispatch_active(scraper_type: str = "church") -> Optional[str]:
+    """Check if there's an active dispatch (non-aggregated). Returns run_id or None."""
+    row = _execute("""
+        SELECT run_id FROM county_dispatch
+        WHERE scraper_type = %s AND aggregation_done = 0 AND cancelled = 0
+        ORDER BY created_at DESC LIMIT 1
+    """, (scraper_type,), fetch="one")
+    return row["run_id"] if row else None
+
+
 # ─── Helper: convert DB row to legacy pipeline_runs format ──────────────────
 
 def row_to_pipeline_format(row: dict) -> dict:

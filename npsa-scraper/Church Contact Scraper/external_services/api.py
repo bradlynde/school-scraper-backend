@@ -155,6 +155,282 @@ def _church_queue_worker_loop():
             import traceback
             traceback.print_exc()
 
+def _distributed_county_worker_loop():
+    """
+    County worker loop that runs on EVERY replica.
+    Claims pending county tasks from Postgres and processes them locally.
+    This is how distributed processing works — all replicas pull from the same queue.
+    """
+    while True:
+        time.sleep(1.0)  # Poll interval
+        try:
+            task = db_state.claim_county_task(SCRAPER_TYPE)
+            if not task:
+                continue
+
+            task_id = task["id"]
+            run_id = task["run_id"]
+            state = task["state"]
+            county = task["county"]
+            county_index = task["county_index"]
+            total_counties = task["total_counties"]
+
+            print(f"[WORKER] Claimed {county} County (task {task_id}) for {state} run {run_id[:8]}")
+
+            # Check if run has been cancelled before processing
+            run_row = db_state.get_run(run_id)
+            if not run_row or run_row.get("status") == "cancelled":
+                print(f"[WORKER] Run {run_id[:8]} is cancelled, skipping {county}")
+                db_state.fail_county_task(task_id, "Run cancelled")
+                continue
+
+            # Process using the existing multiprocessing worker (isolates Chrome)
+            args = (county_index, county, state, run_id, total_counties)
+            start_time = time.time()
+
+            try:
+                idx, county_name, result, processing_time = process_county_worker_multiprocessing(args)
+            except Exception as e:
+                print(f"[WORKER] {county} County crashed: {e}")
+                db_state.fail_county_task(task_id, str(e))
+                continue
+
+            if not result.get("success", False):
+                error_msg = result.get("error", "Unknown error")
+                print(f"[WORKER] {county} County failed: {error_msg}")
+                db_state.fail_county_task(task_id, error_msg)
+            else:
+                # Read the CSV data from the county output file to store in Postgres
+                csv_data = None
+                row_count = 0
+                run_dir = RUNS_DIR / run_id
+                county_csv = run_dir / county.replace(' ', '_') / "final_contacts.csv"
+                if county_csv.exists():
+                    try:
+                        csv_data = county_csv.read_text()
+                        row_count = max(0, csv_data.count('\n') - 1)  # subtract header
+                    except Exception:
+                        pass
+
+                db_state.complete_county_task(task_id, result, csv_data, row_count)
+                print(f"[WORKER] Completed {county} County: {result.get('contacts', 0)} contacts in {processing_time:.0f}s")
+
+            # Update pipeline_runs progress from county_tasks counts
+            progress = db_state.get_dispatch_progress(run_id)
+            completed_count = progress["completed"] + progress["failed"]
+            total = progress["total"]
+            progress_pct = int((completed_count / total) * 100) if total > 0 else 0
+
+            db_state.update_run(run_id,
+                progress=progress_pct,
+                counties_processed=completed_count,
+                status_message=f"Processing {completed_count}/{total} counties...",
+                current_county=f"Processing {completed_count}/{total} counties"
+                    if completed_count < total
+                    else f"All {total} counties completed",
+            )
+            if result.get("success", False):
+                db_state.increment_run(run_id,
+                    churches_found=result.get("churches", 0),
+                    churches_processed=result.get("churches", 0),
+                )
+                db_state.update_run_json_append(run_id, "county_times", processing_time)
+                db_state.update_run_json_append(run_id, "county_contacts", result.get("contacts", 0))
+                db_state.update_run_json_append(run_id, "county_churches", result.get("churches", 0))
+            db_state.heartbeat(run_id)
+
+            # Check if all counties are done — if so, try to claim aggregation
+            if progress["done"]:
+                print(f"[WORKER] All counties done for {run_id[:8]}, attempting aggregation claim...")
+                if db_state.try_claim_aggregation(run_id):
+                    print(f"[WORKER] Won aggregation for {run_id[:8]}, starting...")
+                    try:
+                        _distributed_aggregate(run_id, state)
+                    except Exception as e:
+                        print(f"[WORKER] Aggregation failed: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        db_state.update_run(run_id, status="error", error=str(e))
+                    finally:
+                        db_state.mark_aggregation_done(run_id)
+                        # Finalize queue job
+                        row = db_state.get_run(run_id)
+                        if row and row.get("queue_job_id") is not None:
+                            try:
+                                db_state.queue_finalize(run_id, SCRAPER_TYPE,
+                                    str(row.get("status", "error")),
+                                    row.get("error"))
+                            except Exception as qe:
+                                print(f"[WORKER] queue finalize error: {qe}")
+                else:
+                    print(f"[WORKER] Another replica is aggregating {run_id[:8]}")
+
+            # Explicit GC after each county
+            gc.collect()
+
+        except Exception as e:
+            print(f"[WORKER] Error in county worker loop: {e}")
+            import traceback
+            traceback.print_exc()
+            time.sleep(5)  # Back off on error
+
+
+def _distributed_aggregate(run_id: str, state: str):
+    """
+    Aggregation function for distributed processing.
+    Reads county CSV data from county_results table instead of local filesystem,
+    then runs the standard aggregation steps (dedup, enrichment, final CSV).
+    """
+    from models import Contact
+    import pandas as pd
+    from io import StringIO
+
+    print(f"[AGG] Starting aggregation for {run_id[:8]}")
+    db_state.update_run(run_id, status_message="Aggregating results from all counties...")
+
+    # Get all county results from Postgres
+    county_results = db_state.get_county_results(run_id)
+    completed_tasks = db_state.get_completed_county_tasks(run_id)
+
+    # Also read any local CSV files (from counties processed by this replica)
+    run_dir = RUNS_DIR / run_id
+    counties = load_counties_from_state(state)
+    total_counties = len(counties)
+
+    all_contacts = []
+    for cr in county_results:
+        if not cr.get("csv_rows"):
+            continue
+        try:
+            df = pd.read_csv(StringIO(cr["csv_rows"]))
+            if len(df) > 0:
+                for _, row in df.iterrows():
+                    def sval(val):
+                        return str(val).strip() if val is not None and not (isinstance(val, float) and pd.isna(val)) else ""
+
+                    email_raw = row.get('email', '') or row.get('Email', '')
+                    email_val = sval(email_raw)
+                    if not email_val:
+                        email_val = None
+
+                    contact = Contact(
+                        first_name=sval(row.get('first_name', '') or row.get('First Name', '')),
+                        last_name=sval(row.get('last_name', '') or row.get('Last Name', '')),
+                        title=sval(row.get('title', '') or row.get('Title', '')),
+                        email=email_val,
+                        phone=sval(row.get('phone', '') or row.get('Phone', '')),
+                        church_name=sval(row.get('church_name', '') or row.get('Church Name', '')),
+                        denomination=sval(row.get('denomination', '') or row.get('Denomination', '')),
+                        county=sval(row.get('county', '') or row.get('County', '')),
+                        state=sval(row.get('state', '') or row.get('State', '')),
+                        website=sval(row.get('website', '') or row.get('Website', '')),
+                        source_url=sval(row.get('source_url', '') or row.get('Source URL', '')),
+                    )
+                    all_contacts.append(contact)
+        except Exception as e:
+            print(f"[AGG] Error reading CSV for {cr.get('county', '?')}: {e}")
+
+    print(f"[AGG] Collected {len(all_contacts)} total contacts from {len(county_results)} counties")
+
+    if not all_contacts:
+        print(f"[AGG] No contacts found, completing run")
+        db_state.update_run(run_id,
+            status="finalizing",
+            finalizing_at=time.time(),
+            progress=100,
+            total_contacts=0,
+            status_message=f"Pipeline completed: {total_counties}/{total_counties} counties processed. 0 contacts found.",
+        )
+        _finalize_completion(run_id, state, total_counties)
+        return
+
+    # Dedup contacts
+    seen = set()
+    unique_contacts = []
+    for c in all_contacts:
+        key = (c.first_name, c.last_name, c.church_name)
+        if key not in seen:
+            seen.add(key)
+            unique_contacts.append(c)
+
+    contacts_with_emails = [c for c in unique_contacts if c.has_email()]
+    contacts_without_emails = [c for c in unique_contacts if not c.has_email()]
+
+    print(f"[AGG] After dedup: {len(unique_contacts)} unique ({len(contacts_with_emails)} with email, {len(contacts_without_emails)} without)")
+
+    # Generate final CSV
+    db_state.update_run(run_id, status_message="Generating final CSV...")
+    csv_filename = f"{state.lower().replace(' ', '_')}_church_contacts.csv"
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    final_csv_path = str(run_dir / csv_filename)
+
+    # Write CSV
+    if unique_contacts:
+        df_data = []
+        for c in unique_contacts:
+            df_data.append({
+                'First Name': c.first_name,
+                'Last Name': c.last_name,
+                'Title': c.title,
+                'Email': c.email or '',
+                'Phone': c.phone,
+                'Church Name': c.church_name,
+                'Denomination': c.denomination,
+                'County': c.county,
+                'State': c.state,
+                'Website': c.website,
+                'Source URL': c.source_url,
+            })
+        df = pd.DataFrame(df_data)
+        df.to_csv(final_csv_path, index=False)
+        print(f"[AGG] Wrote {len(df)} contacts to {csv_filename}")
+
+    db_state.update_run(run_id,
+        csv_filename=csv_filename,
+        final_csv_path=final_csv_path,
+        total_contacts=len(unique_contacts),
+        total_contacts_with_emails=len(contacts_with_emails),
+        total_contacts_without_emails=len(contacts_without_emails),
+        status="finalizing",
+        finalizing_at=time.time(),
+        progress=100,
+        status_message=f"Pipeline completed: {total_counties} counties, {len(unique_contacts)} contacts. Finalizing...",
+    )
+
+    _finalize_completion(run_id, state, total_counties)
+
+    # Cleanup dispatch tables
+    db_state.cleanup_dispatch(run_id)
+    print(f"[AGG] Aggregation complete for {run_id[:8]}")
+
+
+def _finalize_completion(run_id: str, state: str, total_counties: int):
+    """Background thread to transition from finalizing to completed after grace period."""
+    def finalize():
+        time.sleep(120)
+        row = db_state.get_run(run_id)
+        if row and row.get("status") == "finalizing":
+            completed_now = time.time()
+            db_state.update_run(run_id,
+                status="completed",
+                completed_at=completed_now,
+                status_message=f"Pipeline completed: {total_counties} counties processed",
+            )
+            if not row.get("notify_sent"):
+                duration = completed_now - (row.get("start_time") or completed_now)
+                send_run_complete_email(
+                    run_id, state, total_counties, total_counties,
+                    row.get("total_contacts", 0),
+                    row.get("total_contacts_with_emails", 0),
+                    duration,
+                )
+                db_state.update_run(run_id, notify_sent=True)
+
+    t = threading.Thread(target=finalize, daemon=True)
+    t.start()
+
+
 # Track 404 requests for non-existent run IDs to prevent spam from stale browser tabs
 # Format: {run_id: (first_404_time, count)}
 not_found_runs = {}
@@ -1369,358 +1645,54 @@ def run_streaming_pipeline(
     queue_job_id: Optional[int] = None,
 ):
     """
-    Initialize the pipeline and process all counties (sequentially or in parallel).
-    
-    Processing mode is controlled by MAX_WORKERS environment variable:
-    - MAX_WORKERS=1: Sequential processing (one county at a time)
-    - MAX_WORKERS=2: Parallel processing with 2 workers (50% time reduction)
-    - MAX_WORKERS=3: Parallel processing with 3 workers (66% time reduction)
-    - MAX_WORKERS=4: Parallel processing with 4 workers (75% time reduction)
-    
-    Both sequential and parallel modes use multiprocessing.Pool with maxtasksperchild=1:
-    - Each worker process terminates after one county, automatically cleaning up Chrome processes
-    - When worker dies, OS automatically reaps all child processes (Chrome/ChromeDriver)
-    - Checkpoint coordination (locks prevent race conditions)
-    - Progress tracking (locks ensure accurate updates)
-    - Out-of-order county completion handling (for parallel mode)
-    
-    This unified approach prevents Chrome process accumulation by ensuring workers
-    die after each task, eliminating zombie processes in both sequential and parallel modes.
+    Initialize a distributed pipeline run.
+
+    Creates the run in Postgres and publishes all counties to the county_tasks table.
+    Actual processing is handled by _distributed_county_worker_loop on every replica.
+    This function returns immediately — it does NOT process counties locally.
     """
-    # Initialize progress tracking in Postgres
-    db_state.create_run(
-        run_id, state, SCRAPER_TYPE,
-        display_name=_run_display_name(state, SCRAPER_TYPE),
-        queue_job_id=queue_job_id
-    )
-    
-    def process_all_counties():
-        """
-        Process all counties (sequentially or in parallel) with checkpointing.
-        
-        Processing mode depends on MAX_WORKERS:
-        - Sequential (MAX_WORKERS=1): One county at a time, simple loop
-        - Parallel (MAX_WORKERS>1): Multiple counties simultaneously with multiprocessing.Pool
-        
-        If resume_from_checkpoint is True, loads checkpoint and skips counties that have data files.
-        Thread locks ensure safe concurrent access to shared state.
-        """
-        try:
-            # Load counties for state
-            counties = load_counties_from_state(state)
-            total_counties = len(counties)
-            
-            # Check if resuming from checkpoint
-            completed_counties = []
-            start_index = 0
-            
-            if resume_from_checkpoint:
-                # Load checkpoint
-                checkpoint = load_checkpoint(run_id)
-                if checkpoint:
-                    completed_counties = checkpoint.get('completed_counties', [])
-                    start_index = checkpoint.get('next_county_index', 0)
-                    print(f"[{run_id}] Resuming from checkpoint: {len(completed_counties)}/{total_counties} counties already completed")
-                
-                # Also check data files to catch counties that completed but didn't checkpoint
-                # (e.g., Prince George's that completed but hung during cleanup)
-                run_dir = RUNS_DIR / run_id
-                if run_dir.exists():
-                    for county in counties:
-                        county_dir = run_dir / county.replace(' ', '_')
-                        county_csv = county_dir / "final_contacts.csv"
-                        if county_csv.exists() and county not in completed_counties:
-                            print(f"[{run_id}] Found completed county (data file exists): {county}")
-                            completed_counties.append(county)
-                    
-                    # Recalculate start_index based on actual completed counties
-                    start_index = 0
-                    for i, c in enumerate(counties):
-                        if c in completed_counties:
-                            start_index = i + 1
-                        else:
-                            break
-                    
-                    if completed_counties:
-                        print(f"[{run_id}] Resuming: {len(completed_counties)}/{total_counties} counties completed, starting from index {start_index}")
-            
-            if resume_from_checkpoint and completed_counties:
-                print(f"[{run_id}] Resuming run: {len(completed_counties)}/{total_counties} counties already completed")
-            else:
-                print(f"[{run_id}] New run started: {total_counties} counties to process")
+    try:
+        # Initialize progress tracking in Postgres
+        db_state.create_run(
+            run_id, state, SCRAPER_TYPE,
+            display_name=_run_display_name(state, SCRAPER_TYPE),
+            queue_job_id=queue_job_id
+        )
 
-            # Update progress tracking with county info
-            remaining_counties = total_counties - len(completed_counties)
-            effective_remaining = max(1, remaining_counties / MAX_WORKERS)
-            initial_estimate = int(effective_remaining * CHURCH_AVG_SECONDS_PER_COUNTY_SLOT)
+        # Load counties for state
+        counties = load_counties_from_state(state)
+        total_counties = len(counties)
 
-            db_state.update_run(run_id,
-                total_counties=total_counties,
-                status_message=f"Processing {state} ({len(completed_counties)}/{total_counties} counties completed)...",
-                current_county="Starting..." if not completed_counties else f"Resuming from {len(completed_counties)}/{total_counties}",
-                counties_processed=len(completed_counties),
-                initial_estimated_time_remaining=initial_estimate,
-            )
-            
-            # Determine processing mode message
-            remaining_count = total_counties - len(completed_counties)
-            if MAX_WORKERS == 1:
-                print(f"[{run_id}] Processing {remaining_count} remaining counties sequentially...")
-            else:
-                print(f"[{run_id}] Processing {remaining_count} remaining counties with {MAX_WORKERS} parallel workers...")
-            
-            # Process remaining counties (skip completed ones if resuming)
-            remaining_counties = [(idx, county) for idx, county in enumerate(counties) if county not in completed_counties]
-            
-            if not remaining_counties:
-                print(f"[{run_id}] All counties already completed!")
-                db_state.update_run(run_id,
-                    progress=100,
-                    counties_processed=total_counties,
-                    status_message=f"All {total_counties} counties already completed"
-                )
-                # Continue to aggregation - skip the pool processing
-            else:
-                # UNIFIED PROCESSING: Use Pool for both sequential (MAX_WORKERS=1) and parallel (MAX_WORKERS>1)
-                # maxtasksperchild=1 forces each worker to terminate after one county,
-                # which automatically cleans up all Chrome child processes when the worker dies
-                with Pool(processes=MAX_WORKERS, maxtasksperchild=1) as pool:
-                    # Submit all remaining counties to the pool
-                    pool_args = [(idx, county, state, run_id, total_counties) for idx, county in remaining_counties]
-                    
-                    # Use imap_unordered to get results as they complete (out-of-order is handled)
-                    # Track which counties we've submitted to handle failures gracefully
-                    failed_counties = []
-                    try:
-                        for idx, county, result, processing_time in pool.imap_unordered(process_county_worker_multiprocessing, pool_args):
-                            # Check for cancellation
-                            if running_threads.get(run_id, {}).get('cancelled', False):
-                                pool.terminate()  # Force kill all workers
-                                pool.join()
-                                db_state.update_run(run_id,
-                                    status="cancelled",
-                                    status_message="Pipeline cancelled by user"
-                                )
-                                print(f"[{run_id}] Pipeline cancelled during processing")
-                                return
-                            
-                            # Handle worker failures gracefully - continue processing other counties
-                            if not result.get('success', False):
-                                error_msg = result.get('error', 'Unknown error')
-                                print(f"[{run_id}] WARNING: {county} County failed: {error_msg}")
-                                failed_counties.append(county)
-                                # Still mark as completed to avoid infinite retry, but log the failure
-                                with checkpoint_lock:
-                                    if county not in completed_counties:
-                                        completed_counties.append(county)
-                                continue
-                            
-                            # Update progress in main process (thread-safe)
-                            with checkpoint_lock:
-                                if county not in completed_counties:
-                                    completed_counties.append(county)
-                            
-                            completed = len(completed_counties)
-                            progress_pct = int((completed / total_counties) * 100)
-                            
-                            # Update progress in Postgres
-                            current_county_label = (
-                                f"Processing {completed}/{total_counties} counties"
-                                if completed < total_counties
-                                else f"All {total_counties} counties completed"
-                            )
-                            db_state.update_run(run_id,
-                                progress=progress_pct,
-                                status_message=f"Processing {completed}/{total_counties} counties...",
-                                counties_processed=completed,
-                                current_county=current_county_label,
-                            )
-                            db_state.increment_run(run_id,
-                                churches_found=result.get('churches', 0),
-                                churches_processed=result.get('churches', 0),
-                            )
-                            db_state.update_run_json_append(run_id, "county_times", processing_time)
-                            db_state.update_run_json_append(run_id, "county_contacts", result.get('contacts', 0))
-                            db_state.update_run_json_append(run_id, "county_churches", result.get('churches', 0))
-                            db_state.heartbeat(run_id)
-                            
-                            print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
-                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
-                            
-                            # Save checkpoint after every county (CHECKPOINT_BATCH_SIZE=1) or at completion
-                            # This is for progress tracking only - runs always start fresh, no resume logic
-                            is_checkpoint = completed % CHECKPOINT_BATCH_SIZE == 0 or completed == total_counties
-                            if is_checkpoint:
-                                # Calculate next county index: find the highest index of completed counties + 1
-                                # This handles out-of-order completion in parallel mode
-                                next_index = 0
-                                for i, c in enumerate(counties):
-                                    if c in completed_counties:
-                                        next_index = i + 1
-                                    else:
-                                        # Found first incomplete county
-                                        break
-                                
-                                save_checkpoint(run_id, state, completed_counties, next_index, total_counties)
-                                print(f"[{run_id}] Checkpoint saved after {completed} counties")
-                            
-                            # Health check after each county (lists remaining processes)
-                            check_health()
-                            
-                            # Resource monitoring
-                            log_resource_usage()
-                            
-                            # EXPLICIT GARBAGE COLLECTION: Force cleanup after each county
-                            gc.collect()
-                            
-                            # 2-second delay between counties to provide buffer for cleanup
-                            if completed < total_counties:
-                                time.sleep(2.0)
-                    
-                    except KeyboardInterrupt:
-                        print(f"[{run_id}] Interrupted by user, cleaning up...")
-                        pool.terminate()
-                        pool.join()
-                        save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
-                        db_state.update_run(run_id, status="cancelled", status_message="Pipeline cancelled by user")
-                        return
-                    except Exception as e:
-                        print(f"[{run_id}] Error in pool processing: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
-                        pool.terminate()
-                        pool.join()
-                        if len(completed_counties) > 0:
-                            print(f"[{run_id}] Continuing to aggregation with {len(completed_counties)} completed counties despite error")
-                        else:
-                            db_state.update_run(run_id,
-                                status="error",
-                                error=f"Pool processing failed: {str(e)}",
-                                status_message=f"Pipeline failed: {str(e)}"
-                            )
+        # Estimate time (distributed across all replicas)
+        initial_estimate = int(max(1, total_counties / (MAX_WORKERS * 4)) * CHURCH_AVG_SECONDS_PER_COUNTY_SLOT)
 
-                    if failed_counties:
-                        print(f"[{run_id}] WARNING: {len(failed_counties)} counties failed: {', '.join(failed_counties)}")
-                        db_state.update_run(run_id, status_message=f"Completed with {len(failed_counties)} failures")
-                        return
-            
-            # All counties completed, aggregate results
-            print(f"[{run_id}] All counties completed ({len(completed_counties)}/{total_counties}), starting aggregation...")
-            try:
-                aggregate_final_results(run_id, state)
-            except Exception as e:
-                print(f"[{run_id}] Error during aggregation: {e}")
-                import traceback
-                traceback.print_exc()
-                db_state.update_run(run_id, status="error", error=f"Aggregation failed: {str(e)}")
+        db_state.update_run(run_id,
+            total_counties=total_counties,
+            status_message=f"Dispatching {total_counties} counties across all replicas...",
+            current_county="Dispatching...",
+            counties_processed=0,
+            initial_estimated_time_remaining=initial_estimate,
+        )
 
-            # Final checkpoint
-            save_checkpoint(run_id, state, completed_counties, len(counties), total_counties)
+        # Publish all counties to distributed task queue
+        db_state.dispatch_counties(run_id, state, counties, SCRAPER_TYPE)
 
-            # Check current status to decide final state
-            current_row = db_state.get_run(run_id)
-            current_status = current_row.get("status") if current_row else "error"
+        db_state.update_run(run_id,
+            status_message=f"Processing 0/{total_counties} counties...",
+            current_county="Waiting for workers...",
+        )
 
-            if current_status != "error":
-                db_state.update_run(run_id,
-                    status="finalizing",
-                    status_message=f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed. Finalizing...",
-                    finalizing_at=time.time(),
-                    progress=100,
-                )
+        print(f"[{run_id}] Dispatched {total_counties} counties for {state} — all replicas will process")
 
-                # Background thread to transition to completed after 2 minutes
-                def finalize_completion():
-                    time.sleep(120)
-                    row = db_state.get_run(run_id)
-                    if row and row.get("status") == "finalizing":
-                        now = time.time()
-                        db_state.update_run(run_id,
-                            status="completed",
-                            status_message=f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed",
-                            completed_at=now,
-                        )
-                        if not row.get("notify_sent"):
-                            duration = now - (row.get("start_time") or now)
-                            send_run_complete_email(
-                                run_id, state, len(completed_counties), total_counties,
-                                row.get("total_contacts", 0),
-                                row.get("total_contacts_with_emails", 0),
-                                duration,
-                            )
-                            db_state.update_run(run_id, notify_sent=True)
-
-                finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
-                finalize_thread.start()
-
-                print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
-                print(f"[{run_id}] Container will remain running and ready for next run")
-            else:
-                print(f"[{run_id}] Pipeline run complete with errors: {len(completed_counties)}/{total_counties} counties processed")
-        
-        except FileNotFoundError as e:
-            error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
-            db_state.update_run(run_id, status="error", error=error_msg, status_message=f"Pipeline failed: {error_msg}")
-            import traceback
-            traceback.print_exc()
-        except Exception as e:
-            error_msg = str(e)[:500]
-            print(f"[{run_id}] Fatal error in pipeline: {error_msg}")
-            import traceback
-            traceback.print_exc()
-
-            try:
-                checkpoint = load_checkpoint(run_id)
-                if checkpoint:
-                    cc = checkpoint.get("completed_counties", [])
-                    tc = checkpoint.get("total_counties", 0)
-                    if len(cc) > 0:
-                        save_checkpoint(run_id, state, cc, len(cc), tc)
-                        print(f"[{run_id}] Checkpoint saved after fatal error: {len(cc)}/{tc} counties")
-            except Exception as checkpoint_error:
-                print(f"[{run_id}] Failed to save checkpoint after error: {checkpoint_error}")
-
-            db_state.update_run(run_id, status="error", error=error_msg, status_message=f"Pipeline failed: {error_msg}")
-    
-    # Wrapper to ensure thread always completes and updates status
-    def process_all_counties_with_error_handling():
-        try:
-            process_all_counties()
-        except Exception as e:
-            print(f"[{run_id}] Unhandled exception in process_all_counties: {e}")
-            import traceback
-            traceback.print_exc()
-            db_state.update_run(run_id,
-                status="error",
-                error=f"Unhandled exception: {str(e)}",
-                status_message=f"Pipeline crashed: {str(e)}"
-            )
-        finally:
-            # Finalize queue job in Postgres
-            row = db_state.get_run(run_id)
-            if row and row.get("queue_job_id") is not None:
-                try:
-                    db_state.queue_finalize(run_id, SCRAPER_TYPE,
-                        str(row.get("status", "error")),
-                        row.get("error"))
-                except Exception as qe:
-                    print(f"[{run_id}] queue finalize error: {qe}")
-            # Always clean up thread tracking
-            if run_id in running_threads:
-                running_threads[run_id]['cancelled'] = True
-            print(f"[{run_id}] Pipeline thread completed")
-    
-    # Start processing in a background thread
-    # Note: daemon=True means thread dies if main process exits, but we save checkpoints
-    # so progress is preserved even if container restarts
-    thread = threading.Thread(target=process_all_counties_with_error_handling)
-    thread.daemon = True
-    
-    # Track the thread for cancellation
-    running_threads[run_id] = {'thread': thread, 'cancelled': False}
-    
-    thread.start()
+    except FileNotFoundError as e:
+        error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
+        db_state.update_run(run_id, status="error", error=error_msg, status_message=f"Pipeline failed: {error_msg}")
+    except Exception as e:
+        error_msg = str(e)[:500]
+        print(f"[{run_id}] Error dispatching pipeline: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        db_state.update_run(run_id, status="error", error=error_msg, status_message=f"Pipeline failed: {error_msg}")
 
 
 @app.route("/", methods=["GET"])
@@ -2233,13 +2205,16 @@ def stop_run(run_id: str):
         if run_id in running_threads:
             running_threads[run_id]['cancelled'] = True
 
+        # Cancel all pending/running county tasks in distributed dispatch
+        db_state.cancel_dispatch(run_id)
+
         db_state.update_run(run_id,
             status="cancelled",
             status_message="Pipeline cancelled by user",
             cancelled_at=datetime.now().isoformat()
         )
-        
-        print(f"[{run_id}] Pipeline stop requested")
+
+        print(f"[{run_id}] Pipeline stop requested (dispatch cancelled)")
         
         response = jsonify({
             "status": "success",
@@ -2650,6 +2625,11 @@ cleanup_old_runs()
 _church_q_thread = threading.Thread(target=_church_queue_worker_loop, daemon=True)
 _church_q_thread.start()
 print("[STARTUP] Queue worker thread started")
+
+# Start distributed county worker thread (runs on EVERY replica)
+_county_worker_thread = threading.Thread(target=_distributed_county_worker_loop, daemon=True)
+_county_worker_thread.start()
+print(f"[STARTUP] County worker thread started (replica: {db_state.REPLICA_ID})")
 
 # Production: Use Waitress server
 # NOTE: If Railway runs this file directly (bypassing Dockerfile ENTRYPOINT),
