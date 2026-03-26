@@ -1,7 +1,7 @@
 // @ts-nocheck
 "use client";
 
-import { useState, useEffect } from "react";
+import { } from "react";
 import Link from "next/link";
 import { COLORS } from "../lib/constants";
 import StatusBadge from "./StatusBadge";
@@ -16,31 +16,7 @@ function formatState(state: string): string {
 }
 
 export default function ActivePipelineHero({ activeRuns }: ActivePipelineHeroProps) {
-  const [elapsed, setElapsed] = useState("");
-
   const run = activeRuns[0]; // Show the primary active run
-
-  useEffect(() => {
-    if (!run?.created_at) return;
-    const update = () => {
-      const start = new Date(run.created_at).getTime();
-      const now = Date.now();
-      const diff = Math.floor((now - start) / 1000);
-      const hrs = Math.floor(diff / 3600);
-      const mins = Math.floor((diff % 3600) / 60);
-      const secs = diff % 60;
-      if (hrs > 0) {
-        setElapsed(`${hrs}h ${mins}m ${secs}s`);
-      } else if (mins > 0) {
-        setElapsed(`${mins}m ${secs}s`);
-      } else {
-        setElapsed(`${secs}s`);
-      }
-    };
-    update();
-    const interval = setInterval(update, 1000);
-    return () => clearInterval(interval);
-  }, [run?.created_at]);
 
   // Collapse when no active runs
   if (!activeRuns || activeRuns.length === 0) return null;
@@ -114,9 +90,6 @@ export default function ActivePipelineHero({ activeRuns }: ActivePipelineHeroPro
                 Active Pipeline
               </span>
             </div>
-            <span style={{ fontSize: 12, opacity: 0.6 }}>
-              {elapsed}
-            </span>
           </div>
 
           {/* Run info */}
