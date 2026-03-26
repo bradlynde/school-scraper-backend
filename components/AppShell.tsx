@@ -30,7 +30,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div style={{ display: "flex", minHeight: "100dvh" }}>
+    <div style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       <Sidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
       <MobileMenuButton onClick={() => setMobileOpen(true)} />
       <main style={{ flex: 1, overflowY: "auto", background: "#f7f8fa" }}>
