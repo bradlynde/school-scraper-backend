@@ -684,7 +684,7 @@ def mark_county_failed(run_id: str, county: str, error: str) -> None:
             conn.close()
 
 
-def reclaim_stale_county_tasks(stale_seconds: int = 900) -> int:
+def reclaim_stale_county_tasks(stale_seconds: int = 7200) -> int:
     """Reset stuck processing tasks to pending. Returns rows updated."""
     p = _p()
     cutoff = (datetime.now() - timedelta(seconds=stale_seconds)).isoformat()

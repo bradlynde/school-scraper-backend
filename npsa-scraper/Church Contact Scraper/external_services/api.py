@@ -474,7 +474,7 @@ def _watch_county_queue_until_aggregated(
         if reclaim_every >= 20:
             reclaim_every = 0
             try:
-                queue_store.reclaim_stale_county_tasks(600)
+                queue_store.reclaim_stale_county_tasks(7200)
             except Exception as e:
                 log_warn(f"reclaim stale county tasks: {e}")
 
@@ -543,7 +543,7 @@ def _church_aggregation_recovery_loop() -> None:
         if not queue_store.is_enabled():
             continue
         try:
-            queue_store.reclaim_stale_county_tasks(600)
+            queue_store.reclaim_stale_county_tasks(7200)
             pending = queue_store.list_dispatch_pending_aggregation(SCRAPER_TYPE)
             for rid in pending:
                 claimer = f"{_CHURCH_PROCESS_ID}-recover"
@@ -721,10 +721,10 @@ def cleanup_ephemeral_run(run_id: str):
 CHECKPOINT_BATCH_SIZE = int(os.getenv("CHECKPOINT_BATCH_SIZE", "1"))
 
 # Number of parallel workers for processing counties
-# Default 8 (override with MAX_WORKERS env). Lower if Chrome/fork errors on small instances.
-MAX_WORKERS = int(os.getenv("MAX_WORKERS", "8"))
-# Multi-replica: processes per container claiming counties from SQLite (override MAX_WORKERS if unset).
-WORKERS_PER_REPLICA = int(os.getenv("WORKERS_PER_REPLICA", os.getenv("MAX_WORKERS", "8")))
+# Default 4 (override with MAX_WORKERS env). Keep low with multi-replica to avoid OOM.
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
+# Multi-replica: processes per container claiming counties from the county queue.
+WORKERS_PER_REPLICA = int(os.getenv("WORKERS_PER_REPLICA", os.getenv("MAX_WORKERS", "4")))
 # Set to your Railway replica count for ETA math when using the SQLite county queue.
 CHURCH_REPLICA_COUNT = max(1, int(os.getenv("CHURCH_REPLICA_COUNT", "1")))
 
@@ -1311,7 +1311,7 @@ def list_all_runs() -> list:
                         "created_at": dr.get("created_at", ""),
                         "total_counties": total,
                         "progress": int((terminal / max(1, total)) * 100) if total else 0,
-                        "total_contacts": int(prog.get("total_contacts") or 0),
+                        "total_contacts": int(prog.get("contacts_found") or 0),
                         "archived": False,
                     })
             except Exception as e:
