@@ -154,10 +154,8 @@ export default function RunDetailPage({ runId, scraperType }: { runId: string; s
       )}
 
       {/* Stats */}
-      <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 16, marginBottom: 28 }}>
+      <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
         <StatCard label="Total Contacts" value={totalContacts} />
-        <StatCard label="With Email" value={withEmail} />
-        <StatCard label="Without Email" value={withoutEmail} />
         <StatCard label="Counties" value={`${countiesDone} / ${totalCounties}`} />
         <StatCard label="Run ID" value={runId.substring(0, 8)} subtitle={runId} />
       </div>

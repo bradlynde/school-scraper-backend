@@ -82,11 +82,7 @@ function formatScraperType(type?: string): string {
 
 function getDescription(run: RunMetadata): string {
   if (run.status === "done" && run.total_contacts != null) {
-    const emailNote =
-      run.total_contacts_with_emails != null
-        ? ` (${run.total_contacts_with_emails} with emails)`
-        : "";
-    return `Completed with ${run.total_contacts.toLocaleString()} contacts${emailNote}`;
+    return `Completed with ${run.total_contacts.toLocaleString()} contacts`;
   }
   if (run.status === "running" || run.status === "finalizing") {
     if (run.completed_counties != null && run.total_counties != null) {

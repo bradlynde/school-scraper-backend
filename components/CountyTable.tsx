@@ -82,8 +82,6 @@ export default function CountyTable({ counties, scraperType }: {
             <th style={thStyle} onClick={() => handleSort('status')}>Status{arrow('status')}</th>
             <th style={{ ...thStyle, textAlign: 'right' }} onClick={() => handleSort('found')}>{labels.plural} Found{arrow('found')}</th>
             <th style={{ ...thStyle, textAlign: 'right' }} onClick={() => handleSort('contacts')}>Contacts{arrow('contacts')}</th>
-            <th style={{ ...thStyle, textAlign: 'right' }} onClick={() => handleSort('withEmail')}>With Email{arrow('withEmail')}</th>
-            <th style={{ ...thStyle, textAlign: 'right' }} onClick={() => handleSort('withoutEmail')}>Without Email{arrow('withoutEmail')}</th>
             <th style={thStyle}>Worker</th>
           </tr>
         </thead>
@@ -96,8 +94,6 @@ export default function CountyTable({ counties, scraperType }: {
                 <td style={tdStyle}><StatusBadge status={task.status} /></td>
                 <td style={{ ...tdStyle, textAlign: 'right' }}>{r?.churches ?? r?.schools ?? '-'}</td>
                 <td style={{ ...tdStyle, textAlign: 'right' }}>{r?.contacts ?? '-'}</td>
-                <td style={{ ...tdStyle, textAlign: 'right' }}>{r?.contacts_with_emails ?? '-'}</td>
-                <td style={{ ...tdStyle, textAlign: 'right' }}>{r?.contacts_without_emails ?? '-'}</td>
                 <td style={{ ...tdStyle, fontSize: 11, color: COLORS.textMuted }}>{task.claimed_by ? task.claimed_by.substring(0, 12) : '-'}</td>
               </tr>
             );
