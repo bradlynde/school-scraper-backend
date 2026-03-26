@@ -52,6 +52,18 @@ const ChevronIcon = ({ open }: { open: boolean }) => (
   </svg>
 );
 
+const HamburgerIcon = () => (
+  <svg style={{ width: 22, height: 22 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+  </svg>
+);
+
+const CloseIcon = () => (
+  <svg style={{ width: 22, height: 22 }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+  </svg>
+);
+
 /* ── Nav items ────────────────────────────────────────────────── */
 
 const NAV_ITEMS = [
@@ -63,7 +75,7 @@ const NAV_ITEMS = [
 
 /* ── Component ────────────────────────────────────────────────── */
 
-export default function Sidebar() {
+export default function Sidebar({ mobileOpen, onMobileClose }: { mobileOpen?: boolean; onMobileClose?: () => void }) {
   const pathname = usePathname();
   const { username, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -73,37 +85,31 @@ export default function Sidebar() {
     return pathname.startsWith(href);
   };
 
-  return (
-    <aside style={{
-      width: 240,
-      background: COLORS.sidebarBg,
-      display: "flex",
-      flexDirection: "column",
-      flexShrink: 0,
-      height: "100vh",
-      overflow: "hidden",
-    }}>
+  const handleNavClick = () => {
+    if (onMobileClose) onMobileClose();
+  };
+
+  const sidebarContent = (
+    <>
       {/* Logo */}
-      <Link href="/" style={{
+      <Link href="/" onClick={handleNavClick} style={{
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: "24px 20px 20px",
+        padding: "20px 16px",
+        borderBottom: `1px solid ${COLORS.sidebarBorder}`,
         minHeight: 72,
         textDecoration: "none",
       }}>
         <Image
           src="/npsa-logo.png"
           alt="Nonprofit Security Advisors"
-          width={160}
-          height={48}
-          style={{ height: "auto", objectFit: "contain", filter: "brightness(0) invert(1)" }}
+          width={170}
+          height={51}
+          style={{ height: "auto", objectFit: "contain" }}
           priority
         />
       </Link>
-
-      {/* Divider */}
-      <div style={{ margin: "0 20px", height: 1, background: COLORS.sidebarBorder }} />
 
       {/* Navigation */}
       <nav style={{ flex: 1, padding: "16px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
@@ -113,6 +119,7 @@ export default function Sidebar() {
             <Link
               key={href}
               href={href}
+              onClick={handleNavClick}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -122,8 +129,9 @@ export default function Sidebar() {
                 textDecoration: "none",
                 fontSize: 13,
                 fontWeight: active ? 600 : 400,
-                color: active ? "#ffffff" : COLORS.sidebarMuted,
-                background: active ? COLORS.sidebarActive : "transparent",
+                color: active ? COLORS.sidebarActive : COLORS.sidebarMuted,
+                background: active ? "rgba(30, 58, 95, 0.08)" : "transparent",
+                borderLeft: active ? `3px solid ${COLORS.sidebarActive}` : "3px solid transparent",
                 transition: "all 0.15s ease",
                 letterSpacing: "0.01em",
               }}
@@ -161,15 +169,15 @@ export default function Sidebar() {
             left: 8,
             right: 8,
             marginBottom: 8,
-            background: "#1a2e4a",
+            background: "#fff",
             border: `1px solid ${COLORS.sidebarBorder}`,
             borderRadius: 8,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
+            boxShadow: "0 4px 16px rgba(0,0,0,0.10)",
             overflow: "hidden",
             zIndex: 50,
           }}>
             <button
-              onClick={() => { logout(); setMenuOpen(false); }}
+              onClick={() => { logout(); setMenuOpen(false); if (onMobileClose) onMobileClose(); }}
               style={{
                 width: "100%",
                 display: "flex",
@@ -229,7 +237,8 @@ export default function Sidebar() {
             width: 28,
             height: 28,
             borderRadius: "50%",
-            background: COLORS.sidebarActive,
+            background: "rgba(30, 58, 95, 0.1)",
+            color: COLORS.sidebarActive,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -243,6 +252,120 @@ export default function Sidebar() {
           <ChevronIcon open={menuOpen} />
         </button>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <aside className="sidebar-desktop" style={{
+        width: 250,
+        background: COLORS.sidebarBg,
+        borderRight: `1px solid ${COLORS.sidebarBorder}`,
+        display: "flex",
+        flexDirection: "column",
+        flexShrink: 0,
+        height: "100vh",
+        overflow: "hidden",
+      }}>
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile overlay + sidebar */}
+      {mobileOpen && (
+        <>
+          <div
+            className="sidebar-mobile-overlay"
+            onClick={onMobileClose}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.4)",
+              zIndex: 998,
+            }}
+          />
+          <aside
+            className="sidebar-mobile"
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              bottom: 0,
+              width: 280,
+              background: COLORS.sidebarBg,
+              borderRight: `1px solid ${COLORS.sidebarBorder}`,
+              display: "flex",
+              flexDirection: "column",
+              zIndex: 999,
+              boxShadow: "4px 0 24px rgba(0,0,0,0.15)",
+              animation: "slideInLeft 0.2s ease-out",
+            }}
+          >
+            {/* Close button */}
+            <div style={{ position: "absolute", top: 16, right: 16, zIndex: 10 }}>
+              <button
+                onClick={onMobileClose}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: COLORS.sidebarMuted,
+                  padding: 4,
+                }}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+            {sidebarContent}
+          </aside>
+        </>
+      )}
+
+      <style>{`
+        @keyframes slideInLeft {
+          from { transform: translateX(-100%); }
+          to { transform: translateX(0); }
+        }
+        @media (max-width: 768px) {
+          .sidebar-desktop { display: none !important; }
+        }
+        @media (min-width: 769px) {
+          .sidebar-mobile-overlay, .sidebar-mobile { display: none !important; }
+        }
+      `}</style>
+    </>
+  );
+}
+
+/* ── Mobile hamburger button (exported for AppShell) ── */
+
+export function MobileMenuButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      className="mobile-menu-btn"
+      onClick={onClick}
+      style={{
+        position: "fixed",
+        top: 12,
+        left: 12,
+        zIndex: 997,
+        background: "#fff",
+        border: `1px solid ${COLORS.sidebarBorder}`,
+        borderRadius: 8,
+        padding: "8px 10px",
+        cursor: "pointer",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <HamburgerIcon />
+      <style>{`
+        @media (min-width: 769px) {
+          .mobile-menu-btn { display: none !important; }
+        }
+      `}</style>
+    </button>
   );
 }

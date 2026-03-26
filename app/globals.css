@@ -86,3 +86,29 @@ body {
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
 }
 
+/* ── Mobile Responsive ── */
+
+@media (max-width: 768px) {
+  /* Add top padding for hamburger button on mobile */
+  main {
+    padding-top: 52px !important;
+  }
+
+  /* Make grids single column on mobile */
+  .grid-responsive {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Tighter padding on mobile */
+  .page-container {
+    padding: 16px !important;
+  }
+
+  /* Stack header on mobile */
+  .page-container > div:first-child {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 12px;
+  }
+}
+

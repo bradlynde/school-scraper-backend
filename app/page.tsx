@@ -120,7 +120,7 @@ export default function HomePage() {
   }
 
   return (
-    <div style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
+    <div className="page-container" style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <div>
@@ -217,7 +217,7 @@ export default function HomePage() {
       </div>
 
       {/* Two-column: Recent Runs + Activity Timeline */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+      <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
         {/* Recent Runs */}
         <div style={{
           background: COLORS.cardBg,

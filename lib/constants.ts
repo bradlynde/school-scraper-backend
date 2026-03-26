@@ -1,11 +1,11 @@
 export const COLORS = {
-  // Sidebar — dark navy
-  sidebarBg: '#0f1f38',
-  sidebarText: '#e8eaf0',
-  sidebarMuted: '#7a8baa',
+  // Sidebar — white
+  sidebarBg: '#ffffff',
+  sidebarText: '#111827',
+  sidebarMuted: '#6b7280',
   sidebarActive: '#1e3a5f',
-  sidebarBorder: '#1a2e4a',
-  sidebarHover: '#162d4d',
+  sidebarBorder: '#e5e7eb',
+  sidebarHover: '#f3f4f6',
 
   // Brand
   accent: '#1e3a5f',

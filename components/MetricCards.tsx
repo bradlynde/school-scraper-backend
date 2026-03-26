@@ -41,7 +41,7 @@ export default function MetricCards({ loesGenerated, avgDurationPerCounty, avgCo
   ];
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+    <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
       {cards.map((card) => (
         <div
           key={card.label}

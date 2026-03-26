@@ -1,12 +1,14 @@
 // @ts-nocheck
 "use client";
 
+import { useState } from "react";
 import { AuthProvider, useAuth } from "../contexts/AuthContext";
 import LoginForm from "./LoginForm";
-import Sidebar from "./Sidebar";
+import Sidebar, { MobileMenuButton } from "./Sidebar";
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   if (loading) {
     return (
@@ -29,7 +31,8 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <div style={{ display: "flex", height: "100vh" }}>
-      <Sidebar />
+      <Sidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
+      <MobileMenuButton onClick={() => setMobileOpen(true)} />
       <main style={{ flex: 1, overflowY: "auto", background: "#f7f8fa" }}>
         {children}
       </main>

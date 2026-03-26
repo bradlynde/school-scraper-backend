@@ -165,7 +165,7 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
 
           <ProgressBar completed={activeCountiesDone} total={activeCountiesTotal} />
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginTop: 16 }}>
+          <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginTop: 16 }}>
             <StatCard label="Counties Done" value={`${activeCountiesDone} / ${activeCountiesTotal}`} />
             <StatCard label="Contacts Found" value={activeContacts} />
             <StatCard label="With Email" value={activeWithEmail} />
@@ -258,7 +258,7 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
       )}
 
       {/* Aggregated Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+      <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
         <StatCard label="Total Contacts" value={totalContacts} />
         <StatCard label="With Email" value={totalWithEmail} />
         <StatCard label="States Scraped" value={statesScraped} />
