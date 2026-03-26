@@ -40,7 +40,8 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
       const missing = seeds.filter(s => !apiStates.has(s.state));
       setRuns([...data, ...missing]);
     } catch {
-      setRuns(SEED_RUNS[scraperType] || []);
+      // On API failure, only set seeds if we have no runs yet (avoid wiping active runs)
+      setRuns(prev => prev.length > 0 ? prev : (SEED_RUNS[scraperType] || []));
     }
     setLoading(false);
   };
