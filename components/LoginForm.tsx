@@ -68,7 +68,7 @@ export default function LoginForm() {
       minHeight: "100dvh",
       display: "flex",
       flexDirection: "column",
-      background: "#f7f8fa",
+      background: "#ffffff",
       fontFamily: "Inter, system-ui, sans-serif",
     }}>
       {/* Logo - top left */}
