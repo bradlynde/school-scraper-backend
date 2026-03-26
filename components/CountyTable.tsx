@@ -68,7 +68,7 @@ export default function CountyTable({ counties, scraperType }: {
   const arrow = (key: SortKey) => sortKey === key ? (sortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
 
   return (
-    <div style={{
+    <div className="table-responsive" style={{
       background: COLORS.cardBg,
       borderRadius: 12,
       overflow: 'hidden',

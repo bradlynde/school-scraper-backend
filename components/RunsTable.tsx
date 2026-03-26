@@ -81,7 +81,7 @@ export default function RunsTable({ runs, scraperType, onArchive }: {
   };
 
   return (
-    <div style={{
+    <div className="table-responsive" style={{
       background: COLORS.cardBg,
       borderRadius: 12,
       overflow: 'hidden',

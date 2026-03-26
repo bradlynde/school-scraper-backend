@@ -126,16 +126,16 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
 
   if (loading) {
     return (
-      <div style={{ padding: "40px 48px" }}>
+      <div className="page-container" style={{ padding: "40px 48px" }}>
         <div style={{ fontSize: 13, color: COLORS.textMuted }}>Loading...</div>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
+    <div className="page-container" style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+      <div className="header-responsive" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, margin: 0, letterSpacing: "-0.02em" }}>
           {labels.title}
         </h1>

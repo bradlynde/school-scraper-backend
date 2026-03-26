@@ -104,21 +104,21 @@ export default function RunDetailPage({ runId, scraperType }: { runId: string; s
   const stateName = status.state ? formatState(status.state) : "Unknown";
 
   return (
-    <div style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
+    <div className="page-container" style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
       {/* Back link */}
       <Link href={`/${scraperType}`} style={{ fontSize: 12, color: COLORS.textMuted, textDecoration: "none", marginBottom: 16, display: "inline-flex", alignItems: "center", gap: 4 }}>
         &larr; Back to {labels.title}
       </Link>
 
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div className="header-responsive" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, margin: 0, letterSpacing: "-0.02em" }}>
             {stateName} {labels.plural}
           </h1>
           <StatusBadge status={status.status} />
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
+        <div className="btn-row-responsive" style={{ display: "flex", gap: 10 }}>
           {isActive && (
             <button onClick={handleStop} style={{
               background: "none", border: `1px solid ${COLORS.error}`, borderRadius: 6,
