@@ -1119,6 +1119,7 @@ export default function App() {
             <div style={{borderTop:"1px solid #2e4060",marginTop:6,paddingTop:6,display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700}}>
               <span style={{color:"#9aab2e"}}>Total</span><span style={{color:"#9aab2e"}}>{fmt(fees.total)}</span>
             </div>
+          </div>
           <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.optPostAwardScope?4:14,cursor:"pointer"}}>
             <input type="checkbox" checked={form.optPostAwardScope} onChange={e=>setF("optPostAwardScope",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
             Compliance Consulting
@@ -1291,6 +1292,7 @@ export default function App() {
             <div style={{borderTop:"1px solid #2e4060",marginTop:6,paddingTop:6,display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:700}}>
               <span style={{color:"#9aab2e"}}>Total</span><span style={{color:"#9aab2e"}}>{fmt(inhFees.total)}</span>
             </div>
+          </div>
           <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.inhOptPostAwardScope?4:14,cursor:"pointer"}}>
             <input type="checkbox" checked={form.inhOptPostAwardScope} onChange={e=>setF("inhOptPostAwardScope",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
             Compliance Consulting
