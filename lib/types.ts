@@ -8,7 +8,7 @@ export type RunMetadata = {
   status: RunStatus;
   scraper_type?: ScraperType;
   total_counties?: number;
-  completed_counties?: number;
+  completed_counties?: number | string[];
   total_contacts?: number;
   total_contacts_with_emails?: number;
   created_at?: string;

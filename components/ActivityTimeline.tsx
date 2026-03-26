@@ -90,7 +90,8 @@ function getDescription(run: RunMetadata): string {
   }
   if (run.status === "running" || run.status === "finalizing") {
     if (run.completed_counties != null && run.total_counties != null) {
-      return `${getStatusLabel(run.status)} — ${run.completed_counties}/${run.total_counties} counties`;
+      const done = Array.isArray(run.completed_counties) ? run.completed_counties.length : run.completed_counties;
+      return `${getStatusLabel(run.status)} — ${done}/${run.total_counties} counties`;
     }
     return getStatusLabel(run.status);
   }

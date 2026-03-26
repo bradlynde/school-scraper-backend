@@ -45,8 +45,11 @@ export default function ActivePipelineHero({ activeRuns }: ActivePipelineHeroPro
   // Collapse when no active runs
   if (!activeRuns || activeRuns.length === 0) return null;
 
-  const countiesDone = run.completed_counties || 0;
-  const progress = run.total_counties
+  // completed_counties may be a number OR an array of county names from the API
+  const rawCounties = run.completed_counties;
+  const countiesDone = Array.isArray(rawCounties) ? rawCounties.length : (typeof rawCounties === "number" ? rawCounties : 0);
+  const countyNames = Array.isArray(rawCounties) ? rawCounties.join(", ") : "";
+  const progress = (run.total_counties && countiesDone)
     ? Math.round((countiesDone / run.total_counties) * 100)
     : 0;
 
@@ -132,7 +135,7 @@ export default function ActivePipelineHero({ activeRuns }: ActivePipelineHeroPro
               <span style={{ fontSize: 12, opacity: 0.7 }}>
                 {countiesDone} / {run.total_counties || 0} counties
               </span>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{progress}%</span>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>{isNaN(progress) ? 0 : progress}%</span>
             </div>
             <div style={{
               height: 6,
