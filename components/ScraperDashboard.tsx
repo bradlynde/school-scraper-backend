@@ -135,7 +135,7 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
   return (
     <div className="page-container" style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
-      <div className="header-responsive" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+      <div className="animate-in header-responsive" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, margin: 0, letterSpacing: "-0.02em" }}>
           {labels.title}
         </h1>
@@ -145,7 +145,10 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
             display: "inline-flex", alignItems: "center", gap: 6,
             padding: "8px 16px", background: scraperType === "church" ? COLORS.accent : COLORS.green, color: "#fff",
             borderRadius: 8, textDecoration: "none", fontSize: 12, fontWeight: 600,
+            transition: "all 0.2s",
           }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(30,58,95,0.3)"; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
         >
           + New Run
         </Link>
@@ -153,7 +156,7 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
 
       {/* Active Run */}
       {activeRun && (
-        <div style={{
+        <div className="animate-in delay-1" style={{
           background: COLORS.cardBg, borderRadius: 12, padding: "20px 24px",
           boxShadow: COLORS.cardShadow, border: `1px solid ${COLORS.cardBorder}`,
           marginBottom: 20,
@@ -272,14 +275,14 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
       )}
 
       {/* Aggregated Stats */}
-      <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+      <div className="animate-in delay-2 grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
         <StatCard label="Total Contacts" value={totalContacts} />
         <StatCard label="States Scraped" value={statesScraped} />
         <StatCard label="Completed Runs" value={completedRuns.length} />
       </div>
 
       {/* Previous Runs */}
-      <div style={{ marginBottom: 20 }}>
+      <div className="animate-in delay-3" style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: COLORS.textPrimary }}>
             Previous Runs

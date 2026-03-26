@@ -101,7 +101,10 @@ export default function RunsTable({ runs, scraperType, onArchive }: {
         </thead>
         <tbody>
           {runs.map((run, i) => (
-            <tr key={run.run_id} style={{ background: i % 2 === 1 ? '#fafbfc' : '#fff' }}>
+            <tr key={run.run_id} style={{ background: i % 2 === 1 ? '#fafbfc' : '#fff', transition: 'background 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f3f4f6'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = i % 2 === 1 ? '#fafbfc' : '#fff'; }}
+            >
               <td style={tdStyle}>
                 <Link
                   href={`/${scraperType}/${run.run_id}`}

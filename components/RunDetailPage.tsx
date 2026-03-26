@@ -106,12 +106,12 @@ export default function RunDetailPage({ runId, scraperType }: { runId: string; s
   return (
     <div className="page-container" style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
       {/* Back link */}
-      <Link href={`/${scraperType}`} style={{ fontSize: 12, color: COLORS.textMuted, textDecoration: "none", marginBottom: 16, display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <Link className="animate-in" href={`/${scraperType}`} style={{ fontSize: 12, color: COLORS.textMuted, textDecoration: "none", marginBottom: 16, display: "inline-flex", alignItems: "center", gap: 4 }}>
         &larr; Back to {labels.title}
       </Link>
 
       {/* Header */}
-      <div className="header-responsive" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+      <div className="animate-in delay-1 header-responsive" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, margin: 0, letterSpacing: "-0.02em" }}>
             {stateName} {labels.plural}
@@ -132,7 +132,11 @@ export default function RunDetailPage({ runId, scraperType }: { runId: string; s
               <button onClick={handleDownload} style={{
                 background: COLORS.accent, border: "none", borderRadius: 6,
                 padding: "8px 16px", fontSize: 12, color: "#fff", cursor: "pointer", fontWeight: 600,
-              }}>
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(30,58,95,0.3)"; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
+              >
                 Download CSV
               </button>
               <button onClick={handleArchive} style={{
@@ -154,7 +158,7 @@ export default function RunDetailPage({ runId, scraperType }: { runId: string; s
       )}
 
       {/* Stats */}
-      <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
+      <div className="animate-in delay-2 grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
         <StatCard label="Total Contacts" value={totalContacts} />
         <StatCard label="Counties" value={`${countiesDone} / ${totalCounties}`} />
         <StatCard label="Run ID" value={runId.substring(0, 8)} subtitle={runId} />
@@ -162,7 +166,7 @@ export default function RunDetailPage({ runId, scraperType }: { runId: string; s
 
       {/* County Table */}
       {counties.length > 0 && (
-        <div>
+        <div className="animate-in delay-3">
           <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700, color: COLORS.textPrimary }}>
             County Breakdown
           </h3>

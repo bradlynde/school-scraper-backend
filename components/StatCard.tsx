@@ -16,7 +16,11 @@ export default function StatCard({ label, value, subtitle, icon }: {
       border: `1px solid ${COLORS.cardBorder}`,
       flex: 1,
       minWidth: 160,
-    }}>
+      transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = COLORS.cardShadowHover; }}
+    onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = COLORS.cardShadow; }}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
           <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 6, fontWeight: 500 }}>

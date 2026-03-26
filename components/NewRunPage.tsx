@@ -36,19 +36,20 @@ export default function NewRunPage({ scraperType }: { scraperType: ScraperType }
   };
 
   return (
-    <div style={{
+    <div className="page-container" style={{
       padding: "28px 36px",
       maxWidth: 560,
       margin: "0 auto",
     }}>
       <Link
+        className="animate-in"
         href={`/${scraperType}`}
         style={{ fontSize: 13, color: COLORS.textMuted, textDecoration: "none", marginBottom: 20, display: "inline-block" }}
       >
         &larr; Back to {labels.title}
       </Link>
 
-      <div style={{
+      <div className="animate-in delay-1" style={{
         background: COLORS.cardBg,
         borderRadius: 12,
         padding: "32px",

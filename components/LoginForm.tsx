@@ -72,7 +72,7 @@ export default function LoginForm() {
       fontFamily: "Inter, system-ui, sans-serif",
     }}>
       {/* Logo - top left */}
-      <div style={{ padding: "28px 32px" }}>
+      <div className="animate-in" style={{ padding: "28px 32px" }}>
         <Image
           src="/npsa-logo.png"
           alt="NPSA"
@@ -85,7 +85,7 @@ export default function LoginForm() {
 
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", marginTop: -60 }}>
         <div style={{ width: "100%", maxWidth: 400, padding: "0 16px" }}>
-          <div style={{
+          <div className="animate-in delay-1" style={{
             background: "#ffffff",
             borderRadius: 14,
             border: "1px solid #e5e7eb",
