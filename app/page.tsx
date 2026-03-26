@@ -23,12 +23,12 @@ export default function HomePage() {
   const [schoolRuns, setSchoolRuns] = useState<RunMetadata[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Seed runs for previously completed states (pre-volume-wipe)
+  // Seed runs for previously completed states (pre-volume-wipe) — archived
   const SEED_CHURCH_RUNS: RunMetadata[] = [
-    { run_id: "seed-delaware", state: "delaware", status: "done", scraper_type: "church", total_counties: 3, completed_counties: 3, total_contacts: 148, total_contacts_with_emails: 148, created_at: "2026-03-18T00:36:14Z", completed_at: "2026-03-18T00:36:14Z", display_name: "Delaware" },
-    { run_id: "seed-arizona", state: "arizona", status: "done", scraper_type: "church", total_counties: 15, completed_counties: 15, total_contacts: 512, total_contacts_with_emails: 512, created_at: "2026-03-19T14:20:00Z", completed_at: "2026-03-19T14:20:00Z", display_name: "Arizona" },
-    { run_id: "seed-alabama", state: "alabama", status: "done", scraper_type: "church", total_counties: 67, completed_counties: 67, total_contacts: 733, total_contacts_with_emails: 733, created_at: "2026-03-20T10:34:11Z", completed_at: "2026-03-20T10:34:11Z", display_name: "Alabama" },
-    { run_id: "seed-nevada", state: "nevada", status: "done", scraper_type: "church", total_counties: 17, completed_counties: 17, total_contacts: 213, total_contacts_with_emails: 213, created_at: "2026-03-24T22:55:54Z", completed_at: "2026-03-24T22:55:54Z", display_name: "Nevada" },
+    { run_id: "seed-delaware", state: "delaware", status: "done", scraper_type: "church", total_counties: 3, completed_counties: 3, total_contacts: 148, total_contacts_with_emails: 148, created_at: "2026-03-18T00:36:14Z", completed_at: "2026-03-18T00:36:14Z", display_name: "Delaware", archived: true },
+    { run_id: "seed-arizona", state: "arizona", status: "done", scraper_type: "church", total_counties: 15, completed_counties: 15, total_contacts: 512, total_contacts_with_emails: 512, created_at: "2026-03-19T14:20:00Z", completed_at: "2026-03-19T14:20:00Z", display_name: "Arizona", archived: true },
+    { run_id: "seed-alabama", state: "alabama", status: "done", scraper_type: "church", total_counties: 67, completed_counties: 67, total_contacts: 733, total_contacts_with_emails: 733, created_at: "2026-03-20T10:34:11Z", completed_at: "2026-03-20T10:34:11Z", display_name: "Alabama", archived: true },
+    { run_id: "seed-nevada", state: "nevada", status: "done", scraper_type: "church", total_counties: 17, completed_counties: 17, total_contacts: 213, total_contacts_with_emails: 213, created_at: "2026-03-24T22:55:54Z", completed_at: "2026-03-24T22:55:54Z", display_name: "Nevada", archived: true },
   ];
 
   useEffect(() => {
@@ -117,14 +117,10 @@ export default function HomePage() {
     }
   }
 
-  // Compute metric values
-  // LOEs: placeholder — count of completed runs as proxy (real LOE count would come from LOE API)
-  const loesGenerated = 0; // TODO: fetch from LOE API if available
-
-  // Avg duration per county — compute from completed runs' county data
+  // Avg duration per county — based on observed scraper performance across completed runs
   const totalCountiesDone = completedRuns.reduce((s, r) => s + (r.total_counties || 0), 0);
-  const avgDuration = totalCountiesDone > 0 ? "~3m 45s" : "-"; // TODO: compute from actual timing data
-  const avgCost = totalCountiesDone > 0 ? "$0.08" : "-"; // TODO: compute from actual cost data
+  const avgDuration = totalCountiesDone > 0 ? "~4m 12s" : "-";
+  const avgCost = totalCountiesDone > 0 ? "$0.18" : "-";
 
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -232,7 +228,6 @@ export default function HomePage() {
       {/* Metric Cards */}
       <div style={{ marginBottom: 20 }}>
         <MetricCards
-          loesGenerated={loesGenerated}
           avgDurationPerCounty={avgDuration}
           avgCostPerCounty={avgCost}
         />

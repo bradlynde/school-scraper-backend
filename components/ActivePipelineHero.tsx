@@ -154,12 +154,11 @@ export default function ActivePipelineHero({ activeRuns }: ActivePipelineHeroPro
           </div>
 
           {/* Bottom stats */}
-          <div style={{ display: "flex", gap: 24, fontSize: 12, opacity: 0.6 }}>
-            <span>{(run.total_contacts || 0).toLocaleString()} contacts found</span>
-            {activeRuns.length > 1 && (
-              <span>+{activeRuns.length - 1} more active</span>
-            )}
-          </div>
+          {activeRuns.length > 1 && (
+            <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
+              +{activeRuns.length - 1} more active
+            </div>
+          )}
         </div>
 
         <style>{`

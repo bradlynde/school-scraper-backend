@@ -63,7 +63,7 @@ function formatDate(dateStr: string): string {
   if (!dateStr || dateStr === "In Progress") return dateStr || "-";
   try {
     const d = new Date(dateStr);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
   } catch {
     return dateStr;
   }
@@ -102,6 +102,14 @@ export default function USStateMap({ stateData }: USStateMapProps) {
           const isHovered = tooltip?.stateId === stateId;
           const hasData = !!stateData[stateId];
 
+          // Alaska: rotate -30deg, scale 1.2x around its center
+          // Hawaii: rotate -30deg, shift right
+          const transform = stateId === "alaska"
+            ? "translate(170,475) scale(1.2) rotate(-30) translate(-170,-475)"
+            : stateId === "hawaii"
+            ? "translate(330,515) rotate(-30) translate(-300,-515)"
+            : undefined;
+
           return (
             <path
               key={stateId}
@@ -109,6 +117,7 @@ export default function USStateMap({ stateData }: USStateMapProps) {
               fill={color}
               stroke="#ffffff"
               strokeWidth={1}
+              transform={transform}
               style={{
                 cursor: hasData ? "pointer" : "default",
                 opacity: isHovered ? 0.85 : 1,

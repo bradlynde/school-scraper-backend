@@ -4,22 +4,12 @@
 import { COLORS } from "../lib/constants";
 
 interface MetricCardsProps {
-  loesGenerated: number;
   avgDurationPerCounty: string; // e.g. "4m 32s"
   avgCostPerCounty: string; // e.g. "$0.12"
 }
 
-export default function MetricCards({ loesGenerated, avgDurationPerCounty, avgCostPerCounty }: MetricCardsProps) {
+export default function MetricCards({ avgDurationPerCounty, avgCostPerCounty }: MetricCardsProps) {
   const cards = [
-    {
-      label: "LOEs Generated",
-      value: loesGenerated,
-      icon: (
-        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke={COLORS.accent}>
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-      ),
-    },
     {
       label: "Avg Duration / County",
       value: avgDurationPerCounty,
@@ -41,7 +31,7 @@ export default function MetricCards({ loesGenerated, avgDurationPerCounty, avgCo
   ];
 
   return (
-    <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+    <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
       {cards.map((card) => (
         <div
           key={card.label}
