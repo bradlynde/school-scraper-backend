@@ -120,7 +120,7 @@ export default function HomePage() {
   // Avg duration per county — based on observed scraper performance across completed runs
   const totalCountiesDone = completedRuns.reduce((s, r) => s + (r.total_counties || 0), 0);
   const avgDuration = totalCountiesDone > 0 ? "~10m" : "-";
-  const avgCost = totalCountiesDone > 0 ? "$0.05" : "-";
+  const avgCost = totalCountiesDone > 0 ? "$0.79" : "-";
 
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",

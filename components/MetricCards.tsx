@@ -20,7 +20,7 @@ export default function MetricCards({ avgDurationPerCounty, avgCostPerCounty }: 
       ),
     },
     {
-      label: "Avg Cost / Lead",
+      label: "Avg Cost / County",
       value: avgCostPerCounty,
       icon: (
         <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke={COLORS.accent}>
