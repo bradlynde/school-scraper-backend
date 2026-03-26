@@ -71,9 +71,14 @@ def _execute(query: str, params: tuple = (), fetch: str = "none") -> Any:
 
 def init_tables():
     """Create tables if they don't exist. Safe to call multiple times."""
-    conn = _get_conn()
-    with conn.cursor() as cur:
-        cur.execute("""
+    try:
+        conn = _get_conn()
+    except Exception as e:
+        print(f"[DB] ERROR: Failed to connect to Postgres: {e}")
+        raise
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
             CREATE TABLE IF NOT EXISTS pipeline_runs (
                 run_id TEXT PRIMARY KEY,
                 scraper_type TEXT NOT NULL DEFAULT 'church',
@@ -150,7 +155,14 @@ def init_tables():
                 WHERE status = 'queued';
         """)
         conn.commit()
-    print("[DB] Postgres tables initialized")
+        print("[DB] Postgres tables initialized")
+    except Exception as e:
+        print(f"[DB] ERROR: Failed to create tables: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
 
 
 # ─── Pipeline runs ───────────────────────────────────────────────────────────
