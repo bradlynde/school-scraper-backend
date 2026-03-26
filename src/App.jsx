@@ -1758,7 +1758,8 @@ ${form.npsa1Name||"NPSA"}`
               <div style={{fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#666",marginBottom:4}}>Client</div>
               <div style={{fontSize:13,fontWeight:700,color:"#1a1a1a",fontFamily:"Georgia,serif"}}>{form.clientName||"[CLIENT NAME]"}</div>
               {clientAddr&&<div style={{fontSize:11,color:"#666",marginTop:2}}>{clientAddr}</div>}
-              {form.contactName&&<div style={{fontSize:11,color:"#666",marginTop:2}}>{form.contactName}{form.contactTitle?`, ${form.contactTitle}`:""}</div>}
+              {form.contactName&&<div style={{fontSize:11,color:"#666",marginTop:2}}>{form.contactName}</div>}
+              {form.contactTitle&&<div style={{fontSize:11,color:"#666"}}>{form.contactTitle}</div>}
               {form.contactEmail&&<div style={{fontSize:11,color:"#666"}}>{form.contactEmail}</div>}
               {form.contactPhone&&<div style={{fontSize:11,color:"#666"}}>{form.contactPhone}</div>}
             </div>
