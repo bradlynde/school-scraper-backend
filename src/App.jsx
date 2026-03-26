@@ -479,11 +479,11 @@ export default function App() {
     return () => document.head.removeChild(link);
   }, []);
   useEffect(()=>{
-    (async()=>{
+    (()=>{
       try {
         const TEMPLATE_VERSION = "v2026-03-18-m"; // bump this to force cache reset
-        const ver = await window.storage.get("npsa-template-version");
-        const versionMatch = ver?.value === TEMPLATE_VERSION;
+        const ver = localStorage.getItem("npsa-template-version");
+        const versionMatch = ver === TEMPLATE_VERSION;
         // Helper: merge stored sections with defaults, always taking structural fields from default
         const mergeWithDefault = (stored, defaults) => {
           const merged = stored.map(s => {
@@ -514,17 +514,17 @@ export default function App() {
         };
         if (!versionMatch) {
           // Version mismatch — clear stored templates and use fresh defaults
-          await window.storage.set("npsa-template-version", TEMPLATE_VERSION);
-          await window.storage.delete("npsa-pre-sections");
-          await window.storage.delete("npsa-post-sections");
-          await window.storage.delete("npsa-inh-sections");
+          localStorage.setItem("npsa-template-version", TEMPLATE_VERSION);
+          localStorage.removeItem("npsa-pre-sections");
+          localStorage.removeItem("npsa-post-sections");
+          localStorage.removeItem("npsa-inh-sections");
         } else {
-          const r1 = await window.storage.get("npsa-pre-sections");
-          if(r1?.value) setPreSections(mergeWithDefault(JSON.parse(r1.value), DEFAULT_PRE));
-          const r2 = await window.storage.get("npsa-post-sections");
-          if(r2?.value) setPostSections(mergeWithDefault(JSON.parse(r2.value), DEFAULT_POST));
-          const r3 = await window.storage.get("npsa-inh-sections");
-          if(r3?.value) setInhSections(mergeWithDefault(JSON.parse(r3.value), DEFAULT_INH));
+          const r1 = localStorage.getItem("npsa-pre-sections");
+          if(r1) setPreSections(mergeWithDefault(JSON.parse(r1), DEFAULT_PRE));
+          const r2 = localStorage.getItem("npsa-post-sections");
+          if(r2) setPostSections(mergeWithDefault(JSON.parse(r2), DEFAULT_POST));
+          const r3 = localStorage.getItem("npsa-inh-sections");
+          if(r3) setInhSections(mergeWithDefault(JSON.parse(r3), DEFAULT_INH));
         }
       } catch{}
     })();
@@ -557,9 +557,9 @@ export default function App() {
     setActiveEdit(null); setMode("template");
   };
   const saveTemplate = async () => {
-    if(editingTab==="pre"){ setPreSections(editingSections); try{ await window.storage.set("npsa-pre-sections",JSON.stringify(editingSections)); }catch{} }
-    else if(editingTab==="inh"){ setInhSections(editingSections); try{ await window.storage.set("npsa-inh-sections",JSON.stringify(editingSections)); }catch{} }
-    else { setPostSections(editingSections); try{ await window.storage.set("npsa-post-sections",JSON.stringify(editingSections)); }catch{} }
+    if(editingTab==="pre"){ setPreSections(editingSections); try{ localStorage.setItem("npsa-pre-sections",JSON.stringify(editingSections)); }catch{} }
+    else if(editingTab==="inh"){ setInhSections(editingSections); try{ localStorage.setItem("npsa-inh-sections",JSON.stringify(editingSections)); }catch{} }
+    else { setPostSections(editingSections); try{ localStorage.setItem("npsa-post-sections",JSON.stringify(editingSections)); }catch{} }
     setSavedBanner(true); setTimeout(()=>setSavedBanner(false),3000); setMode("document");
   };
   const resetTemplate = () => {
