@@ -43,8 +43,13 @@ export default function HomePage() {
     (r) => r.status === "running" || r.status === "finalizing"
   );
 
-  // Build state data for the map
-  const stateData: Record<string, any> = {};
+  // Build state data for the map — seed with known completed runs
+  const stateData: Record<string, any> = {
+    delaware: { state: "delaware", churchRun: { total_contacts: 148, total_counties: 3, completed_at: "2026-03-18T00:36:14Z", display_name: "Delaware" } },
+    alabama: { state: "alabama", churchRun: { total_contacts: 733, total_counties: 67, completed_at: "2026-03-20T10:34:11Z", display_name: "Alabama" } },
+    nevada: { state: "nevada", churchRun: { total_contacts: 213, total_counties: 17, completed_at: "2026-03-24T22:55:54Z", display_name: "Nevada" } },
+    arizona: { state: "arizona", churchRun: { total_contacts: 512, total_counties: 15, completed_at: "2026-03-19T14:20:00Z", display_name: "Arizona" } },
+  };
   const completedRuns = allRuns.filter(
     (r) => r.status === "done" || r.status === "completed"
   );
