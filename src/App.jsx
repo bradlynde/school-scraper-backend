@@ -441,16 +441,10 @@ const NPSA_SIGNATURES = {
 };
 export default function App() {
   const [docTab, setDocTab] = useState("pre");
-  const [mode, setMode] = useState("document");
   const [form, setForm] = useState(defaultForm);
   const [preSections, setPreSections] = useState(DEFAULT_PRE);
   const [postSections, setPostSections] = useState(DEFAULT_POST);
   const [inhSections, setInhSections] = useState(DEFAULT_INH);
-  const [editingSections, setEditingSections] = useState(null);
-  const [editingTab, setEditingTab] = useState("pre");
-  const [activeEdit, setActiveEdit] = useState(null);
-  const [savedBanner, setSavedBanner] = useState(false);
-  const [confirmModal, setConfirmModal] = useState(null); // null or "pre"/"post"
   const [signerApprovalModal, setSignerApprovalModal] = useState(null); // {name, title} pending approval
   const [mgmtApprovalModal, setMgmtApprovalModal] = useState(false); // AI clause approval gate
   const [emailModal, setEmailModal] = useState(false);
@@ -470,6 +464,18 @@ export default function App() {
   const numLocs = totalApps; // fees scale on total applications
   const fees = calcFees(form.engagementModel, form.pricingTier, numLocs, form.optPostAwardScope, form.postAwardFee, form.customFee, form.earlySigningDiscount, form.earlySigningAmount);
   const inhFees = calcFees(form.inhEngagementModel, form.inhPricingTier, numLocs, form.inhOptPostAwardScope, form.inhPostAwardFee, form.inhCustomFee, form.inhEarlySigningDiscount, form.inhEarlySigningAmount);
+  // Load templates from server on mount; fall back to hardcoded defaults
+  useEffect(() => {
+    const load = async (type, setter) => {
+      try {
+        const r = await fetch(`/api/templates/${type}`);
+        if (r.ok) { const d = await r.json(); if (d.sections) setter(d.sections); }
+      } catch {}
+    };
+    load('pre-award', setPreSections);
+    load('in-house', setInhSections);
+    load('post-award', setPostSections);
+  }, []);
   // Inject Ms Madi font for signatures
   useEffect(()=>{
     const link = document.createElement("link");
@@ -478,57 +484,7 @@ export default function App() {
     document.head.appendChild(link);
     return () => document.head.removeChild(link);
   }, []);
-  useEffect(()=>{
-    (async()=>{
-      try {
-        const TEMPLATE_VERSION = "v2026-03-18-m"; // bump this to force cache reset
-        const ver = await window.storage.get("npsa-template-version");
-        const versionMatch = ver?.value === TEMPLATE_VERSION;
-        // Helper: merge stored sections with defaults, always taking structural fields from default
-        const mergeWithDefault = (stored, defaults) => {
-          const merged = stored.map(s => {
-            const def = defaults.find(d => d.id === s.id);
-            if (!def) return s;
-            // Always use structural fields from default
-            let result = { ...s, roman: def.roman, title: def.title };
-            // Reset content if missing tokens
-            if (s.content && def.content) {
-              const missingTokens = (def.content.match(/\[[A-Z_]+\]/g)||[]).filter(tok => !s.content.includes(tok));
-              if (missingTokens.length > 0) result = { ...result, content: def.content };
-            }
-            if (s.subsections && def.subsections) {
-              const mergedSubs = s.subsections.map(sub => {
-                const defSub = def.subsections.find(d => d.id === sub.id);
-                if (!defSub) return sub;
-                const missingTokens = (defSub.content.match(/\[[A-Z_]+\]/g)||[]).filter(tok => !sub.content.includes(tok));
-                const base = { ...sub, title: defSub.title };
-                return missingTokens.length > 0 ? { ...base, content: defSub.content } : base;
-              });
-              result = { ...result, subsections: mergedSubs };
-            }
-            return result;
-          });
-          // Insert any new default sections not in storage, in correct position
-          const mergedIds = merged.map(s => s.id);
-          return defaults.map(def => mergedIds.includes(def.id) ? merged.find(s => s.id === def.id) : def);
-        };
-        if (!versionMatch) {
-          // Version mismatch — clear stored templates and use fresh defaults
-          await window.storage.set("npsa-template-version", TEMPLATE_VERSION);
-          await window.storage.delete("npsa-pre-sections");
-          await window.storage.delete("npsa-post-sections");
-          await window.storage.delete("npsa-inh-sections");
-        } else {
-          const r1 = await window.storage.get("npsa-pre-sections");
-          if(r1?.value) setPreSections(mergeWithDefault(JSON.parse(r1.value), DEFAULT_PRE));
-          const r2 = await window.storage.get("npsa-post-sections");
-          if(r2?.value) setPostSections(mergeWithDefault(JSON.parse(r2.value), DEFAULT_POST));
-          const r3 = await window.storage.get("npsa-inh-sections");
-          if(r3?.value) setInhSections(mergeWithDefault(JSON.parse(r3.value), DEFAULT_INH));
-        }
-      } catch{}
-    })();
-  },[]);
+
   // Sync Grant Writer guarantee options with pre-award toggles
   useEffect(()=>{
     setForm(f => ({
@@ -551,29 +507,7 @@ export default function App() {
     iframe.onload = tryWrite;
     tryWrite();
   },[reviewMode, reviewHtml]);
-  const enterTemplate = (tab) => {
-    setEditingTab(tab);
-    setEditingSections(JSON.parse(JSON.stringify(tab==="pre"?preSections:tab==="inh"?inhSections:postSections)));
-    setActiveEdit(null); setMode("template");
-  };
-  const saveTemplate = async () => {
-    if(editingTab==="pre"){ setPreSections(editingSections); try{ await window.storage.set("npsa-pre-sections",JSON.stringify(editingSections)); }catch{} }
-    else if(editingTab==="inh"){ setInhSections(editingSections); try{ await window.storage.set("npsa-inh-sections",JSON.stringify(editingSections)); }catch{} }
-    else { setPostSections(editingSections); try{ await window.storage.set("npsa-post-sections",JSON.stringify(editingSections)); }catch{} }
-    setSavedBanner(true); setTimeout(()=>setSavedBanner(false),3000); setMode("document");
-  };
-  const resetTemplate = () => {
-    if(!confirm("Reset to original default text?")) return;
-    setEditingSections(JSON.parse(JSON.stringify(editingTab==="pre"?DEFAULT_PRE:editingTab==="inh"?DEFAULT_INH:DEFAULT_POST)));
-    setActiveEdit(null);
-  };
-  const updateContent = (id,subId,val) => {
-    setEditingSections(prev=>prev.map(s=>{
-      if(s.id!==id) return s;
-      if(subId&&s.subsections) return {...s,subsections:s.subsections.map(sub=>sub.id===subId?{...sub,content:val}:sub)};
-      return {...s,content:val};
-    }));
-  };
+
   const today = (()=>{ const d=new Date(); const mm=String(d.getMonth()+1).padStart(2,"0"); const dd=String(d.getDate()).padStart(2,"0"); const yyyy=d.getFullYear(); return `${mm}-${dd}-${yyyy}`; })();
   const loc0 = (form.locations||[])[0]||{};
   const clientAddr = [loc0.address,loc0.city,loc0.state,loc0.zip].filter(Boolean).join(", ");
@@ -690,7 +624,8 @@ export default function App() {
         const govtRef = stateProgs.length > 0 ? "the federal and state governments provide" : "the federal government provides";
         const nextOpp = allAcronyms.join(" and ");
         const guarNum = 4 + stateProgs.length;
-        return `${guarNum}. If CLIENT applies for the ${pg0.year||form.grantYear} ${progList}, ${govtRef} a Notice of Funding, and CLIENT is not awarded any grant funding under either program, no refunds will be issued for fees collected as part of this engagement, but NPSA will provide the services outlined in this engagement letter for the next available ${nextOpp} opportunity and waive the ${fmt(fees.upfront)} fee associated with COMPENSATION Section 1 above. In the event this occurs, and CLIENT is awarded grant funding under either program, the fees associated with COMPENSATION Section 1 above will apply and all other provisions of this agreement will apply to the subsequent ${progList} opportunity.`;
+        const eitherProgram = stateProgs.length > 0 ? " under either program" : "";
+        return `${guarNum}. If CLIENT applies for the ${pg0.year||form.grantYear} ${progList}, ${govtRef} a Notice of Funding, and CLIENT is not awarded any grant funding${eitherProgram}, no refunds will be issued for fees collected as part of this engagement, but NPSA will provide the services outlined in this engagement letter for the next available ${nextOpp} opportunity and waive the ${fmt(fees.upfront)} fee associated with COMPENSATION Section 1 above. In the event this occurs, and CLIENT is awarded grant funding${eitherProgram}, the fees associated with COMPENSATION Section 1 above will apply and all other provisions of this agreement will apply to the subsequent ${progList} opportunity.`;
       })())
       .replace(/\[COMP_BLOCK\]/g, compBlock);
   };
@@ -782,7 +717,8 @@ export default function App() {
         const govtRefInh = stateProgsInh.length > 0 ? "the federal and state governments provide" : "the federal government provides";
         const nextOppInh = allAcronymsInh.join(" and ");
         const guarNumInh = 4 + stateProgsInh.length;
-        return `${guarNumInh}. If CLIENT applies for the ${pg0inh.year||form.grantYear} ${progListInh}, ${govtRefInh} a Notice of Funding, and CLIENT is not awarded any grant funding under either program, no refunds will be issued for fees collected as part of this engagement, but NPSA will provide the services outlined in this engagement letter for the next available ${nextOppInh} opportunity and waive the ${fmt(inhFees.upfront)} fee associated with COMPENSATION Section 1 above. In the event this occurs, and CLIENT is awarded grant funding under either program, the fees associated with COMPENSATION Section 1 above will apply and all other provisions of this agreement will apply to the subsequent ${progListInh} opportunity.`;
+        const eitherProgramInh = stateProgsInh.length > 0 ? " under either program" : "";
+        return `${guarNumInh}. If CLIENT applies for the ${pg0inh.year||form.grantYear} ${progListInh}, ${govtRefInh} a Notice of Funding, and CLIENT is not awarded any grant funding${eitherProgramInh}, no refunds will be issued for fees collected as part of this engagement, but NPSA will provide the services outlined in this engagement letter for the next available ${nextOppInh} opportunity and waive the ${fmt(inhFees.upfront)} fee associated with COMPENSATION Section 1 above. In the event this occurs, and CLIENT is awarded grant funding${eitherProgramInh}, the fees associated with COMPENSATION Section 1 above will apply and all other provisions of this agreement will apply to the subsequent ${progListInh} opportunity.`;
       })())
       .replace(/\[COMP_BLOCK\]/g, compBlock);
   };
@@ -837,72 +773,7 @@ export default function App() {
       }).from(el).save();
     }
   };
-  // ── TEMPLATE EDITOR ────────────────────────────────────────────────────────
-  if(mode==="template"){
-    const TOKENS_PRE = ["[CLIENT_NAME]","[GRANT_YEAR]","[GRANT_YEAR_NSGP]","[MAX_AWARD]","[NUM_LOCATIONS]","[NUM_APPLICATIONS]","[UPFRONT_FEE]","[POST_AWARD_FEE]","[NOFO_CLAUSE]","[STATE_NOFO_CLAUSE]","[GUAR_ROLLOVER]","[COMP_BLOCK]","[LOCATION_LIST]"];
-    const TOKENS_POST = ["[CLIENT_NAME]","[GRANT_YEAR]","[POST_FEE]","[POST_PMT1]","[POST_PMT2]","[POST_PMT3]"];
-    const tokens = editingTab==="pre"||editingTab==="inh" ? TOKENS_PRE : TOKENS_POST;
-    return (
-      <div style={{display:"flex",height:"100vh",fontFamily:"Inter,sans-serif",background:"#f4f5f7"}}>
-        <div style={{width:260,background:"#1a2540",color:"#e8eaf0",overflowY:"auto",padding:"20px 16px",flexShrink:0}}>
-          <div style={{fontWeight:700,fontSize:13,color:"#fff",marginBottom:2}}>Template Editor</div>
-          <div style={{fontSize:11,color:"#8892aa",marginBottom:14}}>Editing: <span style={{color:editingTab==="post"?"#9aab2e":"#5b9ec9",fontWeight:700}}>{editingTab==="pre"?"Pre-Award":editingTab==="inh"?"Pre-Award (In-House)":"Award Implementation"}</span></div>
-          {editingSections.map(s=>(
-            <div key={s.id}>
-              <button onClick={()=>setActiveEdit({sectionId:s.id,subId:null})}
-                style={{width:"100%",textAlign:"left",background:activeEdit?.sectionId===s.id&&!activeEdit?.subId?"#2a3d60":"transparent",border:"none",color:activeEdit?.sectionId===s.id&&!activeEdit?.subId?"#fff":"#b0b8cc",padding:"8px 10px",borderRadius:6,fontSize:12,cursor:"pointer",marginBottom:2,fontWeight:600}}>
-                {s.roman?`${s.roman} `:""}{s.title}
-              </button>
-              {s.subsections?.map(sub=>(
-                <button key={sub.id} onClick={()=>setActiveEdit({sectionId:s.id,subId:sub.id})}
-                  style={{width:"100%",textAlign:"left",background:activeEdit?.sectionId===s.id&&activeEdit?.subId===sub.id?"#2a3d60":"transparent",border:"none",color:activeEdit?.sectionId===s.id&&activeEdit?.subId===sub.id?"#fff":"#8892aa",padding:"6px 10px 6px 22px",borderRadius:6,fontSize:11,cursor:"pointer",marginBottom:2}}>
-                  {sub.title}
-                </button>
-              ))}
-            </div>
-          ))}
-          <div style={{marginTop:20,borderTop:"1px solid #2a3550",paddingTop:14,fontSize:10,color:"#6c7a9c"}}>Use tokens like {tokens[0]} where client-specific values appear.</div>
-        </div>
-        <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-          <div style={{background:"#fff",borderBottom:"1px solid #dde0e6",padding:"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div><span style={{fontWeight:700,fontSize:14,color:"#1a2540"}}>Editing Template</span><span style={{fontSize:12,color:"#888",marginLeft:12}}>{editingTab==="pre"?"Pre-Award":editingTab==="inh"?"Pre-Award (In-House)":"Award Implementation"}</span></div>
-            <div style={{display:"flex",gap:10}}>
-              <button onClick={resetTemplate} style={{background:"none",border:"1px solid #e0e0e0",borderRadius:6,padding:"7px 14px",fontSize:12,color:"#888",cursor:"pointer"}}>Reset to Default</button>
-              <button onClick={()=>setMode("document")} style={{background:"none",border:"1px solid #e0e0e0",borderRadius:6,padding:"7px 14px",fontSize:12,color:"#555",cursor:"pointer"}}>Cancel</button>
-              <button onClick={saveTemplate} style={{background:"#1a4a6e",border:"none",borderRadius:6,padding:"7px 18px",fontSize:12,color:"#fff",fontWeight:700,cursor:"pointer"}}>Save Template</button>
-            </div>
-          </div>
-          <div style={{flex:1,overflowY:"auto",padding:"32px 40px"}}>
-            {!activeEdit?(
-              <div style={{textAlign:"center",color:"#aaa",marginTop:80,fontSize:14}}>Select a section from the sidebar to edit</div>
-            ):(() => {
-              const sec=editingSections.find(s=>s.id===activeEdit.sectionId);
-              const sub=activeEdit.subId?sec?.subsections?.find(s=>s.id===activeEdit.subId):null;
-              const content=sub?sub.content:sec?.content||"";
-              const title=sub?`${sec.roman} ${sec.title} — ${sub.title}`:`${sec.roman||""} ${sec.title}`.trim();
-              return (
-                <div style={{maxWidth:760,margin:"0 auto"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#1a4a6e",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>{title}</div>
-                  <textarea value={content} onChange={e=>updateContent(activeEdit.sectionId,activeEdit.subId,e.target.value)}
-                    style={{width:"100%",minHeight:420,fontFamily:"Georgia,serif",fontSize:13,lineHeight:1.75,padding:"16px 20px",border:"1.5px solid #c0cad8",borderRadius:8,resize:"vertical",outline:"none",color:"#1a1a1a",background:"#fff",boxSizing:"border-box"}}/>
-                  <div style={{marginTop:10,display:"flex",gap:8,flexWrap:"wrap"}}>
-                    {tokens.map(tok=>(
-                      <button key={tok} onClick={()=>{
-                        const ta=document.querySelector("textarea");
-                        const s=ta.selectionStart,e=ta.selectionEnd;
-                        updateContent(activeEdit.sectionId,activeEdit.subId,content.slice(0,s)+tok+content.slice(e));
-                      }} style={{background:"#eef2f8",border:"1px solid #c0cad8",borderRadius:4,padding:"3px 8px",fontSize:11,color:"#1a4a6e",cursor:"pointer",fontFamily:"monospace"}}>{tok}</button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      </div>
-    );
-  }
-  // ── DOCUMENT MODE ──────────────────────────────────────────────────────────
+    // ── DOCUMENT MODE ──────────────────────────────────────────────────────────
   const isPre = docTab==="pre";
   const isGw = docTab==="gw";
   const isInh = docTab==="inh";
@@ -994,10 +865,7 @@ export default function App() {
     <div style={{display:"flex",height:"100vh",fontFamily:"Inter,sans-serif",background:"#f4f5f7"}}>
       {/* ── SIDEBAR ── */}
       <div style={{width:320,background:"#1a2540",color:"#e8eaf0",overflowY:"auto",padding:"20px 16px",flexShrink:0}}>
-                <button onClick={()=>setConfirmModal(docTab)} style={{width:"100%",background:"#2a3d60",border:"1px solid #3a5080",borderRadius:6,padding:"7px 0",fontSize:11,color:"#9ab8d8",cursor:"pointer",marginBottom:14,fontWeight:600,display:isGw?"none":"block"}}>
-          Edit {isPre?"Pre-Award":isInh?"In-House Pre-Award":"Award Implementation"} Template
-        </button>
-        {savedBanner&&<div style={{background:"#1e3a2f",border:"1px solid #2d5c42",borderRadius:6,padding:"7px 12px",fontSize:11,color:"#7edca8",marginBottom:12}}>Saved</div>}
+        
         {SHARED_FIELDS.map((f2,i)=>{
           if(f2.section) return <div key={i} style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>{f2.section}</div>;
           return (
@@ -2236,26 +2104,7 @@ ${form.npsa1Name||"NPSA"}`
           </div>
         </div>
       )}
-      {/* ── CONFIRM MODAL ── */}
-      {confirmModal&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
-          <div style={{background:"#fff",borderRadius:10,padding:"32px 36px",maxWidth:380,width:"90%",boxShadow:"0 8px 40px rgba(0,0,0,0.22)",textAlign:"center"}}>
-            
-            <div style={{fontWeight:700,fontSize:16,color:"#1a2540",marginBottom:8}}>Edit {confirmModal==="pre"?"Pre-Award":confirmModal==="inh"?"In-House Pre-Award":"Award Implementation"} Template?</div>
-            <div style={{fontSize:13,color:"#555",lineHeight:1.6,marginBottom:24}}>Are you sure you want to edit this template? Changes will affect all future documents generated from it.</div>
-            <div style={{display:"flex",gap:12,justifyContent:"center"}}>
-              <button onClick={()=>setConfirmModal(null)}
-                style={{padding:"9px 24px",borderRadius:7,border:"1px solid #d0d5dd",background:"#fff",fontSize:13,fontWeight:600,color:"#444",cursor:"pointer"}}>
-                Never Mind
-              </button>
-              <button onClick={()=>{ enterTemplate(confirmModal); setConfirmModal(null); }}
-                style={{padding:"9px 24px",borderRadius:7,border:"none",background:"#1a4a6e",fontSize:13,fontWeight:700,color:"#fff",cursor:"pointer"}}>
-                Yes, Edit Template
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
       {/* ── EMAIL MODAL ── */}
       {emailModal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
