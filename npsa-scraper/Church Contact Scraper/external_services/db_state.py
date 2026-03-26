@@ -153,6 +153,49 @@ def init_tables():
             CREATE INDEX IF NOT EXISTS idx_qj_pending
                 ON queue_jobs (scraper_type, id)
                 WHERE status = 'queued';
+
+            CREATE TABLE IF NOT EXISTS county_dispatch (
+                run_id TEXT PRIMARY KEY,
+                scraper_type TEXT NOT NULL DEFAULT 'church',
+                state TEXT NOT NULL,
+                total_counties INTEGER NOT NULL,
+                cancelled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                meta_json TEXT,
+                aggregation_owner TEXT,
+                aggregation_started_at TEXT,
+                aggregation_done INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS county_tasks (
+                id SERIAL PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                scraper_type TEXT NOT NULL DEFAULT 'church',
+                state TEXT NOT NULL,
+                county TEXT NOT NULL,
+                county_index INTEGER NOT NULL,
+                total_counties INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                claimed_by TEXT,
+                claimed_at TEXT,
+                completed_at TEXT,
+                result_json TEXT,
+                error TEXT,
+                UNIQUE (run_id, county)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_county_tasks_claim
+                ON county_tasks (scraper_type, status, run_id, county_index)
+                WHERE status = 'pending';
+
+            CREATE TABLE IF NOT EXISTS county_results (
+                id SERIAL PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                county TEXT NOT NULL,
+                csv_rows TEXT,
+                row_count INTEGER DEFAULT 0,
+                created_at TEXT
+            );
         """)
         conn.commit()
         print("[DB] Postgres tables initialized")

@@ -184,15 +184,18 @@ def _distributed_county_worker_loop():
                 db_state.fail_county_task(task_id, "Run cancelled")
                 continue
 
-            # Process using the existing multiprocessing worker (isolates Chrome)
+            # Process in an isolated subprocess via Pool(1, maxtasksperchild=1)
+            # This ensures Chrome processes die when the worker dies
             args = (county_index, county, state, run_id, total_counties)
-            start_time = time.time()
 
             try:
-                idx, county_name, result, processing_time = process_county_worker_multiprocessing(args)
+                with Pool(processes=1, maxtasksperchild=1) as pool:
+                    results_iter = pool.map(process_county_worker_multiprocessing, [args])
+                    idx, county_name, result, processing_time = results_iter[0]
             except Exception as e:
                 print(f"[WORKER] {county} County crashed: {e}")
                 db_state.fail_county_task(task_id, str(e))
+                gc.collect()
                 continue
 
             if not result.get("success", False):
@@ -320,10 +323,6 @@ def _distributed_aggregate(run_id: str, state: str):
                         email=email_val,
                         phone=sval(row.get('phone', '') or row.get('Phone', '')),
                         church_name=sval(row.get('church_name', '') or row.get('Church Name', '')),
-                        denomination=sval(row.get('denomination', '') or row.get('Denomination', '')),
-                        county=sval(row.get('county', '') or row.get('County', '')),
-                        state=sval(row.get('state', '') or row.get('State', '')),
-                        website=sval(row.get('website', '') or row.get('Website', '')),
                         source_url=sval(row.get('source_url', '') or row.get('Source URL', '')),
                     )
                     all_contacts.append(contact)
@@ -367,21 +366,7 @@ def _distributed_aggregate(run_id: str, state: str):
 
     # Write CSV
     if unique_contacts:
-        df_data = []
-        for c in unique_contacts:
-            df_data.append({
-                'First Name': c.first_name,
-                'Last Name': c.last_name,
-                'Title': c.title,
-                'Email': c.email or '',
-                'Phone': c.phone,
-                'Church Name': c.church_name,
-                'Denomination': c.denomination,
-                'County': c.county,
-                'State': c.state,
-                'Website': c.website,
-                'Source URL': c.source_url,
-            })
+        df_data = [c.to_dict() for c in unique_contacts]
         df = pd.DataFrame(df_data)
         df.to_csv(final_csv_path, index=False)
         print(f"[AGG] Wrote {len(df)} contacts to {csv_filename}")
