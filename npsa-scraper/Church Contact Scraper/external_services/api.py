@@ -47,7 +47,7 @@ from assets.shared.models import Contact
 # Import authentication module
 from external_services.auth import require_auth, verify_password, generate_token
 from external_services.notify import send_run_complete_email, send_test_notification_email
-from external_services import queue_store
+from external_services import db_state
 
 SCRAPER_TYPE = "church"
 
@@ -107,86 +107,36 @@ CORS(app,
      automatic_options=True  # Automatically handle OPTIONS requests
 )
 
-# In-memory storage for pipeline runs (use Redis or database in production)
-pipeline_runs = {}
-
-# Track running threads and cancellation flags
+# Track running threads and cancellation flags (local to this replica only)
 # Format: {run_id: {'thread': Thread, 'cancelled': bool}}
 running_threads = {}
 
 
 def _unique_running_states_after_stale_cleanup() -> set:
-    """Expire stale 'running' / old 'finalizing' entries; return set of state slugs still running."""
-    current_time = time.time()
-    for rid, run_data in list(pipeline_runs.items()):
-        run_state = run_data.get("state", "").lower()
-        status = run_data.get("status")
-        if status == "running":
-            if rid in running_threads:
-                thread = running_threads[rid].get("thread")
-                if not thread or not thread.is_alive():
-                    pipeline_runs[rid]["status"] = "cancelled"
-            else:
-                pipeline_runs[rid]["status"] = "cancelled"
-        elif status == "finalizing":
-            finalizing_at = run_data.get("finalizingAt", 0)
-            if current_time - finalizing_at >= 120:
-                pipeline_runs[rid]["status"] = "completed"
-                if "completedAt" not in pipeline_runs[rid]:
-                    pipeline_runs[rid]["completedAt"] = current_time
-    unique: set = set()
-    for rid, run_data in pipeline_runs.items():
-        if run_data.get("status") != "running":
-            continue
-        if rid not in running_threads:
-            continue
-        thread = running_threads[rid].get("thread")
-        if not thread or not thread.is_alive():
-            continue
-        st = (run_data.get("state") or "").lower()
-        if st:
-            unique.add(st)
-    return unique
+    """Expire stale runs in Postgres; return set of state slugs still running."""
+    return db_state.cleanup_stale_runs(SCRAPER_TYPE)
 
 
 def _same_state_running(state: str) -> bool:
-    state = state.lower()
-    for rid, run_data in pipeline_runs.items():
-        if (run_data.get("state") or "").lower() != state:
-            continue
-        if run_data.get("status") != "running":
-            continue
-        if rid not in running_threads:
-            continue
-        t = running_threads[rid].get("thread")
-        if t and t.is_alive():
-            return True
-    return False
+    return db_state.is_state_running(state, SCRAPER_TYPE)
 
 
 def _state_finalizing(state: str) -> bool:
-    state = state.lower()
-    now = time.time()
-    for run_data in pipeline_runs.values():
-        if run_data.get("status") != "finalizing":
-            continue
-        if (run_data.get("state") or "").lower() != state:
-            continue
-        if now - float(run_data.get("finalizingAt") or 0) < 120:
-            return True
-    return False
+    return db_state.is_state_finalizing(state, SCRAPER_TYPE)
 
 
 def _church_queue_worker_loop():
+    """Queue worker loop. Uses Postgres advisory lock so only one replica processes the queue."""
     while True:
         time.sleep(2.5)
-        if not queue_store.is_enabled():
-            continue
         try:
+            # Try to become the queue leader (non-blocking)
+            if not db_state.try_acquire_queue_leader():
+                continue
             active = _unique_running_states_after_stale_cleanup()
             if len(active) >= 2:
                 continue
-            nxt = queue_store.peek_next_queued(SCRAPER_TYPE)
+            nxt = db_state.queue_peek_next(SCRAPER_TYPE)
             if not nxt:
                 continue
             job_id, st = nxt
@@ -197,7 +147,7 @@ def _church_queue_worker_loop():
             if len(active) >= 2:
                 continue
             run_id = str(uuid.uuid4())
-            if not queue_store.mark_job_running(job_id, run_id, SCRAPER_TYPE):
+            if not db_state.queue_mark_running(job_id, run_id, SCRAPER_TYPE):
                 continue
             run_streaming_pipeline(st, run_id, False, job_id)
         except Exception as e:
@@ -752,82 +702,65 @@ def log_resource_usage():
 
 
 def save_checkpoint(run_id: str, state: str, completed_counties: list, next_county_index: int, total_counties: int):
-    """Save checkpoint to persistent storage"""
-    # Security: Validate run_id to prevent path traversal
+    """Save checkpoint to Postgres"""
     if not validate_run_id(run_id):
         raise ValueError(f"Invalid run_id format: {run_id}")
-    checkpoint_path = CHECKPOINTS_DIR / f"{run_id}.json"
-    checkpoint_data = {
-        "run_id": run_id,
-        "state": state,
-        "completed_counties": completed_counties,
-        "next_county_index": next_county_index,
-        "total_counties": total_counties,
-        "timestamp": time.time(),
-        "updated_at": datetime.now().isoformat()
-    }
-    try:
-        with open(checkpoint_path, 'w') as f:
-            json.dump(checkpoint_data, f, indent=2)
-        print(f"[{run_id}] Checkpoint saved: {len(completed_counties)}/{total_counties} counties completed")
-        return True
-    except Exception as e:
-        print(f"[{run_id}] Error saving checkpoint: {e}")
-        return False
+    return db_state.save_checkpoint(run_id, state, completed_counties, next_county_index, total_counties)
 
 
 def load_checkpoint(run_id: str) -> dict:
-    """Load checkpoint from persistent storage"""
-    # Security: Validate run_id to prevent path traversal
+    """Load checkpoint from Postgres"""
     if not validate_run_id(run_id):
         return None
-    checkpoint_path = CHECKPOINTS_DIR / f"{run_id}.json"
-    if not checkpoint_path.exists():
-        return None
-    try:
-        with open(checkpoint_path, 'r') as f:
-            checkpoint_data = json.load(f)
-        print(f"[{run_id}] Checkpoint loaded: {len(checkpoint_data.get('completed_counties', []))}/{checkpoint_data.get('total_counties', 0)} counties completed")
-        return checkpoint_data
-    except Exception as e:
-        print(f"[{run_id}] Error loading checkpoint: {e}")
-        return None
+    return db_state.load_checkpoint(run_id)
 
 
 def save_run_metadata(run_id: str, metadata: dict):
-    """Save run metadata to persistent storage"""
-    # Security: Validate run_id to prevent path traversal
+    """Save run metadata to Postgres (update fields on pipeline_runs row)"""
     if not validate_run_id(run_id):
         raise ValueError(f"Invalid run_id format: {run_id}")
-    metadata_path = METADATA_DIR / f"{run_id}.json"
-    try:
-        # Add timestamp if not present
-        if "created_at" not in metadata:
-            metadata["created_at"] = datetime.now().isoformat()
-        metadata["updated_at"] = datetime.now().isoformat()
-        
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        return True
-    except Exception as e:
-        print(f"[{run_id}] Error saving metadata: {e}")
-        return False
+    # Map metadata keys to DB column names
+    field_map = {
+        "status": "status", "state": "state", "display_name": "display_name",
+        "total_counties": "total_counties", "start_time": "start_time",
+        "final_csv_path": "final_csv_path", "csv_filename": "csv_filename",
+        "total_contacts": "total_contacts",
+        "total_contacts_with_emails": "total_contacts_with_emails",
+        "total_contacts_without_emails": "total_contacts_without_emails",
+        "archived": "archived", "deleted": "deleted", "deleted_at": "deleted_at",
+        "cancelled_at": "cancelled_at", "completed_at": "completed_at",
+        "progress": "progress", "scraper_type": "scraper_type",
+        "churchesFound": "churches_found", "churchesProcessed": "churches_processed",
+        "countyChurches": "county_churches",
+    }
+    db_fields = {}
+    for k, v in metadata.items():
+        if k in field_map:
+            db_fields[field_map[k]] = v
+    if db_fields:
+        # Check if run exists; if not, create it
+        existing = db_state.get_run_including_deleted(run_id)
+        if existing:
+            db_state.update_run(run_id, **db_fields)
+        else:
+            db_state.create_run(
+                run_id,
+                metadata.get("state", "unknown"),
+                metadata.get("scraper_type", "church"),
+                metadata.get("display_name", ""),
+            )
+            db_state.update_run(run_id, **db_fields)
+    return True
 
 
 def load_run_metadata(run_id: str) -> dict:
-    """Load run metadata from persistent storage"""
-    # Security: Validate run_id to prevent path traversal
+    """Load run metadata from Postgres"""
     if not validate_run_id(run_id):
         return None
-    metadata_path = METADATA_DIR / f"{run_id}.json"
-    if not metadata_path.exists():
+    row = db_state.get_run_including_deleted(run_id)
+    if not row:
         return None
-    try:
-        with open(metadata_path, 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"[{run_id}] Error loading metadata: {e}")
-        return None
+    return db_state.row_to_list_format(row)
 
 
 def _run_display_name(state: str, scraper_type: str) -> str:
@@ -870,40 +803,21 @@ def _parse_run_from_csv_filename(name: str) -> dict | None:
     }
 
 
-def list_all_runs() -> list:
-    """List all runs from persistent storage, excluding deleted runs"""
-    seen_ids = set()
-    runs = []
+def list_all_runs(include_archived: bool = False) -> list:
+    """List all runs from Postgres, excluding deleted runs"""
     try:
-        # Get all metadata files
-        for metadata_file in METADATA_DIR.glob("*.json"):
-            try:
-                with open(metadata_file, 'r') as f:
-                    metadata = json.load(f)
-                    # Skip deleted runs (filter them out from view)
-                    if metadata.get("deleted", False):
-                        continue
-                    
-                    metadata["run_id"] = metadata_file.stem  # Add run_id from filename
-                    seen_ids.add(metadata["run_id"])
-                    # Ensure archived field exists (default to False for backwards compatibility)
-                    if "archived" not in metadata:
-                        metadata["archived"] = False
-                    _backfill_run_list_fields(metadata, "church")
-                    runs.append(metadata)
-            except Exception as e:
-                print(f"Error reading metadata file {metadata_file}: {e}")
-                continue
+        rows = db_state.list_runs(SCRAPER_TYPE, include_archived)
+        runs = [db_state.row_to_list_format(r) for r in rows]
 
-        # Fallback: include runs from volume CSVs when metadata is missing (e.g. after container restart)
+        # Fallback: include runs from volume CSVs when Postgres entry is missing
+        seen_ids = {r["run_id"] for r in runs}
         for f in VOLUME_DIR.glob("*_leads_*.csv"):
             parsed = _parse_run_from_csv_filename(f.name)
             if parsed and parsed["run_id"] not in seen_ids:
                 _backfill_run_list_fields(parsed, "church")
                 seen_ids.add(parsed["run_id"])
                 runs.append(parsed)
-        
-        # Sort by created_at (newest first)
+
         runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return runs
     except Exception as e:
@@ -1083,10 +997,12 @@ def process_single_county(state: str, county: str, run_id: str, county_index: in
     result_file = str(run_dir / f"{county.replace(' ', '_')}_result.json")
     
     # Update progress
-    pipeline_runs[run_id]["statusMessage"] = f"Processing {county} County ({county_index + 1}/{total_counties})..."
-    pipeline_runs[run_id]["currentCounty"] = county
-    pipeline_runs[run_id]["currentCountyIndex"] = county_index + 1
-    pipeline_runs[run_id]["currentStep"] = 1
+    db_state.update_run(run_id,
+        status_message=f"Processing {county} County ({county_index + 1}/{total_counties})...",
+        current_county=county,
+        current_county_index=county_index + 1,
+        current_step=1,
+    )
     
     # Start subprocess to run county
     # Use multiprocessing.Process to isolate the county processing
@@ -1183,7 +1099,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         counties = load_counties_from_state(state)
         run_dir = RUNS_DIR / run_id
         
-        pipeline_runs[run_id]["statusMessage"] = "Waiting for all counties to complete..."
+        db_state.update_run(run_id, status_message="Waiting for all counties to complete...")
         
         # Wait for all counties to complete (check that all CSV files exist)
         # With multiprocessing pool, counties should complete more reliably, but add timeout as safety
@@ -1224,7 +1140,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             # Skip wait - proceed immediately with available data
             print(f"[{run_id}] Skipping wait - proceeding with available county data...")
         
-        pipeline_runs[run_id]["statusMessage"] = "Aggregating results from all counties..."
+        db_state.update_run(run_id, status_message="Aggregating results from all counties...")
         
         # Read and combine all county CSVs into Contact objects
         all_contacts = []
@@ -1265,44 +1181,38 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         
         if not all_contacts:
             print(f"[{run_id}] No contacts found in any county")
-            # Set to finalizing for 2-minute cooldown
-            pipeline_runs[run_id]["status"] = "finalizing"
-            pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found. Finalizing..."
-            pipeline_runs[run_id]["finalizingAt"] = time.time()
-            
-            # Create restart marker for start.sh to detect restart
-            try:
-                with open("/tmp/run_completed_marker", "w") as f:
-                    f.write(str(time.time()))
-            except:
-                pass  # Ignore if can't write marker
-            
-            # Start background thread to transition to completed after 2 minutes
+            now = time.time()
+            db_state.update_run(run_id,
+                status="finalizing",
+                status_message="Pipeline completed but no contacts found. Finalizing...",
+                finalizing_at=now,
+                total_contacts=0,
+                completed_at=now,
+            )
+
             def finalize_completion():
-                time.sleep(120)  # 2-minute cooldown
-                if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "finalizing":
-                    pipeline_runs[run_id]["status"] = "completed"
-                    pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found."
-                    pipeline_runs[run_id]["completedAt"] = time.time()
-                    # Final data saved - clean up ephemeral run data
+                time.sleep(120)
+                row = db_state.get_run(run_id)
+                if row and row.get("status") == "finalizing":
+                    db_state.update_run(run_id,
+                        status="completed",
+                        status_message="Pipeline completed but no contacts found.",
+                        completed_at=time.time(),
+                    )
                     cleanup_ephemeral_run(run_id)
-                    if not pipeline_runs[run_id].get("notify_sent"):
-                        duration = time.time() - pipeline_runs[run_id].get("startTime", time.time())
-                        send_run_complete_email(
-                            run_id, state, len(counties), len(counties), 0, 0, duration
-                        )
-                        pipeline_runs[run_id]["notify_sent"] = True
-            
+                    if not row.get("notify_sent"):
+                        duration = time.time() - (row.get("start_time") or time.time())
+                        send_run_complete_email(run_id, state, len(counties), len(counties), 0, 0, duration)
+                        db_state.update_run(run_id, notify_sent=True)
+
             finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
             finalize_thread.start()
-            pipeline_runs[run_id]["totalContacts"] = 0
-            pipeline_runs[run_id]["completedAt"] = time.time()
             return
         
         print(f"[{run_id}] Total contacts collected: {len(all_contacts)}")
         
         # STEP 11: Split contacts into with/without emails
-        pipeline_runs[run_id]["statusMessage"] = "Step 11: Splitting contacts..."
+        db_state.update_run(run_id, status_message="Step 11: Splitting contacts...")
         splitter = step11_contact_splitter.ContactSplitter()
         contacts_with_emails, contacts_without_emails = splitter.split_contacts(all_contacts)
         
@@ -1320,7 +1230,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         hunter_io_enabled = os.getenv('HUNTER_IO_API_KEY') is not None
         
         if hunter_io_enabled and contacts_without_emails_deduped:
-            pipeline_runs[run_id]["statusMessage"] = f"Step 12: Enriching {len(contacts_without_emails_deduped)} contacts with Hunter.io..."
+            db_state.update_run(run_id, status_message=f"Step 12: Enriching {len(contacts_without_emails_deduped)} contacts with Hunter.io...")
             try:
                 enricher = step12_hunter_io.HunterIOEnricher(
                     api_key=os.getenv('HUNTER_IO_API_KEY'),
@@ -1344,7 +1254,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             print(f"[{run_id}] Step 12 skipped: No contacts without emails to enrich")
         
         # STEP 13: Compile final CSV (already deduplicated)
-        pipeline_runs[run_id]["statusMessage"] = "Step 13: Compiling final CSV..."
+        db_state.update_run(run_id, status_message="Step 13: Compiling final CSV...")
         final_output_csv = str(run_dir / f"{state.title()}_leads_final.csv")
         
         final_csv_path = compiler.compile_contacts_to_csv(
@@ -1364,8 +1274,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 csv_content = f.read()
             
             csv_filename = f"{state.title()}_leads_{run_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            pipeline_runs[run_id]["csvData"] = csv_content
-            pipeline_runs[run_id]["csvFilename"] = csv_filename
+            db_state.update_run(run_id, csv_filename=csv_filename)
         
             # Copy final CSV to volume (only thing persisted)
             volume_csv_path = VOLUME_DIR / csv_filename
@@ -1388,86 +1297,67 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 contacts_with_emails_final = pd.DataFrame()
                 contacts_without_emails_final = final_df
             
-            pipeline_runs[run_id]["totalContacts"] = len(final_df)
-            pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails_final)
-            pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails_final)
-            
-            # Save metadata (ephemeral) - final_csv_path on volume for reference
-            metadata = load_run_metadata(run_id) or {}
-            metadata.update({
-                "final_csv_path": str(volume_csv_path) if volume_saved else final_csv_path,
-                "csv_filename": csv_filename,
-                "total_contacts": len(final_df),
-                "total_contacts_with_emails": len(contacts_with_emails_final),
-                "total_contacts_without_emails": len(contacts_without_emails_final),
-                "status": "finalizing"  # Will be updated to "completed" after 2-minute cooldown
-            })
-            if not metadata.get("display_name"):
-                metadata["display_name"] = _run_display_name(state, "church")
-            save_run_metadata(run_id, metadata)
+            db_state.update_run(run_id,
+                total_contacts=len(final_df),
+                total_contacts_with_emails=len(contacts_with_emails_final),
+                total_contacts_without_emails=len(contacts_without_emails_final),
+                final_csv_path=str(volume_csv_path) if volume_saved else final_csv_path,
+                csv_filename=csv_filename,
+                status="finalizing",
+            )
         else:
             print(f"[{run_id}] ERROR: Final CSV not created at {final_csv_path}")
-            pipeline_runs[run_id]["totalContacts"] = len(deduplicated)
-            pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails_deduped) + len(contacts_enriched)
-            pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails_deduped) - len(contacts_enriched)
+            db_state.update_run(run_id,
+                total_contacts=len(deduplicated),
+                total_contacts_with_emails=len(contacts_with_emails_deduped) + len(contacts_enriched),
+                total_contacts_without_emails=len(contacts_without_emails_deduped) - len(contacts_enriched),
+            )
         
         # Update final stats - set to finalizing for 2-minute cooldown
-        pipeline_runs[run_id]["status"] = "finalizing"
-        pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts. Finalizing..."
-        pipeline_runs[run_id]["currentStep"] = 13
-        pipeline_runs[run_id]["progress"] = 100
-        pipeline_runs[run_id]["countiesProcessed"] = len(counties)
-        pipeline_runs[run_id]["finalizingAt"] = time.time()  # Track when finalizing started
-        
-        # Create restart marker for start.sh to detect restart
-        try:
-            with open("/tmp/run_completed_marker", "w") as f:
-                f.write(str(time.time()))
-        except:
-            pass  # Ignore if can't write marker
-        
-        # Start background thread to transition to completed after 2 minutes
-        def finalize_completion():
-            time.sleep(120)  # 2-minute cooldown
-            if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "finalizing":
-                pipeline_runs[run_id]["status"] = "completed"
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts."
-                pipeline_runs[run_id]["completedAt"] = time.time()
-                
-                # Update metadata to mark as completed (so it appears in Finished tab)
-                metadata = load_run_metadata(run_id) or {}
-                metadata.update({
-                    "status": "completed",
-                    "completed_at": datetime.now().isoformat(),
-                    "completion_time": time.time()
-                })
-                if not metadata.get("display_name"):
-                    metadata["display_name"] = _run_display_name(state, "church")
-                save_run_metadata(run_id, metadata)
-                if not pipeline_runs[run_id].get("notify_sent"):
-                    duration = time.time() - pipeline_runs[run_id].get("startTime", time.time())
-                    send_run_complete_email(
-                        run_id,
-                        state,
-                        len(counties),
-                        len(counties),
-                        pipeline_runs[run_id].get("totalContacts", 0),
-                        pipeline_runs[run_id].get("totalContactsWithEmails", 0),
-                        duration,
-                    )
-                    pipeline_runs[run_id]["notify_sent"] = True
-        
+        now = time.time()
+        db_state.update_run(run_id,
+            status="finalizing",
+            status_message=f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts. Finalizing...",
+            current_step=13,
+            progress=100,
+            counties_processed=len(counties),
+            finalizing_at=now,
+        )
+
         # Clean up ephemeral run data only after final CSV successfully saved to volume
         if final_data_saved_to_volume:
             cleanup_ephemeral_run(run_id)
-        
+
+        # Background thread to transition to completed after 2 minutes
+        def finalize_completion():
+            time.sleep(120)
+            row = db_state.get_run(run_id)
+            if row and row.get("status") == "finalizing":
+                completed_now = time.time()
+                db_state.update_run(run_id,
+                    status="completed",
+                    status_message=f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts.",
+                    completed_at=completed_now,
+                )
+                if not row.get("notify_sent"):
+                    duration = completed_now - (row.get("start_time") or completed_now)
+                    send_run_complete_email(
+                        run_id, state, len(counties), len(counties),
+                        row.get("total_contacts", 0),
+                        row.get("total_contacts_with_emails", 0),
+                        duration,
+                    )
+                    db_state.update_run(run_id, notify_sent=True)
+
         finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
         finalize_thread.start()
         
     except Exception as e:
-        pipeline_runs[run_id]["status"] = "error"
-        pipeline_runs[run_id]["error"] = str(e)
-        pipeline_runs[run_id]["statusMessage"] = f"Failed to aggregate results: {str(e)}"
+        db_state.update_run(run_id,
+            status="error",
+            error=str(e),
+            status_message=f"Failed to aggregate results: {str(e)}"
+        )
         import traceback
         traceback.print_exc()
 
@@ -1497,35 +1387,12 @@ def run_streaming_pipeline(
     This unified approach prevents Chrome process accumulation by ensuring workers
     die after each task, eliminating zombie processes in both sequential and parallel modes.
     """
-    # Initialize progress tracking FIRST, before any operations that might fail
-    pipeline_runs[run_id] = {
-        "status": "running",
-        "state": state.lower(),  # Store state for concurrent run checking
-        "progress": 0,
-        "currentStep": 1,
-        "totalSteps": 7,
-        "statusMessage": f"Starting pipeline for {state}...",
-        "steps": [],
-        "totalContacts": 0,
-        "totalContactsNoEmails": 0,
-        "churchesFound": 0,
-        "churchesProcessed": 0,
-        "csvData": None,
-        "csvFilename": None,
-        "csvNoEmailsData": None,
-        "csvNoEmailsFilename": None,
-        "error": None,
-        "countiesProcessed": 0,
-        "totalCounties": 0,
-        "currentCounty": None,
-        "currentCountyIndex": 0,
-        "countyTimes": [],  # Track processing times for each county
-        "countyContacts": [],  # Track contacts per county for graphs
-        "countyChurches": [],  # Track churches per county for graphs
-        "startTime": time.time(),  # Track overall start time
-        "initialEstimatedTimeRemaining": None,  # Static estimate calculated once at start (in seconds)
-        "queue_job_id": queue_job_id,  # SQLite queue_jobs.id if started from queue
-    }
+    # Initialize progress tracking in Postgres
+    db_state.create_run(
+        run_id, state, SCRAPER_TYPE,
+        display_name=_run_display_name(state, SCRAPER_TYPE),
+        queue_job_id=queue_job_id
+    )
     
     def process_all_counties():
         """
@@ -1577,39 +1444,23 @@ def run_streaming_pipeline(
                     if completed_counties:
                         print(f"[{run_id}] Resuming: {len(completed_counties)}/{total_counties} counties completed, starting from index {start_index}")
             
-            # Save initial metadata for new run or resume
-            initial_metadata = {
-                "run_id": run_id,
-                "state": state,
-                "status": "running",
-                "total_counties": total_counties,
-                "completed_counties": completed_counties,
-                "start_time": time.time(),
-                "created_at": datetime.now().isoformat(),
-                "scraper_type": "church",
-                "display_name": _run_display_name(state, "church"),
-            }
-            save_run_metadata(run_id, initial_metadata)
-            
             if resume_from_checkpoint and completed_counties:
                 print(f"[{run_id}] Resuming run: {len(completed_counties)}/{total_counties} counties already completed")
             else:
                 print(f"[{run_id}] New run started: {total_counties} counties to process")
-            
+
             # Update progress tracking with county info
-            pipeline_runs[run_id]["totalCounties"] = total_counties
-            pipeline_runs[run_id]["statusMessage"] = f"Processing {state} ({len(completed_counties)}/{total_counties} counties completed)..."
-            pipeline_runs[run_id]["currentCounty"] = "Starting..." if not completed_counties else f"Resuming from {len(completed_counties)}/{total_counties}"
-            pipeline_runs[run_id]["countiesProcessed"] = len(completed_counties)
-            
-            # Calculate static initial estimated time remaining (only if not already set)
-            if pipeline_runs[run_id].get("initialEstimatedTimeRemaining") is None:
-                remaining_counties = total_counties - len(completed_counties)
-                avg_time_per_county = CHURCH_AVG_SECONDS_PER_COUNTY_SLOT
-                # Account for parallel processing (MAX_WORKERS)
-                effective_remaining = max(1, remaining_counties / MAX_WORKERS)
-                initial_estimate = effective_remaining * avg_time_per_county
-                pipeline_runs[run_id]["initialEstimatedTimeRemaining"] = int(initial_estimate)
+            remaining_counties = total_counties - len(completed_counties)
+            effective_remaining = max(1, remaining_counties / MAX_WORKERS)
+            initial_estimate = int(effective_remaining * CHURCH_AVG_SECONDS_PER_COUNTY_SLOT)
+
+            db_state.update_run(run_id,
+                total_counties=total_counties,
+                status_message=f"Processing {state} ({len(completed_counties)}/{total_counties} counties completed)...",
+                current_county="Starting..." if not completed_counties else f"Resuming from {len(completed_counties)}/{total_counties}",
+                counties_processed=len(completed_counties),
+                initial_estimated_time_remaining=initial_estimate,
+            )
             
             # Determine processing mode message
             remaining_count = total_counties - len(completed_counties)
@@ -1623,10 +1474,11 @@ def run_streaming_pipeline(
             
             if not remaining_counties:
                 print(f"[{run_id}] All counties already completed!")
-                # Update progress to show all complete
-                pipeline_runs[run_id]["progress"] = 100
-                pipeline_runs[run_id]["countiesProcessed"] = total_counties
-                pipeline_runs[run_id]["statusMessage"] = f"All {total_counties} counties already completed"
+                db_state.update_run(run_id,
+                    progress=100,
+                    counties_processed=total_counties,
+                    status_message=f"All {total_counties} counties already completed"
+                )
                 # Continue to aggregation - skip the pool processing
             else:
                 # UNIFIED PROCESSING: Use Pool for both sequential (MAX_WORKERS=1) and parallel (MAX_WORKERS>1)
@@ -1645,8 +1497,10 @@ def run_streaming_pipeline(
                             if running_threads.get(run_id, {}).get('cancelled', False):
                                 pool.terminate()  # Force kill all workers
                                 pool.join()
-                                pipeline_runs[run_id]["status"] = "cancelled"
-                                pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+                                db_state.update_run(run_id,
+                                    status="cancelled",
+                                    status_message="Pipeline cancelled by user"
+                                )
                                 print(f"[{run_id}] Pipeline cancelled during processing")
                                 return
                             
@@ -1669,33 +1523,26 @@ def run_streaming_pipeline(
                             completed = len(completed_counties)
                             progress_pct = int((completed / total_counties) * 100)
                             
-                            # Update pipeline_runs state
-                            with progress_lock:
-                                pipeline_runs[run_id]["progress"] = progress_pct
-                                pipeline_runs[run_id]["statusMessage"] = f"Processing {completed}/{total_counties} counties..."
-                                pipeline_runs[run_id]["countiesProcessed"] = completed
-                                # Set currentCounty to show progress (since we're processing in parallel, show the count)
-                                # This replaces "Initializing..." with actual progress
-                                if completed < total_counties:
-                                    pipeline_runs[run_id]["currentCounty"] = f"Processing {completed}/{total_counties} counties"
-                                else:
-                                    pipeline_runs[run_id]["currentCounty"] = f"All {total_counties} counties completed"
-                                pipeline_runs[run_id]["churchesFound"] = pipeline_runs[run_id].get("churchesFound", 0) + result.get('churches', 0)
-                                pipeline_runs[run_id]["churchesProcessed"] = pipeline_runs[run_id].get("churchesProcessed", 0) + result.get('churches', 0)
-                                
-                                # Track county timing for average calculation
-                                if "countyTimes" not in pipeline_runs[run_id]:
-                                    pipeline_runs[run_id]["countyTimes"] = []
-                                pipeline_runs[run_id]["countyTimes"].append(processing_time)
-                                
-                                # Track per-county contacts and schools for graphs
-                                if "countyContacts" not in pipeline_runs[run_id]:
-                                    pipeline_runs[run_id]["countyContacts"] = []
-                                if "countyChurches" not in pipeline_runs[run_id]:
-                                    pipeline_runs[run_id]["countyChurches"] = []
-                                
-                                pipeline_runs[run_id]["countyContacts"].append(result.get('contacts', 0))
-                                pipeline_runs[run_id]["countyChurches"].append(result.get('churches', 0))
+                            # Update progress in Postgres
+                            current_county_label = (
+                                f"Processing {completed}/{total_counties} counties"
+                                if completed < total_counties
+                                else f"All {total_counties} counties completed"
+                            )
+                            db_state.update_run(run_id,
+                                progress=progress_pct,
+                                status_message=f"Processing {completed}/{total_counties} counties...",
+                                counties_processed=completed,
+                                current_county=current_county_label,
+                            )
+                            db_state.increment_run(run_id,
+                                churches_found=result.get('churches', 0),
+                                churches_processed=result.get('churches', 0),
+                            )
+                            db_state.update_run_json_append(run_id, "county_times", processing_time)
+                            db_state.update_run_json_append(run_id, "county_contacts", result.get('contacts', 0))
+                            db_state.update_run_json_append(run_id, "county_churches", result.get('churches', 0))
+                            db_state.heartbeat(run_id)
                             
                             print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
                             print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
@@ -1715,19 +1562,6 @@ def run_streaming_pipeline(
                                         break
                                 
                                 save_checkpoint(run_id, state, completed_counties, next_index, total_counties)
-                                
-                                # Update metadata
-                                metadata = load_run_metadata(run_id) or {}
-                                metadata.update({
-                                    "status": "running",
-                                    "completed_counties": completed_counties,
-                                    "progress": progress_pct,
-                                    "last_checkpoint": time.time()
-                                })
-                                if not metadata.get("display_name"):
-                                    metadata["display_name"] = _run_display_name(state, "church")
-                                save_run_metadata(run_id, metadata)
-                                
                                 print(f"[{run_id}] Checkpoint saved after {completed} counties")
                             
                             # Health check after each county (lists remaining processes)
@@ -1747,35 +1581,29 @@ def run_streaming_pipeline(
                         print(f"[{run_id}] Interrupted by user, cleaning up...")
                         pool.terminate()
                         pool.join()
-                        # Save checkpoint before exiting
                         save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
-                        pipeline_runs[run_id]["status"] = "cancelled"
-                        pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
+                        db_state.update_run(run_id, status="cancelled", status_message="Pipeline cancelled by user")
                         return
                     except Exception as e:
                         print(f"[{run_id}] Error in pool processing: {e}")
                         import traceback
                         traceback.print_exc()
-                        # Save checkpoint before terminating
                         save_checkpoint(run_id, state, completed_counties, start_index + len(completed_counties), total_counties)
                         pool.terminate()
                         pool.join()
-                        # Don't crash - try to continue to aggregation if we have some results
                         if len(completed_counties) > 0:
                             print(f"[{run_id}] Continuing to aggregation with {len(completed_counties)} completed counties despite error")
                         else:
-                            # No progress made, mark as error
-                            if run_id in pipeline_runs:
-                                pipeline_runs[run_id]["status"] = "error"
-                                pipeline_runs[run_id]["error"] = f"Pool processing failed: {str(e)}"
-                                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {str(e)}"
-                    
-                    # Log any failed counties after all processing completes
+                            db_state.update_run(run_id,
+                                status="error",
+                                error=f"Pool processing failed: {str(e)}",
+                                status_message=f"Pipeline failed: {str(e)}"
+                            )
+
                     if failed_counties:
                         print(f"[{run_id}] WARNING: {len(failed_counties)} counties failed: {', '.join(failed_counties)}")
-                        if run_id in pipeline_runs:
-                            pipeline_runs[run_id]["statusMessage"] = f"Completed with {len(failed_counties)} failures"
-                            return
+                        db_state.update_run(run_id, status_message=f"Completed with {len(failed_counties)} failures")
+                        return
             
             # All counties completed, aggregate results
             print(f"[{run_id}] All counties completed ({len(completed_counties)}/{total_counties}), starting aggregation...")
@@ -1785,109 +1613,75 @@ def run_streaming_pipeline(
                 print(f"[{run_id}] Error during aggregation: {e}")
                 import traceback
                 traceback.print_exc()
-                # Still mark as completed if we have results
-                if run_id in pipeline_runs:
-                    pipeline_runs[run_id]["status"] = "error"
-                    pipeline_runs[run_id]["error"] = f"Aggregation failed: {str(e)}"
-            
-            # Final checkpoint - mark as completed (always save, even if aggregation failed)
+                db_state.update_run(run_id, status="error", error=f"Aggregation failed: {str(e)}")
+
+            # Final checkpoint
             save_checkpoint(run_id, state, completed_counties, len(counties), total_counties)
-            final_metadata = load_run_metadata(run_id) or {}
-            final_metadata.update({
-                "status": "completed" if run_id in pipeline_runs and pipeline_runs[run_id].get("status") != "error" else "error",
-                "completed_counties": completed_counties,
-                "progress": 100,
-                "completed_at": datetime.now().isoformat(),
-                "completion_time": time.time(),
-                "scraper_type": "church",
-                "display_name": _run_display_name(state, "church"),
-                "churchesFound": pipeline_runs.get(run_id, {}).get("churchesFound", 0),
-                "churchesProcessed": pipeline_runs.get(run_id, {}).get("churchesProcessed", 0),
-                "countyChurches": pipeline_runs.get(run_id, {}).get("countyChurches", []),
-            })
-            save_run_metadata(run_id, final_metadata)
-            
-            # Final status update - set to finalizing for 2-minute cooldown
-            if run_id in pipeline_runs:
-                if pipeline_runs[run_id].get("status") != "error":
-                    pipeline_runs[run_id]["status"] = "finalizing"
-                    pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed. Finalizing..."
-                    pipeline_runs[run_id]["finalizingAt"] = time.time()
-                    pipeline_runs[run_id]["containerResetRequested"] = True
-                    
-                    # Create restart marker for start.sh to detect restart
-                    try:
-                        with open("/tmp/run_completed_marker", "w") as f:
-                            f.write(str(time.time()))
-                    except:
-                        pass  # Ignore if can't write marker
-                    
-                    # Start background thread to transition to completed after 2 minutes
-                    def finalize_completion():
-                        time.sleep(120)  # 2-minute cooldown
-                        if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "finalizing":
-                            pipeline_runs[run_id]["status"] = "completed"
-                            pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed"
-                            pipeline_runs[run_id]["completedAt"] = time.time()
-                            if not pipeline_runs[run_id].get("notify_sent"):
-                                duration = time.time() - pipeline_runs[run_id].get("startTime", time.time())
-                                send_run_complete_email(
-                                    run_id,
-                                    state,
-                                    len(completed_counties),
-                                    total_counties,
-                                    pipeline_runs[run_id].get("totalContacts", 0),
-                                    pipeline_runs[run_id].get("totalContactsWithEmails", 0),
-                                    duration,
-                                )
-                                pipeline_runs[run_id]["notify_sent"] = True
-                    
-                    finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
-                    finalize_thread.start()
-                    
-                    # Pipeline completed successfully - no container reset needed
-                    # The backup branch doesn't force container restarts, allowing the container to stay running
-                    # This prevents Railway from logging crashes and allows the container to handle multiple runs
-                    print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
-                    print(f"[{run_id}] Container will remain running and ready for next run")
-                    pipeline_runs[run_id]["progress"] = 100
-            else:
+
+            # Check current status to decide final state
+            current_row = db_state.get_run(run_id)
+            current_status = current_row.get("status") if current_row else "error"
+
+            if current_status != "error":
+                db_state.update_run(run_id,
+                    status="finalizing",
+                    status_message=f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed. Finalizing...",
+                    finalizing_at=time.time(),
+                    progress=100,
+                )
+
+                # Background thread to transition to completed after 2 minutes
+                def finalize_completion():
+                    time.sleep(120)
+                    row = db_state.get_run(run_id)
+                    if row and row.get("status") == "finalizing":
+                        now = time.time()
+                        db_state.update_run(run_id,
+                            status="completed",
+                            status_message=f"Pipeline completed: {len(completed_counties)}/{total_counties} counties processed",
+                            completed_at=now,
+                        )
+                        if not row.get("notify_sent"):
+                            duration = now - (row.get("start_time") or now)
+                            send_run_complete_email(
+                                run_id, state, len(completed_counties), total_counties,
+                                row.get("total_contacts", 0),
+                                row.get("total_contacts_with_emails", 0),
+                                duration,
+                            )
+                            db_state.update_run(run_id, notify_sent=True)
+
+                finalize_thread = threading.Thread(target=finalize_completion, daemon=True)
+                finalize_thread.start()
+
                 print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
+                print(f"[{run_id}] Container will remain running and ready for next run")
+            else:
+                print(f"[{run_id}] Pipeline run complete with errors: {len(completed_counties)}/{total_counties} counties processed")
         
         except FileNotFoundError as e:
-            # State file not found
             error_msg = f"State file not found. Please ensure assets/data/state_counties/{state.lower().replace(' ', '_')}.txt exists in the repository."
-            # Only update pipeline_runs if run_id still exists (may have been cleaned up)
-            if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "error"
-                pipeline_runs[run_id]["error"] = error_msg
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+            db_state.update_run(run_id, status="error", error=error_msg, status_message=f"Pipeline failed: {error_msg}")
             import traceback
             traceback.print_exc()
         except Exception as e:
-            # Any other error - save checkpoint before exiting
-            error_msg = str(e)[:500]  # Limit error message length
+            error_msg = str(e)[:500]
             print(f"[{run_id}] Fatal error in pipeline: {error_msg}")
             import traceback
             traceback.print_exc()
-            
-            # Try to save checkpoint with current progress
+
             try:
                 checkpoint = load_checkpoint(run_id)
                 if checkpoint:
-                    completed_counties = checkpoint.get("completed_counties", [])
-                    total_counties = checkpoint.get("total_counties", 0)
-                    if len(completed_counties) > 0:
-                        save_checkpoint(run_id, state, completed_counties, len(completed_counties), total_counties)
-                        print(f"[{run_id}] Checkpoint saved after fatal error: {len(completed_counties)}/{total_counties} counties")
+                    cc = checkpoint.get("completed_counties", [])
+                    tc = checkpoint.get("total_counties", 0)
+                    if len(cc) > 0:
+                        save_checkpoint(run_id, state, cc, len(cc), tc)
+                        print(f"[{run_id}] Checkpoint saved after fatal error: {len(cc)}/{tc} counties")
             except Exception as checkpoint_error:
                 print(f"[{run_id}] Failed to save checkpoint after error: {checkpoint_error}")
-            
-            # Only update pipeline_runs if run_id still exists (may have been cleaned up)
-            if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "error"
-                pipeline_runs[run_id]["error"] = error_msg
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline failed: {error_msg}"
+
+            db_state.update_run(run_id, status="error", error=error_msg, status_message=f"Pipeline failed: {error_msg}")
     
     # Wrapper to ensure thread always completes and updates status
     def process_all_counties_with_error_handling():
@@ -1897,23 +1691,23 @@ def run_streaming_pipeline(
             print(f"[{run_id}] Unhandled exception in process_all_counties: {e}")
             import traceback
             traceback.print_exc()
-            # Ensure status is updated even on unhandled exceptions
-            if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "error"
-                pipeline_runs[run_id]["error"] = f"Unhandled exception: {str(e)}"
-                pipeline_runs[run_id]["statusMessage"] = f"Pipeline crashed: {str(e)}"
+            db_state.update_run(run_id,
+                status="error",
+                error=f"Unhandled exception: {str(e)}",
+                status_message=f"Pipeline crashed: {str(e)}"
+            )
         finally:
-            # SQLite queue row: mark done / cancelled / failed
-            if queue_store.is_enabled() and pipeline_runs.get(run_id, {}).get("queue_job_id") is not None:
-                pst = pipeline_runs.get(run_id, {}).get("status", "error")
-                perr = pipeline_runs.get(run_id, {}).get("error")
+            # Finalize queue job in Postgres
+            row = db_state.get_run(run_id)
+            if row and row.get("queue_job_id") is not None:
                 try:
-                    queue_store.finalize_job_for_run_id(run_id, SCRAPER_TYPE, str(pst), perr)
+                    db_state.queue_finalize(run_id, SCRAPER_TYPE,
+                        str(row.get("status", "error")),
+                        row.get("error"))
                 except Exception as qe:
                     print(f"[{run_id}] queue finalize error: {qe}")
             # Always clean up thread tracking
             if run_id in running_threads:
-                # Don't remove, just mark as not running
                 running_threads[run_id]['cancelled'] = True
             print(f"[{run_id}] Pipeline thread completed")
     
@@ -2177,89 +1971,38 @@ def run_pipeline():
                 "error": "This is the Church scraper. Use type=church"
             }), 400
         
-        # Check if another run for the SAME STATE is already active or finalizing
-        # Allow concurrent runs for DIFFERENT states (supports 2 states with 3 workers each)
-        active_runs_same_state = []
-        finalizing_runs_same_state = []
-        active_runs_all_states = []  # Track all active runs for cap enforcement
-        current_time = time.time()
-        
-        for rid, run_data in pipeline_runs.items():
-            run_state = run_data.get("state", "").lower()
-            status = run_data.get("status")
-            
-            # Check for running runs (all states - for cap enforcement)
-            if status == "running":
-                # Verify thread is actually alive
-                if rid in running_threads:
-                    thread = running_threads[rid].get('thread')
-                    if thread and thread.is_alive():
-                        active_runs_all_states.append(rid)
-                        # Also track same-state runs
-                        if run_state == state:
-                            active_runs_same_state.append(rid)
-                else:
-                    # Thread missing but status is running - mark as stale
-                    pipeline_runs[rid]["status"] = "cancelled"
-            
-            # Check for finalizing runs (2-minute cooldown)
-            elif status == "finalizing":
-                finalizing_at = run_data.get("finalizingAt", 0)
-                elapsed = current_time - finalizing_at
-                if elapsed < 120:  # Still in 2-minute cooldown
-                    if run_state == state:
-                        finalizing_runs_same_state.append(rid)
-                else:
-                    # Cooldown expired, mark as completed
-                    pipeline_runs[rid]["status"] = "completed"
-                    if "completedAt" not in pipeline_runs[rid]:
-                        pipeline_runs[rid]["completedAt"] = current_time
-        
-        # Enforce maximum 2 concurrent states cap
-        unique_active_states = set()
-        for rid in active_runs_all_states:
-            if rid in pipeline_runs:
-                run_state = pipeline_runs[rid].get("state", "").lower()
-                if run_state:
-                    unique_active_states.add(run_state)
-        
-        if active_runs_same_state:
+        # Check concurrency via Postgres
+        # Clean up stale runs first
+        unique_active_states = _unique_running_states_after_stale_cleanup()
+
+        if db_state.is_state_running(state, SCRAPER_TYPE):
             return jsonify({
                 "status": "error",
                 "error": f"Another run for {state} is already in progress. Please wait for it to complete or stop it first.",
-                "activeRunId": active_runs_same_state[0],
                 "state": state
-            }), 409  # Conflict status code
-        
-        if finalizing_runs_same_state:
+            }), 409
+
+        if db_state.is_state_finalizing(state, SCRAPER_TYPE):
             return jsonify({
                 "status": "error",
                 "error": f"A run for {state} is currently finalizing. Please wait 2 minutes before starting a new run for this state.",
-                "activeRunId": finalizing_runs_same_state[0],
                 "isFinalizing": True,
                 "state": state
-            }), 409  # Conflict status code
-        
-        # At capacity: enqueue (third+ state) or 409 if queue disabled
+            }), 409
+
+        # At capacity: enqueue (third+ state) or 409
         if state.lower() not in unique_active_states and len(unique_active_states) >= 2:
-            if queue_store.is_enabled():
-                dn = _run_display_name(state, SCRAPER_TYPE)
-                q = queue_store.enqueue(state, SCRAPER_TYPE, dn)
-                resp = jsonify({
-                    "status": "queued",
-                    "jobId": q["job_id"],
-                    "position": q["position"],
-                    "message": f"Queued: {len(unique_active_states)} states already running ({', '.join(sorted(unique_active_states))})",
-                    "activeStates": sorted(unique_active_states),
-                })
-                resp.headers.add("Access-Control-Allow-Origin", "*")
-                return resp, 202
-            return jsonify({
-                "status": "error",
-                "error": f"Maximum of 2 concurrent states allowed. Currently running: {', '.join(sorted(unique_active_states))}. Please wait for one to complete.",
+            dn = _run_display_name(state, SCRAPER_TYPE)
+            q = db_state.queue_enqueue(state, SCRAPER_TYPE, dn)
+            resp = jsonify({
+                "status": "queued",
+                "jobId": q["job_id"],
+                "position": q["position"],
+                "message": f"Queued: {len(unique_active_states)} states already running ({', '.join(sorted(unique_active_states))})",
                 "activeStates": sorted(unique_active_states),
-                "maxConcurrentStates": 2
-            }), 409  # Conflict status code
+            })
+            resp.headers.add("Access-Control-Allow-Origin", "*")
+            return resp, 202
         
         # Generate unique run ID
         run_id = str(uuid.uuid4())
@@ -2297,12 +2040,7 @@ def church_queue_list():
         r.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         r.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
         return r, 200
-    if not queue_store.is_enabled():
-        return jsonify({
-            "status": "error",
-            "error": "Queue not configured. Set SQLITE_PATH on the service.",
-        }), 503
-    jobs = queue_store.list_jobs(SCRAPER_TYPE)
+    jobs = db_state.queue_list_jobs(SCRAPER_TYPE)
     resp = jsonify({"status": "ok", "jobs": jobs, "count": len(jobs)})
     resp.headers.add("Access-Control-Allow-Origin", "*")
     return resp, 200
@@ -2318,9 +2056,7 @@ def church_queue_cancel(job_id: int):
         r.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         r.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
         return r, 200
-    if not queue_store.is_enabled():
-        return jsonify({"status": "error", "error": "Queue not configured."}), 503
-    ok = queue_store.cancel_queued_job(job_id, SCRAPER_TYPE)
+    ok = db_state.queue_cancel_job(job_id, SCRAPER_TYPE)
     if not ok:
         return jsonify({
             "status": "error",
@@ -2346,89 +2082,71 @@ def pipeline_status(run_id):
             "error": "Invalid run ID format"
         }), 400
     
-    if run_id not in pipeline_runs:
+    row = db_state.get_run(run_id)
+    if not row:
         # Track repeated 404 requests to prevent spam from stale browser tabs
         current_time = time.time()
         if run_id in not_found_runs:
             first_time, count = not_found_runs[run_id]
-            # If we've seen 3+ requests for this non-existent run ID within 30 seconds, return 410 Gone
-            # This stops polling spam from stale browser tabs quickly
             if count >= 3 and (current_time - first_time) < 30:
                 return jsonify({
                     "status": "error",
                     "error": "Run ID not found. This run no longer exists."
-                }), 410  # Gone - stop polling
-            # Increment count
+                }), 410
             not_found_runs[run_id] = (first_time, count + 1)
         else:
-            # First time seeing this non-existent run ID
             not_found_runs[run_id] = (current_time, 1)
-        
-        # Clean up old entries (older than 5 minutes)
+
         to_remove = [rid for rid, (ft, _) in not_found_runs.items() if current_time - ft > 300]
         for rid in to_remove:
             not_found_runs.pop(rid, None)
-        
-        return jsonify({
-            "status": "error",
-            "error": "Run ID not found"
-        }), 404
-    
-    run_data = pipeline_runs[run_id].copy()
-    
-    # If run is completed, return 410 Gone after grace period to stop polling
-    # Allow a 2-minute grace period for the final status fetch, then return 410 Gone
+
+        return jsonify({"status": "error", "error": "Run ID not found"}), 404
+
+    run_data = db_state.row_to_pipeline_format(row)
+
+    # If completed, return 410 after grace period
     if run_data.get("status") == "completed":
         completed_time = run_data.get("completedAt")
         if completed_time:
             time_since_completion = time.time() - completed_time
-            if time_since_completion > 120:  # 2 minutes grace period, then return 410 Gone
-                # Clean up old completed runs from memory (older than 1 hour)
-                if time_since_completion > 3600:  # 1 hour
-                    pipeline_runs.pop(run_id, None)
+            if time_since_completion > 120:
                 return jsonify({
                     "status": "completed",
                     "message": "Run completed. Status no longer available."
-                }), 410  # Gone status code
-    
-    # Calculate server-side elapsed time
+                }), 410
+
+    # Calculate elapsed time
     start_time = run_data.get("startTime")
     if start_time:
         elapsed_seconds = time.time() - start_time
         run_data["elapsedTime"] = int(elapsed_seconds)
     else:
         run_data["elapsedTime"] = 0
-    
-    # Calculate static estimated time remaining (ticks down minute by minute)
-    # Estimate is calculated once at start and decreases as time passes
+
+    # Calculate estimated time remaining
     if run_data["status"] == "running":
         initial_estimate = run_data.get("initialEstimatedTimeRemaining")
         elapsed_seconds = run_data.get("elapsedTime", 0)
-        
+
         if initial_estimate is not None and initial_estimate > 0:
-            # Calculate remaining as initial estimate minus elapsed time
             remaining_seconds = max(0, initial_estimate - elapsed_seconds)
-            # Round to minutes (no seconds) - round up to nearest minute for display
-            remaining_minutes = int((remaining_seconds + 59) // 60)  # Round up to nearest minute
-            run_data["estimatedTimeRemaining"] = remaining_minutes * 60  # Convert back to seconds for consistency
+            remaining_minutes = int((remaining_seconds + 59) // 60)
+            run_data["estimatedTimeRemaining"] = remaining_minutes * 60
         else:
-            # Fallback: calculate dynamically if initial estimate not set (for old runs)
             counties_processed = run_data.get("countiesProcessed", 0)
             total_counties = run_data.get("totalCounties", 0)
-            
             if total_counties > 0:
                 remaining_counties = max(0, total_counties - counties_processed)
-                avg_time_per_county = CHURCH_AVG_SECONDS_PER_COUNTY_SLOT
                 effective_remaining = max(1, remaining_counties / MAX_WORKERS)
-                estimated_remaining = effective_remaining * avg_time_per_county
-                # Round to minutes
+                estimated_remaining = effective_remaining * CHURCH_AVG_SECONDS_PER_COUNTY_SLOT
                 remaining_minutes = int((estimated_remaining + 59) // 60)
                 run_data["estimatedTimeRemaining"] = remaining_minutes * 60
             else:
                 run_data["estimatedTimeRemaining"] = 0
     else:
         run_data["estimatedTimeRemaining"] = 0
-    
+
     response = jsonify(run_data)
     response.headers.add("Access-Control-Allow-Origin", "*")
     return response, 200
@@ -2460,9 +2178,9 @@ def list_runs():
         return jsonify({}), 200
     
     try:
-        runs = list_all_runs()
-        
-        # Format response
+        include_archived = request.args.get('include_archived', 'false').lower() == 'true'
+        runs = list_all_runs(include_archived)
+
         response_data = {
             "status": "ok",
             "runs": runs,
@@ -2500,37 +2218,26 @@ def stop_run(run_id: str):
         }), 400
     
     try:
-        # Check metadata first (persistent storage)
-        metadata = load_run_metadata(run_id)
-        if not metadata:
-            return jsonify({
-                "status": "error",
-                "error": "Run not found"
-            }), 404
-        
-        # Check if run is actually running
-        current_status = metadata.get("status", pipeline_runs.get(run_id, {}).get("status", "unknown"))
+        row = db_state.get_run(run_id)
+        if not row:
+            return jsonify({"status": "error", "error": "Run not found"}), 404
+
+        current_status = row.get("status", "unknown")
         if current_status != "running":
             return jsonify({
                 "status": "error",
                 "error": f"Run is not running (current status: {current_status})"
             }), 400
-        
-        # Set cancellation flag
+
+        # Set cancellation flag for local thread
         if run_id in running_threads:
             running_threads[run_id]['cancelled'] = True
-        
-        # Update in-memory status if present
-        if run_id in pipeline_runs:
-            pipeline_runs[run_id]["status"] = "cancelled"
-            pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
-        
-        # Update metadata
-        metadata.update({
-            "status": "cancelled",
-            "cancelled_at": datetime.now().isoformat()
-        })
-        save_run_metadata(run_id, metadata)
+
+        db_state.update_run(run_id,
+            status="cancelled",
+            status_message="Pipeline cancelled by user",
+            cancelled_at=datetime.now().isoformat()
+        )
         
         print(f"[{run_id}] Pipeline stop requested")
         
@@ -2568,60 +2275,31 @@ def resume_run(run_id: str):
         }), 400
     
     try:
-        # Check metadata first (persistent storage)
-        metadata = load_run_metadata(run_id)
-        if not metadata:
-            return jsonify({
-                "status": "error",
-                "error": "Run not found"
-            }), 404
-        
-        state = metadata.get("state")
+        row = db_state.get_run(run_id)
+        if not row:
+            return jsonify({"status": "error", "error": "Run not found"}), 404
+
+        state = row.get("state")
         if not state:
-            return jsonify({
-                "status": "error",
-                "error": "State not found in run metadata"
-            }), 400
-        
+            return jsonify({"status": "error", "error": "State not found in run metadata"}), 400
+
         # Check if another run for the SAME STATE is currently running
-        # Allow concurrent runs for DIFFERENT states
-        state_lower = state.lower()
-        active_runs_same_state = []
-        
-        for rid, run_data in pipeline_runs.items():
-            run_state = run_data.get("state", "").lower()
-            run_status = run_data.get("status")
-            
-            # Only check runs for the same state (skip the run we're trying to resume)
-            if rid == run_id or run_state != state_lower:
-                continue
-            
-            # Check for running runs
-            if run_status == "running":
-                # Verify thread is actually alive
-                if rid in running_threads:
-                    thread = running_threads[rid].get('thread')
-                    if thread and thread.is_alive():
-                        active_runs_same_state.append(rid)
-        
-        if active_runs_same_state:
+        if db_state.is_state_running(state, SCRAPER_TYPE, exclude_run_id=run_id):
             return jsonify({
                 "status": "error",
                 "error": f"Another run for {state} is already running. Please stop it first before resuming.",
-                "activeRunId": active_runs_same_state[0],
                 "state": state
-            }), 409  # Conflict
-        
+            }), 409
+
         # Check if THIS run is currently running
-        if run_id in pipeline_runs and pipeline_runs[run_id].get("status") == "running":
-            # Check if thread is actually alive
+        if row.get("status") == "running":
             if run_id in running_threads:
                 thread = running_threads[run_id].get('thread')
                 if thread and thread.is_alive():
                     return jsonify({
                         "status": "error",
                         "error": "This run is already running. Please stop it first before resuming."
-                    }), 409  # Conflict
+                    }), 409
         
         # Check if checkpoint exists
         checkpoint = load_checkpoint(run_id)
@@ -2685,56 +2363,29 @@ def aggregate_run(run_id: str):
         }), 400
     
     try:
-        # Check metadata first (persistent storage)
-        metadata = load_run_metadata(run_id)
-        if not metadata:
-            return jsonify({
-                "status": "error",
-                "error": "Run not found"
-            }), 404
-        
-        state = metadata.get("state")
+        row = db_state.get_run(run_id)
+        if not row:
+            return jsonify({"status": "error", "error": "Run not found"}), 404
+
+        state = row.get("state")
         if not state:
-            return jsonify({
-                "status": "error",
-                "error": "State not found in run metadata"
-            }), 400
-        
-        # Check if run is already aggregating or completed
-        if run_id in pipeline_runs:
-            current_status = pipeline_runs[run_id].get("status")
-            if current_status == "finalizing":
-                return jsonify({
-                    "status": "error",
-                    "error": "Run is already finalizing/aggregating. Please wait."
-                }), 409
-            elif current_status == "completed":
-                return jsonify({
-                    "status": "error",
-                    "error": "Run is already completed."
-                }), 409
-        
-        # Check if run directory exists
+            return jsonify({"status": "error", "error": "State not found in run metadata"}), 400
+
+        current_status = row.get("status")
+        if current_status == "finalizing":
+            return jsonify({"status": "error", "error": "Run is already finalizing/aggregating. Please wait."}), 409
+        elif current_status == "completed":
+            return jsonify({"status": "error", "error": "Run is already completed."}), 409
+
         run_dir = RUNS_DIR / run_id
         if not run_dir.exists():
-            return jsonify({
-                "status": "error",
-                "error": "Run directory not found"
-            }), 404
-        
-        # Initialize run status if not already in pipeline_runs
-        if run_id not in pipeline_runs:
-            pipeline_runs[run_id] = {
-                "status": "finalizing",
-                "state": state.lower(),
-                "statusMessage": "Manually triggering aggregation...",
-                "startTime": metadata.get("start_time", time.time())
-            }
-        else:
-            pipeline_runs[run_id]["status"] = "finalizing"
-            pipeline_runs[run_id]["statusMessage"] = "Manually triggering aggregation..."
-        
-        # Run aggregation in background thread with skip_wait=True
+            return jsonify({"status": "error", "error": "Run directory not found"}), 404
+
+        db_state.update_run(run_id,
+            status="finalizing",
+            status_message="Manually triggering aggregation...",
+        )
+
         def run_aggregation():
             try:
                 aggregate_final_results(run_id, state, skip_wait=True)
@@ -2742,10 +2393,11 @@ def aggregate_run(run_id: str):
                 print(f"[{run_id}] Error during manual aggregation: {e}")
                 import traceback
                 traceback.print_exc()
-                if run_id in pipeline_runs:
-                    pipeline_runs[run_id]["status"] = "error"
-                    pipeline_runs[run_id]["error"] = f"Aggregation failed: {str(e)}"
-                    pipeline_runs[run_id]["statusMessage"] = f"Failed to aggregate: {str(e)}"
+                db_state.update_run(run_id,
+                    status="error",
+                    error=f"Aggregation failed: {str(e)}",
+                    status_message=f"Failed to aggregate: {str(e)}"
+                )
         
         aggregation_thread = threading.Thread(target=run_aggregation, daemon=True)
         aggregation_thread.start()
@@ -2789,48 +2441,25 @@ def delete_run(run_id: str):
         }), 400
     
     try:
-        # Load metadata to check if run exists
-        metadata = load_run_metadata(run_id)
-        if not metadata:
-            return jsonify({
-                "status": "error",
-                "error": "Run not found"
-            }), 404
-        
-        # If run is running, stop it first
-        status = metadata.get("status")
+        row = db_state.get_run_including_deleted(run_id)
+        if not row:
+            return jsonify({"status": "error", "error": "Run not found"}), 404
+
+        status = row.get("status")
         if status == "running":
-            # Set cancellation flag to stop the run
             if run_id in running_threads:
                 running_threads[run_id]['cancelled'] = True
-            
-            # Update in-memory status if present
-            if run_id in pipeline_runs:
-                pipeline_runs[run_id]["status"] = "cancelled"
-                pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
-            
-            # Update metadata to cancelled first
-            metadata["status"] = "cancelled"
-            metadata["cancelled_at"] = datetime.now().isoformat()
+            db_state.update_run(run_id, status="cancelled", cancelled_at=datetime.now().isoformat())
             print(f"[{run_id}] Run stopped for deletion")
-        
-        # Actually delete files (ephemeral + volume final CSV)
-        run_dir = RUNS_DIR / run_id
-        checkpoint_file = CHECKPOINTS_DIR / f"{run_id}.json"
 
+        # Delete ephemeral files
+        run_dir = RUNS_DIR / run_id
         try:
-            # Delete ephemeral run directory
             if run_dir.exists():
                 shutil.rmtree(run_dir)
                 print(f"[{run_id}] Deleted ephemeral run directory: {run_dir}")
 
-            # Delete checkpoint file if it exists
-            if checkpoint_file.exists():
-                checkpoint_file.unlink()
-                print(f"[{run_id}] Deleted checkpoint file: {checkpoint_file}")
-
-            # Delete final CSV from volume if it exists
-            final_csv_path = metadata.get("final_csv_path")
+            final_csv_path = row.get("final_csv_path")
             if final_csv_path and Path(final_csv_path).exists():
                 try:
                     Path(final_csv_path).unlink()
@@ -2840,13 +2469,9 @@ def delete_run(run_id: str):
         except Exception as e:
             print(f"[{run_id}] Warning: Error deleting files: {e}")
 
-        # Mark as deleted in metadata
-        metadata["deleted"] = True
-        metadata["deleted_at"] = datetime.now().isoformat()
-        save_run_metadata(run_id, metadata)
-
-        # Remove from in-memory storage if present
-        pipeline_runs.pop(run_id, None)
+        # Soft-delete in Postgres + delete checkpoint
+        db_state.delete_run(run_id)
+        db_state.delete_checkpoint(run_id)
         running_threads.pop(run_id, None)
 
         print(f"[{run_id}] Run deleted and files removed")
@@ -2885,24 +2510,14 @@ def archive_run(run_id: str):
         }), 400
     
     try:
-        metadata = load_run_metadata(run_id)
-        if not metadata:
-            return jsonify({
-                "status": "error",
-                "error": "Run not found"
-            }), 404
-        
-        # Cannot archive deleted runs
-        if metadata.get("deleted", False):
-            return jsonify({
-                "status": "error",
-                "error": "Cannot archive a deleted run"
-            }), 400
-        
-        # Update metadata to mark as archived
-        metadata["archived"] = True
-        save_run_metadata(run_id, metadata)
-        
+        row = db_state.get_run(run_id)
+        if not row:
+            return jsonify({"status": "error", "error": "Run not found"}), 404
+
+        if row.get("deleted"):
+            return jsonify({"status": "error", "error": "Cannot archive a deleted run"}), 400
+
+        db_state.update_run(run_id, archived=True)
         print(f"[{run_id}] Run archived")
         
         response = jsonify({
@@ -2939,24 +2554,14 @@ def unarchive_run(run_id: str):
         }), 400
     
     try:
-        metadata = load_run_metadata(run_id)
-        if not metadata:
-            return jsonify({
-                "status": "error",
-                "error": "Run not found"
-            }), 404
-        
-        # Cannot unarchive deleted runs
-        if metadata.get("deleted", False):
-            return jsonify({
-                "status": "error",
-                "error": "Cannot unarchive a deleted run"
-            }), 400
-        
-        # Update metadata to remove archived flag
-        metadata["archived"] = False
-        save_run_metadata(run_id, metadata)
-        
+        row = db_state.get_run_including_deleted(run_id)
+        if not row:
+            return jsonify({"status": "error", "error": "Run not found"}), 404
+
+        if row.get("deleted"):
+            return jsonify({"status": "error", "error": "Cannot unarchive a deleted run"}), 400
+
+        db_state.update_run(run_id, archived=False)
         print(f"[{run_id}] Run unarchived")
         
         response = jsonify({
@@ -2988,11 +2593,11 @@ def download_run_csv(run_id: str):
     try:
         csv_path = None
         download_name = f"run_{run_id}.csv"
-        metadata = load_run_metadata(run_id)
-        if metadata:
-            csv_path = metadata.get("final_csv_path")
+        row = db_state.get_run_including_deleted(run_id)
+        if row:
+            csv_path = row.get("final_csv_path")
             if csv_path and os.path.exists(csv_path):
-                download_name = metadata.get("csv_filename", download_name)
+                download_name = row.get("csv_filename") or download_name
             else:
                 csv_path = None
         # Fallback: search volume for CSV containing run_id (metadata may be lost on container restart)
@@ -3034,14 +2639,17 @@ def not_found(e):
         "available_endpoints": ["/", "/health", "/notify/test-email", "/run-pipeline", "/queue", "/queue/<job_id>", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/archive", "/runs/<run_id>/unarchive"]
     }), 404
 
-# Cleanup old runs on startup to prevent storage exhaustion
+# Initialize Postgres tables and start queue worker
+print("[STARTUP] Initializing Postgres state tables...")
+db_state.init_tables()
+
 print("[STARTUP] Running cleanup of old runs...")
 cleanup_old_runs()
 
-if queue_store.init_db():
-    _church_q_thread = threading.Thread(target=_church_queue_worker_loop, daemon=True)
-    _church_q_thread.start()
-    print("[STARTUP] Queue worker thread started")
+# Start queue worker thread (uses advisory lock for leader election across replicas)
+_church_q_thread = threading.Thread(target=_church_queue_worker_loop, daemon=True)
+_church_q_thread.start()
+print("[STARTUP] Queue worker thread started")
 
 # Production: Use Waitress server
 # NOTE: If Railway runs this file directly (bypassing Dockerfile ENTRYPOINT),
