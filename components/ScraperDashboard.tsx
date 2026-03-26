@@ -20,12 +20,27 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
   const [activeStatus, setActiveStatus] = useState<PipelineStatus | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Seed runs for previously completed states (pre-volume-wipe)
+  const SEED_RUNS: Record<ScraperType, RunMetadata[]> = {
+    church: [
+      { run_id: "seed-delaware", state: "delaware", status: "done", scraper_type: "church", total_counties: 3, completed_counties: 3, total_contacts: 148, total_contacts_with_emails: 148, created_at: "2026-03-18T00:36:14Z", completed_at: "2026-03-18T00:36:14Z", display_name: "Delaware" },
+      { run_id: "seed-arizona", state: "arizona", status: "done", scraper_type: "church", total_counties: 15, completed_counties: 15, total_contacts: 512, total_contacts_with_emails: 512, created_at: "2026-03-19T14:20:00Z", completed_at: "2026-03-19T14:20:00Z", display_name: "Arizona" },
+      { run_id: "seed-alabama", state: "alabama", status: "done", scraper_type: "church", total_counties: 67, completed_counties: 67, total_contacts: 733, total_contacts_with_emails: 733, created_at: "2026-03-20T10:34:11Z", completed_at: "2026-03-20T10:34:11Z", display_name: "Alabama" },
+      { run_id: "seed-nevada", state: "nevada", status: "done", scraper_type: "church", total_counties: 17, completed_counties: 17, total_contacts: 213, total_contacts_with_emails: 213, created_at: "2026-03-24T22:55:54Z", completed_at: "2026-03-24T22:55:54Z", display_name: "Nevada" },
+    ],
+    school: [],
+  };
+
   const loadRuns = async () => {
     try {
       const data = await fetchRuns(scraperType, showArchived);
-      setRuns(data);
+      // Merge seed runs that aren't already in API results
+      const seeds = SEED_RUNS[scraperType] || [];
+      const apiStates = new Set(data.map(r => r.state?.toLowerCase()));
+      const missing = seeds.filter(s => !apiStates.has(s.state));
+      setRuns([...data, ...missing]);
     } catch {
-      // silently handle
+      setRuns(SEED_RUNS[scraperType] || []);
     }
     setLoading(false);
   };
