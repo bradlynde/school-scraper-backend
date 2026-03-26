@@ -116,6 +116,43 @@ _SQLITE_SCHEMA = [
     CREATE INDEX IF NOT EXISTS idx_county_results_run
     ON county_results (run_id)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS pipeline_state (
+        run_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running',
+        scraper_type TEXT NOT NULL DEFAULT 'church',
+        display_name TEXT,
+        progress INTEGER NOT NULL DEFAULT 0,
+        total_counties INTEGER NOT NULL DEFAULT 0,
+        counties_processed INTEGER NOT NULL DEFAULT 0,
+        churches_found INTEGER NOT NULL DEFAULT 0,
+        total_contacts INTEGER NOT NULL DEFAULT 0,
+        total_contacts_with_emails INTEGER NOT NULL DEFAULT 0,
+        status_message TEXT,
+        start_time REAL,
+        initial_eta INTEGER,
+        completed_at TEXT,
+        csv_filename TEXT,
+        cost_estimate_json TEXT,
+        places_api_calls INTEGER NOT NULL DEFAULT 0,
+        openai_calls INTEGER NOT NULL DEFAULT 0,
+        openai_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        openai_completion_tokens INTEGER NOT NULL DEFAULT 0,
+        queue_job_id INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS final_csvs (
+        run_id TEXT PRIMARY KEY,
+        csv_data TEXT NOT NULL,
+        csv_filename TEXT NOT NULL,
+        row_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )
+    """,
 ]
 
 _PG_SCHEMA = [
@@ -191,6 +228,43 @@ _PG_SCHEMA = [
     """
     CREATE INDEX IF NOT EXISTS idx_county_results_run
     ON county_results (run_id)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS pipeline_state (
+        run_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'running',
+        scraper_type TEXT NOT NULL DEFAULT 'church',
+        display_name TEXT,
+        progress INTEGER NOT NULL DEFAULT 0,
+        total_counties INTEGER NOT NULL DEFAULT 0,
+        counties_processed INTEGER NOT NULL DEFAULT 0,
+        churches_found INTEGER NOT NULL DEFAULT 0,
+        total_contacts INTEGER NOT NULL DEFAULT 0,
+        total_contacts_with_emails INTEGER NOT NULL DEFAULT 0,
+        status_message TEXT,
+        start_time REAL,
+        initial_eta INTEGER,
+        completed_at TEXT,
+        csv_filename TEXT,
+        cost_estimate_json TEXT,
+        places_api_calls INTEGER NOT NULL DEFAULT 0,
+        openai_calls INTEGER NOT NULL DEFAULT 0,
+        openai_prompt_tokens INTEGER NOT NULL DEFAULT 0,
+        openai_completion_tokens INTEGER NOT NULL DEFAULT 0,
+        queue_job_id INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS final_csvs (
+        run_id TEXT PRIMARY KEY,
+        csv_data TEXT NOT NULL,
+        csv_filename TEXT NOT NULL,
+        row_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )
     """,
 ]
 
@@ -1030,5 +1104,211 @@ def get_county_result_total_rows(run_id: str) -> int:
                 (run_id,),
             ).fetchone()
             return int(row["total"]) if row else 0
+        finally:
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Pipeline state (replaces in-memory pipeline_runs dict)
+# ---------------------------------------------------------------------------
+
+def upsert_pipeline_state(run_id: str, **fields) -> None:
+    """Create or update pipeline run state in Postgres."""
+    if not is_enabled():
+        return
+    p = _p()
+    now = datetime.now().isoformat()
+    fields.setdefault("created_at", now)
+    fields["updated_at"] = now
+
+    with _lock:
+        conn = _conn()
+        try:
+            existing = conn.execute(
+                f"SELECT run_id FROM pipeline_state WHERE run_id = {p}",
+                (run_id,),
+            ).fetchone()
+            if existing:
+                # UPDATE — only set fields that were passed
+                sets = []
+                vals = []
+                for k, v in fields.items():
+                    if k == "run_id" or k == "created_at":
+                        continue
+                    sets.append(f"{k} = {p}")
+                    vals.append(v)
+                if sets:
+                    vals.append(run_id)
+                    conn.execute(
+                        f"UPDATE pipeline_state SET {', '.join(sets)} WHERE run_id = {p}",
+                        tuple(vals),
+                    )
+            else:
+                # INSERT
+                cols = ["run_id"] + list(fields.keys())
+                placeholders = ", ".join([p] * len(cols))
+                col_names = ", ".join(cols)
+                vals = [run_id] + list(fields.values())
+                conn.execute(
+                    f"INSERT INTO pipeline_state ({col_names}) VALUES ({placeholders})",
+                    tuple(vals),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_pipeline_state(run_id: str) -> Optional[dict[str, Any]]:
+    """Read single run state from Postgres."""
+    if not is_enabled():
+        return None
+    p = _p()
+    with _lock:
+        conn = _conn()
+        try:
+            row = conn.execute(
+                f"SELECT * FROM pipeline_state WHERE run_id = {p}",
+                (run_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+
+def list_pipeline_states(scraper_type: str, limit: int = 100) -> list[dict[str, Any]]:
+    """List all pipeline states for /runs endpoint."""
+    if not is_enabled():
+        return []
+    p = _p()
+    with _lock:
+        conn = _conn()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT * FROM pipeline_state
+                WHERE scraper_type = {p}
+                ORDER BY created_at DESC
+                LIMIT {p}
+                """,
+                (scraper_type, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Final CSV storage (Postgres — durable source of truth for downloads)
+# ---------------------------------------------------------------------------
+
+def store_final_csv(run_id: str, csv_data: str, csv_filename: str, row_count: int) -> None:
+    """Store aggregated final CSV in Postgres."""
+    if not is_enabled():
+        return
+    p = _p()
+    now = datetime.now().isoformat()
+    with _lock:
+        conn = _conn()
+        try:
+            if db.is_postgres():
+                conn.execute(
+                    f"""
+                    INSERT INTO final_csvs (run_id, csv_data, csv_filename, row_count, created_at)
+                    VALUES ({p}, {p}, {p}, {p}, {p})
+                    ON CONFLICT (run_id) DO UPDATE SET
+                        csv_data = EXCLUDED.csv_data,
+                        csv_filename = EXCLUDED.csv_filename,
+                        row_count = EXCLUDED.row_count,
+                        created_at = EXCLUDED.created_at
+                    """,
+                    (run_id, csv_data, csv_filename, row_count, now),
+                )
+            else:
+                conn.execute(
+                    f"""
+                    INSERT OR REPLACE INTO final_csvs (run_id, csv_data, csv_filename, row_count, created_at)
+                    VALUES ({p}, {p}, {p}, {p}, {p})
+                    """,
+                    (run_id, csv_data, csv_filename, row_count, now),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_final_csv(run_id: str) -> Optional[dict[str, Any]]:
+    """Retrieve final CSV for download."""
+    if not is_enabled():
+        return None
+    p = _p()
+    with _lock:
+        conn = _conn()
+        try:
+            row = conn.execute(
+                f"SELECT csv_data, csv_filename, row_count FROM final_csvs WHERE run_id = {p}",
+                (run_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+
+# ---------------------------------------------------------------------------
+# County tasks helpers (frontend + crash recovery)
+# ---------------------------------------------------------------------------
+
+def get_county_tasks_for_run(run_id: str) -> list[dict[str, Any]]:
+    """Return all county_tasks rows for a run, with result_json parsed. For frontend countyTasks."""
+    if not is_enabled():
+        return []
+    p = _p()
+    with _lock:
+        conn = _conn()
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT id, run_id, county, status, claimed_by, claimed_at, completed_at, result_json, error
+                FROM county_tasks WHERE run_id = {p} ORDER BY county_index
+                """,
+                (run_id,),
+            ).fetchall()
+            tasks = []
+            for r in rows:
+                d = dict(r)
+                if d.get("result_json"):
+                    try:
+                        d["result_json"] = json.loads(d["result_json"])
+                    except (json.JSONDecodeError, TypeError):
+                        d["result_json"] = None
+                tasks.append(d)
+            return tasks
+        finally:
+            conn.close()
+
+
+def release_stale_claims(hostname_prefix: str) -> int:
+    """Crash recovery: reset processing tasks claimed by a previous incarnation of this worker.
+    Called on worker startup — releases counties that this host claimed but never completed."""
+    if not is_enabled():
+        return 0
+    p = _p()
+    pattern = f"{hostname_prefix}%"
+    with _lock:
+        conn = _conn()
+        try:
+            cur = conn.execute(
+                f"""
+                UPDATE county_tasks
+                SET status = 'pending', claimed_by = NULL, claimed_at = NULL
+                WHERE status = 'processing' AND claimed_by LIKE {p}
+                """,
+                (pattern,),
+            )
+            conn.commit()
+            released = cur.rowcount
+            if released:
+                from church_run_log import log_warn
+                log_warn(f"Crash recovery: released {released} stale task(s) claimed by {hostname_prefix}*")
+            return released
         finally:
             conn.close()

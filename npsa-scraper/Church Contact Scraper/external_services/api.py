@@ -67,6 +67,11 @@ from external_services import db
 
 SCRAPER_TYPE = "church"
 
+# Role-based behavior: manager handles API/queue/aggregation, worker processes counties
+ROLE = os.getenv("ROLE", "worker").lower().strip()
+IS_MANAGER = ROLE == "manager"
+IS_WORKER = ROLE == "worker"
+
 # Handle hyphens in filenames using importlib.util
 import importlib.util
 _parent_dir = Path(__file__).parent.parent
@@ -463,111 +468,74 @@ def _watch_county_queue_until_aggregated(
     completed_counties: list,
 ) -> None:
     """
-    Starter-replica loop: sync SQLite task progress into pipeline_runs, then aggregate when done.
-    County execution happens in _county_processor_worker_loop threads on all replicas.
+    Manager-only loop: poll county progress, sync to pipeline_runs + Postgres, aggregate when done.
+    No stale task reclaim — crash recovery happens on worker startup.
     """
-    reclaim_every = 0
-    wait_loops = 0
+    total = len(counties)
     while True:
-        time.sleep(3.0)
-        reclaim_every += 1
-        if reclaim_every >= 20:
-            reclaim_every = 0
-            try:
-                queue_store.reclaim_stale_county_tasks(7200)
-            except Exception as e:
-                log_warn(f"reclaim stale county tasks: {e}")
+        time.sleep(5.0)
 
         if running_threads.get(run_id, {}).get("cancelled") or queue_store.is_dispatch_cancelled(run_id):
             pipeline_runs[run_id]["status"] = "cancelled"
             pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
             queue_store.cancel_dispatch_run(run_id)
+            queue_store.upsert_pipeline_state(run_id, status="cancelled", status_message="Pipeline cancelled by user")
             return
 
         prog = queue_store.get_run_progress(run_id)
-        total = len(counties)
         terminal = int(prog.get("terminal") or 0)
+        progress_pct = int((terminal / max(1, total)) * 100) if total else 0
+        churches = int(prog.get("churches_found") or 0)
+        places = int(prog.get("places_api_calls_total") or 0)
+        oc = int(prog.get("openai_calls_total") or 0)
+        opt = int(prog.get("openai_prompt_tokens_total") or 0)
+        octt = int(prog.get("openai_completion_tokens_total") or 0)
+
+        if terminal < total:
+            msg = f"Processing {terminal}/{total} counties (distributed queue)..."
+        else:
+            msg = "All counties finished; aggregating..."
+
         with progress_lock:
-            pipeline_runs[run_id]["progress"] = int((terminal / max(1, total)) * 100)
+            pipeline_runs[run_id]["progress"] = progress_pct
             pipeline_runs[run_id]["countiesProcessed"] = terminal
-            pipeline_runs[run_id]["churchesFound"] = int(prog.get("churches_found") or 0)
-            pipeline_runs[run_id]["churchesProcessed"] = int(prog.get("churches_found") or 0)
-            pipeline_runs[run_id]["places_api_calls_total"] = int(prog.get("places_api_calls_total") or 0)
-            pipeline_runs[run_id]["openai_calls_total"] = int(prog.get("openai_calls_total") or 0)
-            pipeline_runs[run_id]["openai_prompt_tokens_total"] = int(
-                prog.get("openai_prompt_tokens_total") or 0
-            )
-            pipeline_runs[run_id]["openai_completion_tokens_total"] = int(
-                prog.get("openai_completion_tokens_total") or 0
-            )
-            if terminal < total:
-                pipeline_runs[run_id]["statusMessage"] = (
-                    f"Processing {terminal}/{total} counties (distributed queue)..."
-                )
-            else:
-                pipeline_runs[run_id]["statusMessage"] = "All counties finished; aggregating..."
+            pipeline_runs[run_id]["churchesFound"] = churches
+            pipeline_runs[run_id]["churchesProcessed"] = churches
+            pipeline_runs[run_id]["statusMessage"] = msg
+            pipeline_runs[run_id]["places_api_calls_total"] = places
+            pipeline_runs[run_id]["openai_calls_total"] = oc
+            pipeline_runs[run_id]["openai_prompt_tokens_total"] = opt
+            pipeline_runs[run_id]["openai_completion_tokens_total"] = octt
+
+        # Sync to Postgres for cross-service visibility
+        queue_store.upsert_pipeline_state(
+            run_id,
+            progress=progress_pct,
+            counties_processed=terminal,
+            churches_found=churches,
+            status_message=msg,
+            places_api_calls=places,
+            openai_calls=oc,
+            openai_prompt_tokens=opt,
+            openai_completion_tokens=octt,
+        )
 
         if not queue_store.all_county_tasks_terminal(run_id):
-            wait_loops = 0
             continue
 
-        # All county rows terminal (done or failed)
-        claimer = f"{_CHURCH_PROCESS_ID}-agg"
-        if queue_store.try_claim_aggregation(run_id, claimer):
-            try:
-                aggregate_final_results(run_id, state, skip_wait=True)
-                queue_store.mark_aggregation_done(run_id)
-            except Exception as e:
-                log_err(f"Aggregation after county queue: {e}")
-                queue_store.clear_aggregation_claim(run_id)
-                if run_id in pipeline_runs:
-                    pipeline_runs[run_id]["status"] = "error"
-                    pipeline_runs[run_id]["error"] = str(e)
-                    pipeline_runs[run_id]["statusMessage"] = f"Aggregation failed: {e}"
-            return
-
-        # Another replica holds the lease or will run recovery — wait for completion
-        row = queue_store.get_dispatch_row(run_id)
-        if row and row.get("aggregation_done"):
-            return
-        wait_loops += 1
-        if wait_loops > 4800:  # ~4h at 3s sleep
-            log_warn("County queue watcher: aggregation wait timeout")
-            return
-
-
-def _church_aggregation_recovery_loop() -> None:
-    """Pick up aggregation if the starter replica died after all counties finished."""
-    while True:
-        time.sleep(45.0)
-        if not queue_store.is_enabled():
-            continue
+        # All counties terminal — manager aggregates directly (no lease racing)
+        log_warn(f"All {total} counties terminal for {run_id}; starting aggregation")
         try:
-            queue_store.reclaim_stale_county_tasks(7200)
-            pending = queue_store.list_dispatch_pending_aggregation(SCRAPER_TYPE)
-            for rid in pending:
-                claimer = f"{_CHURCH_PROCESS_ID}-recover"
-                if not queue_store.try_claim_aggregation(rid, claimer):
-                    continue
-                row = queue_store.get_dispatch_row(rid)
-                if not row:
-                    queue_store.clear_aggregation_claim(rid)
-                    continue
-                st = (row["state"] or "").lower()
-                try:
-                    if not _hydrate_pipeline_run_from_dispatch(rid):
-                        queue_store.clear_aggregation_claim(rid)
-                        continue
-                    aggregate_final_results(rid, st, skip_wait=True)
-                    queue_store.mark_aggregation_done(rid)
-                except Exception as e:
-                    log_err(f"[RECOVER] aggregation {rid}: {e}")
-                    queue_store.clear_aggregation_claim(rid)
+            aggregate_final_results(run_id, state, skip_wait=True)
+            queue_store.mark_aggregation_done(run_id)
         except Exception as e:
-            log_err(f"Recovery loop: {e}")
-            import traceback
-
-            traceback.print_exc()
+            log_err(f"Aggregation failed for {run_id}: {e}")
+            if run_id in pipeline_runs:
+                pipeline_runs[run_id]["status"] = "error"
+                pipeline_runs[run_id]["error"] = str(e)
+                pipeline_runs[run_id]["statusMessage"] = f"Aggregation failed: {e}"
+            queue_store.upsert_pipeline_state(run_id, status="error", status_message=f"Aggregation failed: {e}")
+        return
 
 
 # Track 404 requests for non-existent run IDs to prevent spam from stale browser tabs
@@ -1249,46 +1217,61 @@ def _parse_run_from_csv_filename(name: str) -> dict | None:
 
 
 def list_all_runs() -> list:
-    """List all runs from persistent storage, excluding deleted runs"""
+    """List all runs — primary source is pipeline_state table in Postgres, with fallbacks."""
     seen_ids = set()
     runs = []
     try:
-        # Get all metadata files
-        for metadata_file in METADATA_DIR.glob("*.json"):
-            try:
-                with open(metadata_file, 'r') as f:
-                    metadata = json.load(f)
-                    # Skip deleted runs (filter them out from view)
+        # Primary source: pipeline_state table in Postgres
+        if queue_store.is_enabled():
+            for ps in queue_store.list_pipeline_states(SCRAPER_TYPE):
+                rid = ps["run_id"]
+                seen_ids.add(rid)
+                entry = {
+                    "run_id": rid,
+                    "state": ps.get("state", ""),
+                    "status": ps.get("status", "running"),
+                    "scraper_type": ps.get("scraper_type", "church"),
+                    "display_name": ps.get("display_name", ""),
+                    "created_at": ps.get("created_at", ""),
+                    "completed_at": ps.get("completed_at", ""),
+                    "total_counties": int(ps.get("total_counties") or 0),
+                    "progress": int(ps.get("progress") or 0),
+                    "total_contacts": int(ps.get("total_contacts") or 0),
+                    "total_contacts_with_emails": int(ps.get("total_contacts_with_emails") or 0),
+                    "csv_filename": ps.get("csv_filename", ""),
+                    "archived": False,
+                }
+                _backfill_run_list_fields(entry, "church")
+                runs.append(entry)
+
+        # Fallback: metadata JSON files on volume (backwards compat)
+        try:
+            for metadata_file in METADATA_DIR.glob("*.json"):
+                try:
+                    with open(metadata_file, 'r') as f:
+                        metadata = json.load(f)
                     if metadata.get("deleted", False):
                         continue
-                    
-                    metadata["run_id"] = metadata_file.stem  # Add run_id from filename
+                    metadata["run_id"] = metadata_file.stem
+                    if metadata["run_id"] in seen_ids:
+                        continue
                     seen_ids.add(metadata["run_id"])
-                    # Ensure archived field exists (default to False for backwards compatibility)
                     if "archived" not in metadata:
                         metadata["archived"] = False
                     _backfill_run_list_fields(metadata, "church")
                     runs.append(metadata)
-            except Exception as e:
-                log_err(f"Metadata read failed: {metadata_file}: {e}")
-                continue
+                except Exception as e:
+                    log_err(f"Metadata read failed: {metadata_file}: {e}")
+        except Exception:
+            pass  # METADATA_DIR may not exist without volume
 
-        # Fallback: include runs from volume CSVs when metadata is missing (e.g. after container restart)
-        for f in VOLUME_DIR.glob("*_leads_*.csv"):
-            parsed = _parse_run_from_csv_filename(f.name)
-            if parsed and parsed["run_id"] not in seen_ids:
-                _backfill_run_list_fields(parsed, "church")
-                seen_ids.add(parsed["run_id"])
-                runs.append(parsed)
-
-        # Include dispatch runs from Postgres (visible across all replicas)
+        # Fallback: dispatch runs from Postgres (for runs without pipeline_state rows)
         if queue_store.is_enabled():
             try:
                 for dr in queue_store.list_dispatch_runs(SCRAPER_TYPE):
                     rid = dr["run_id"]
                     if rid in seen_ids:
                         continue
-                    # Skip cancelled dispatch runs (not useful to display)
                     if bool(dr.get("cancelled")):
                         continue
                     seen_ids.add(rid)
@@ -1300,8 +1283,7 @@ def list_all_runs() -> list:
                     terminal = int(prog.get("terminal") or 0)
                     total = int(dr.get("total_counties") or 0)
                     is_done = bool(dr.get("aggregation_done"))
-                    is_cancelled = bool(dr.get("cancelled"))
-                    status = "completed" if is_done else ("cancelled" if is_cancelled else "running")
+                    status = "completed" if is_done else "running"
                     runs.append({
                         "run_id": rid,
                         "state": dr.get("state", ""),
@@ -1317,7 +1299,6 @@ def list_all_runs() -> list:
             except Exception as e:
                 log_warn(f"Could not load dispatch runs: {e}")
 
-        # Sort by created_at (newest first)
         runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return runs
     except Exception as e:
@@ -1873,6 +1854,31 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 int(pr.get("totalContacts", len(final_df))),
             )
             log_state_complete(state, len(counties), len(counties), elapsed_h)
+
+            # Store final CSV in Postgres (durable source of truth for downloads)
+            try:
+                queue_store.store_final_csv(run_id, csv_content, csv_filename, len(final_df))
+            except Exception as e:
+                log_warn(f"Could not store final CSV in Postgres: {e}")
+
+            # Update pipeline_state in Postgres with final results
+            queue_store.upsert_pipeline_state(
+                run_id,
+                status="completed",
+                progress=100,
+                counties_processed=len(counties),
+                total_counties=len(counties),
+                total_contacts=len(final_df),
+                total_contacts_with_emails=len(contacts_with_emails_final),
+                churches_found=int(pr.get("churchesFound", 0)),
+                csv_filename=csv_filename,
+                completed_at=datetime.now().isoformat(),
+                cost_estimate_json=json.dumps(metadata.get("cost_estimate", {})),
+                places_api_calls=places_calls,
+                openai_calls=int(pr.get("openai_calls_total", 0)),
+                openai_prompt_tokens=openai_input_tok,
+                openai_completion_tokens=openai_output_tok,
+            )
         else:
             log_err(f"Final CSV not created at {final_csv_path}")
             pipeline_runs[run_id]["totalContacts"] = len(deduplicated)
@@ -2001,7 +2007,18 @@ def run_streaming_pipeline(
         "openai_prompt_tokens_total": 0,
         "openai_completion_tokens_total": 0,
     }
-    
+
+    # Persist initial state to Postgres
+    queue_store.upsert_pipeline_state(
+        run_id,
+        state=state.lower(),
+        status="running",
+        scraper_type=SCRAPER_TYPE,
+        display_name=_run_display_name(state, SCRAPER_TYPE),
+        start_time=pipeline_runs[run_id]["startTime"],
+        queue_job_id=queue_job_id,
+    )
+
     def process_all_counties():
         """
         Process all counties (sequentially or in parallel) with checkpointing.
@@ -2945,6 +2962,7 @@ def _synthetic_pipeline_status_from_dispatch(run_id: str) -> Optional[dict]:
         "openai_calls_total": int(prog.get("openai_calls_total") or 0),
         "openai_prompt_tokens_total": int(prog.get("openai_prompt_tokens_total") or 0),
         "openai_completion_tokens_total": int(prog.get("openai_completion_tokens_total") or 0),
+        "countyTasks": queue_store.get_county_tasks_for_run(run_id),
     }
 
 
@@ -3048,7 +3066,11 @@ def pipeline_status(run_id):
                 run_data["estimatedTimeRemaining"] = 0
     else:
         run_data["estimatedTimeRemaining"] = 0
-    
+
+    # Add countyTasks for frontend county table (if not already present from synthetic status)
+    if "countyTasks" not in run_data and queue_store.is_enabled():
+        run_data["countyTasks"] = queue_store.get_county_tasks_for_run(run_id)
+
     response = jsonify(run_data)
     response.headers.add("Access-Control-Allow-Origin", "*")
     return response, 200
@@ -3667,6 +3689,17 @@ def download_run_csv(run_id: str):
                 if csv_path:
                     break
         if not csv_path or not os.path.exists(csv_path):
+            # Final fallback: read from Postgres (durable source of truth)
+            csv_record = queue_store.get_final_csv(run_id)
+            if csv_record:
+                from io import BytesIO
+                from flask import send_file
+                return send_file(
+                    BytesIO(csv_record["csv_data"].encode("utf-8")),
+                    mimetype='text/csv',
+                    as_attachment=True,
+                    download_name=csv_record["csv_filename"]
+                )
             return jsonify({
                 "status": "error",
                 "error": "Run not found"
@@ -3736,25 +3769,37 @@ def _repair_stuck_metadata() -> None:
 
 
 def _ensure_api_bootstrap() -> None:
-    """Run once per process: silent cleanup + queue worker (avoids duplicate startup logs)."""
+    """Run once per process: role-based startup for manager vs worker."""
     global _bootstrap_done  # noqa: PLW0603
     with _bootstrap_lock:
         if _bootstrap_done:
             return
         _bootstrap_done = True
+        log_warn(f"Bootstrap: ROLE={ROLE} PID={os.getpid()} HOST={socket.gethostname()}")
         _repair_stuck_metadata()
         cleanup_old_runs(silent_success=True)
         if queue_store.init_db(log_ready=False):
-            threading.Thread(target=_church_queue_worker_loop, daemon=True).start()
-            n_proc = max(1, WORKERS_PER_REPLICA)
-            for i in range(n_proc):
-                tag = f"{_CHURCH_PROCESS_ID}-w{i}"
-                threading.Thread(
-                    target=_county_processor_worker_loop,
-                    args=(tag,),
-                    daemon=True,
-                ).start()
-            threading.Thread(target=_church_aggregation_recovery_loop, daemon=True).start()
+            if IS_MANAGER:
+                # Manager: queue worker + aggregation watcher, NO county processors
+                log_warn("Manager mode: starting queue worker + aggregation watcher (0 county workers)")
+                threading.Thread(target=_church_queue_worker_loop, daemon=True).start()
+                # No aggregation recovery loop needed — manager is the sole aggregator
+            elif IS_WORKER:
+                # Worker: county processors only, NO queue worker, NO aggregation
+                n_proc = max(1, WORKERS_PER_REPLICA)
+                log_warn(f"Worker mode: starting {n_proc} county processor(s)")
+                # Crash recovery: release counties claimed by previous incarnation of this host
+                try:
+                    queue_store.release_stale_claims(socket.gethostname())
+                except Exception as e:
+                    log_warn(f"Crash recovery failed: {e}")
+                for i in range(n_proc):
+                    tag = f"{_CHURCH_PROCESS_ID}-w{i}"
+                    threading.Thread(
+                        target=_county_processor_worker_loop,
+                        args=(tag,),
+                        daemon=True,
+                    ).start()
 
 
 _ensure_api_bootstrap()
