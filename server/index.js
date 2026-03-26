@@ -2,6 +2,7 @@ import express from 'express';
 import { OpenAI } from 'openai';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readFileSync } from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -45,6 +46,25 @@ app.post('/api/polish', async (req, res) => {
   } catch (err) {
     console.error('OpenAI error:', err.message);
     res.status(500).json({ error: 'AI service error' });
+  }
+});
+
+// Template endpoints — serve JSON files so legal language can be updated
+// without touching React code. Edit files in /templates/ and redeploy.
+const TEMPLATES_DIR = path.join(__dirname, '..', 'templates');
+const TEMPLATE_FILES = {
+  'pre-award': 'pre-award.json',
+  'in-house':  'in-house.json',
+  'post-award': 'post-award.json',
+};
+app.get('/api/templates/:type', (req, res) => {
+  const file = TEMPLATE_FILES[req.params.type];
+  if (!file) return res.status(404).json({ error: 'Unknown template type' });
+  try {
+    const data = readFileSync(path.join(TEMPLATES_DIR, file), 'utf8');
+    res.type('json').send(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Could not load template' });
   }
 });
 
