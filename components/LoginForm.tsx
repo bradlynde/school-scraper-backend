@@ -68,7 +68,7 @@ export default function LoginForm() {
       minHeight: "100vh",
       display: "flex",
       flexDirection: "column",
-      background: "#ffffff",
+      background: "#f7f8fa",
       fontFamily: "Inter, system-ui, sans-serif",
     }}>
       {/* Logo - top left */}
@@ -85,17 +85,24 @@ export default function LoginForm() {
 
       <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", marginTop: -60 }}>
         <div style={{ width: "100%", maxWidth: 400, padding: "0 16px" }}>
-          <div style={{ marginBottom: 32, textAlign: "center" }}>
+          <div style={{
+            background: "#ffffff",
+            borderRadius: 14,
+            border: "1px solid #e5e7eb",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06)",
+            padding: "36px 32px",
+          }}>
+          <div style={{ marginBottom: 28, textAlign: "center" }}>
             <h2 style={{
               margin: "0 0 4px",
-              fontSize: 24,
+              fontSize: 22,
               fontWeight: 700,
               color: "#111827",
               letterSpacing: "-0.02em",
             }}>
               Welcome back
             </h2>
-            <p style={{ margin: 0, fontSize: 14, color: "#9ca3af" }}>
+            <p style={{ margin: 0, fontSize: 13, color: "#9ca3af" }}>
               Sign in to continue
             </p>
           </div>
@@ -164,6 +171,7 @@ export default function LoginForm() {
               {loading ? "Signing in..." : "Sign In"}
             </button>
           </form>
+          </div>
         </div>
       </div>
     </div>
