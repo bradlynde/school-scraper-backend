@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import html2pdf from "html2pdf.js";
 // ─── PRICING TABLES ───────────────────────────────────────────────────────────
 const PRICING = {
   "pre-only": {
@@ -806,20 +807,35 @@ export default function App() {
   };
   const handlePrint = () => {
     const docTitle = isGw ? "Grant Writer New Client Form - " : "Engagement Letter - ";
-    const bodyHtml = previewRef.current.innerHTML;
-    const hideButtons = isGw ? "button{display:none!important}.no-print{display:none!important}" : "";
-    const printHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle + (form.clientName||"Client")}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Ms+Madi&display=swap" rel="stylesheet"><style>
-      body{font-family:Georgia,serif;font-size:11.5pt;line-height:1.7;color:#1a1a1a;margin:0;padding:0}
-      .page{padding:72pt;max-width:8.5in;margin:0 auto}
-      pre{white-space:pre-wrap;font-family:Georgia,serif;font-size:11pt;line-height:1.75;margin:0 0 8pt}
-      div,span{font-family:Georgia,serif;font-size:11pt;line-height:1.75;box-sizing:border-box}
-      @media print{@page{margin:72pt;size:letter}body{margin:0}${hideButtons}}
-    </style></head><body><div class="page">${bodyHtml}</div><script>
-      // Wait for fonts to load then print
-      document.fonts.ready.then(function(){ window.print(); });
-    <\/script></body></html>`;
-    const win = window.open("", "_blank");
-    if(win){ win.document.write(printHtml); win.document.close(); }
+    const clientLabel = form.clientName || "Client";
+    const filename = `${docTitle}${clientLabel}.pdf`;
+    if (isGw) {
+      // Grant Writer tab: use print dialog (has checkbox fields that render better via print)
+      const bodyHtml = previewRef.current.innerHTML;
+      const printHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle + clientLabel}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Ms+Madi&display=swap" rel="stylesheet"><style>
+        body{font-family:Georgia,serif;font-size:11.5pt;line-height:1.7;color:#1a1a1a;margin:0;padding:0}
+        .page{padding:72pt;max-width:8.5in;margin:0 auto}
+        pre{white-space:pre-wrap;font-family:Georgia,serif;font-size:11pt;line-height:1.75;margin:0 0 8pt}
+        div,span{font-family:Georgia,serif;font-size:11pt;line-height:1.75;box-sizing:border-box}
+        button{display:none!important}.no-print{display:none!important}
+        @media print{@page{margin:72pt;size:letter}body{margin:0}}
+      </style></head><body><div class="page">${bodyHtml}</div><script>
+        document.fonts.ready.then(function(){ window.print(); });
+      <\/script></body></html>`;
+      const win = window.open("", "_blank");
+      if(win){ win.document.write(printHtml); win.document.close(); }
+    } else {
+      // Engagement letter tabs: direct PDF download, no dialog
+      const el = previewRef.current;
+      html2pdf().set({
+        margin: [0.75, 0.75, 0.75, 0.75],
+        filename,
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, logging: false },
+        jsPDF: { unit: "in", format: "letter", orientation: "portrait" },
+        pagebreak: { mode: ["avoid-all", "css", "legacy"] },
+      }).from(el).save();
+    }
   };
   // ── TEMPLATE EDITOR ────────────────────────────────────────────────────────
   if(mode==="template"){
