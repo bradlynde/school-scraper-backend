@@ -43,21 +43,21 @@ export default function LoginForm() {
   const inputStyle: React.CSSProperties = {
     width: "100%",
     padding: "12px 16px",
-    background: "rgba(255,255,255,0.06)",
-    border: "1px solid rgba(255,255,255,0.12)",
+    background: "#f3f4f6",
+    border: "1px solid #e5e7eb",
     borderRadius: 10,
     fontSize: 14,
-    color: "#e8eaf0",
+    color: "#111827",
     outline: "none",
     boxSizing: "border-box",
-    transition: "border-color 0.15s",
+    transition: "border-color 0.2s, box-shadow 0.2s",
   };
 
   const labelStyle: React.CSSProperties = {
     display: "block",
     fontSize: 12,
-    fontWeight: 500,
-    color: "rgba(255,255,255,0.5)",
+    fontWeight: 600,
+    color: "#6b7280",
     textTransform: "uppercase",
     letterSpacing: "0.06em",
     marginBottom: 8,
@@ -68,104 +68,102 @@ export default function LoginForm() {
       minHeight: "100vh",
       display: "flex",
       flexDirection: "column",
-      background: "linear-gradient(135deg, #0a1628 0%, #0f1f38 50%, #162d4d 100%)",
+      background: "#ffffff",
       fontFamily: "Inter, system-ui, sans-serif",
     }}>
       {/* Logo - top left */}
-      <div style={{ position: "absolute", top: 0, left: 0, padding: "24px 28px", minHeight: 72, display: "flex", alignItems: "center" }}>
+      <div style={{ padding: "28px 32px" }}>
         <Image
           src="/npsa-logo.png"
           alt="NPSA"
-          width={140}
-          height={42}
-          style={{ height: "auto", objectFit: "contain", filter: "brightness(0) invert(1)", opacity: 0.8 }}
+          width={160}
+          height={48}
+          style={{ height: "auto", objectFit: "contain" }}
           priority
         />
       </div>
 
-      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ width: "100%", maxWidth: 380, padding: "0 16px" }}>
-          <div style={{
-            background: "rgba(255,255,255,0.04)",
-            borderRadius: 16,
-            border: "1px solid rgba(255,255,255,0.08)",
-            backdropFilter: "blur(20px)",
-            padding: "36px 32px",
-          }}>
+      <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", marginTop: -60 }}>
+        <div style={{ width: "100%", maxWidth: 400, padding: "0 16px" }}>
+          <div style={{ marginBottom: 32, textAlign: "center" }}>
             <h2 style={{
               margin: "0 0 4px",
-              fontSize: 20,
+              fontSize: 24,
               fontWeight: 700,
-              color: "#fff",
+              color: "#111827",
               letterSpacing: "-0.02em",
             }}>
               Welcome back
             </h2>
-            <p style={{ margin: "0 0 28px", fontSize: 13, color: "rgba(255,255,255,0.4)" }}>
+            <p style={{ margin: 0, fontSize: 14, color: "#9ca3af" }}>
               Sign in to continue
             </p>
-
-            <form onSubmit={handleSubmit}>
-              <div style={{ marginBottom: 18 }}>
-                <label style={labelStyle}>Username</label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  required
-                  placeholder="Enter your username"
-                  autoComplete="username"
-                  style={inputStyle}
-                />
-              </div>
-
-              <div style={{ marginBottom: 18 }}>
-                <label style={labelStyle}>Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  placeholder="Enter your password"
-                  autoComplete="current-password"
-                  style={inputStyle}
-                />
-              </div>
-
-              {error && (
-                <div style={{
-                  padding: 12,
-                  background: "rgba(220, 38, 38, 0.15)",
-                  border: "1px solid rgba(220, 38, 38, 0.3)",
-                  borderRadius: 10,
-                  marginBottom: 18,
-                }}>
-                  <p style={{ color: "#fca5a5", fontSize: 13, fontWeight: 500, margin: 0, whiteSpace: "pre-line" }}>{error}</p>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading}
-                style={{
-                  width: "100%",
-                  padding: "14px 24px",
-                  borderRadius: 10,
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "#fff",
-                  background: loading ? "rgba(255,255,255,0.1)" : "#1e3a5f",
-                  border: "none",
-                  cursor: loading ? "not-allowed" : "pointer",
-                  boxShadow: loading ? "none" : "0 4px 12px rgba(30,58,95,0.4)",
-                  transition: "all 0.2s",
-                  letterSpacing: "0.01em",
-                }}
-              >
-                {loading ? "Signing in..." : "Sign In"}
-              </button>
-            </form>
           </div>
+
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelStyle}>Username</label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                placeholder="Enter your username"
+                autoComplete="username"
+                style={inputStyle}
+                onFocus={(e) => { e.target.style.borderColor = "#1e3a5f"; e.target.style.boxShadow = "0 0 0 3px rgba(30,58,95,0.1)"; }}
+                onBlur={(e) => { e.target.style.borderColor = "#e5e7eb"; e.target.style.boxShadow = "none"; }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={labelStyle}>Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                placeholder="Enter your password"
+                autoComplete="current-password"
+                style={inputStyle}
+                onFocus={(e) => { e.target.style.borderColor = "#1e3a5f"; e.target.style.boxShadow = "0 0 0 3px rgba(30,58,95,0.1)"; }}
+                onBlur={(e) => { e.target.style.borderColor = "#e5e7eb"; e.target.style.boxShadow = "none"; }}
+              />
+            </div>
+
+            {error && (
+              <div style={{
+                padding: 12,
+                background: "#fef2f2",
+                border: "1px solid #fecaca",
+                borderRadius: 10,
+                marginBottom: 18,
+              }}>
+                <p style={{ color: "#dc2626", fontSize: 13, fontWeight: 500, margin: 0, whiteSpace: "pre-line" }}>{error}</p>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                width: "100%",
+                padding: "14px 24px",
+                borderRadius: 10,
+                fontSize: 14,
+                fontWeight: 600,
+                color: "#fff",
+                background: loading ? "#9ca3af" : "#1e3a5f",
+                border: "none",
+                cursor: loading ? "not-allowed" : "pointer",
+                boxShadow: loading ? "none" : "0 2px 8px rgba(30,58,95,0.25)",
+                transition: "all 0.2s",
+                letterSpacing: "0.01em",
+              }}
+            >
+              {loading ? "Signing in..." : "Sign In"}
+            </button>
+          </form>
         </div>
       </div>
     </div>

@@ -139,8 +139,20 @@ export default function HomePage() {
 
   return (
     <div className="page-container" style={{ padding: "28px 36px", maxWidth: 1200, margin: "0 auto" }}>
+      <style>{`
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-in { animation: fadeInUp 0.4s ease-out both; }
+        .delay-1 { animation-delay: 0.05s; }
+        .delay-2 { animation-delay: 0.1s; }
+        .delay-3 { animation-delay: 0.15s; }
+        .delay-4 { animation-delay: 0.2s; }
+        .delay-5 { animation-delay: 0.25s; }
+      `}</style>
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+      <div className="animate-in" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: COLORS.textPrimary, margin: 0, letterSpacing: "-0.02em" }}>
             Dashboard
@@ -161,8 +173,10 @@ export default function HomePage() {
               textDecoration: "none",
               fontSize: 12,
               fontWeight: 600,
-              transition: "background 0.15s",
+              transition: "all 0.2s",
             }}
+            onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(30,58,95,0.3)"; }}
+            onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
           >
             + Church Run
           </Link>
@@ -179,8 +193,10 @@ export default function HomePage() {
               textDecoration: "none",
               fontSize: 12,
               fontWeight: 600,
-              transition: "background 0.15s",
+              transition: "all 0.2s",
             }}
+            onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(107,142,35,0.3)"; }}
+            onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = "none"; }}
           >
             + School Run
           </Link>
@@ -189,13 +205,13 @@ export default function HomePage() {
 
       {/* Active Pipeline Hero — collapses when no active runs */}
       {activeRuns.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
+        <div className="animate-in delay-1" style={{ marginBottom: 20 }}>
           <ActivePipelineHero activeRuns={activeRuns} />
         </div>
       )}
 
       {/* US State Map — main feature */}
-      <div style={{
+      <div className="animate-in delay-2" style={{
         background: COLORS.cardBg,
         borderRadius: 14,
         padding: "24px 28px",
@@ -226,7 +242,7 @@ export default function HomePage() {
       </div>
 
       {/* Metric Cards */}
-      <div style={{ marginBottom: 20 }}>
+      <div className="animate-in delay-3" style={{ marginBottom: 20 }}>
         <MetricCards
           avgDurationPerCounty={avgDuration}
           avgCostPerCounty={avgCost}
@@ -234,7 +250,7 @@ export default function HomePage() {
       </div>
 
       {/* Two-column: Recent Runs + Activity Timeline */}
-      <div className="grid-responsive" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+      <div className="animate-in delay-4 grid-responsive" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
         {/* Recent Runs */}
         <div style={{
           background: COLORS.cardBg,

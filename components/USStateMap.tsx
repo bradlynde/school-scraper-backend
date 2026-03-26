@@ -59,6 +59,12 @@ function getStateColor(stateId: string, stateData: Record<string, StateData>): s
   return "#e5e7eb";
 }
 
+function isInProgress(stateId: string, stateData: Record<string, StateData>): boolean {
+  const data = stateData[stateId];
+  if (!data) return false;
+  return (data.churchRun?.completed_at === "In Progress") || (data.schoolRun?.completed_at === "In Progress");
+}
+
 function formatDate(dateStr: string): string {
   if (!dateStr || dateStr === "In Progress") return dateStr || "-";
   try {
@@ -97,15 +103,24 @@ export default function USStateMap({ stateData }: USStateMapProps) {
         style={{ width: "100%", height: "auto" }}
         xmlns="http://www.w3.org/2000/svg"
       >
+        <defs>
+          <style>{`
+            @keyframes statePulse {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.45; }
+            }
+          `}</style>
+        </defs>
         {Object.entries(US_STATE_PATHS).map(([stateId, pathD]) => {
           const color = getStateColor(stateId, stateData);
           const isHovered = tooltip?.stateId === stateId;
           const hasData = !!stateData[stateId];
+          const pulsing = isInProgress(stateId, stateData);
 
-          // Alaska: rotate -30deg, scale 1.2x around its center
+          // Alaska: rotate -30deg, scale 1.2x, move down near Hawaii
           // Hawaii: rotate -30deg, shift right
           const transform = stateId === "alaska"
-            ? "translate(170,475) scale(1.2) rotate(-30) translate(-170,-475)"
+            ? "translate(170,545) scale(1.2) rotate(-30) translate(-170,-475)"
             : stateId === "hawaii"
             ? "translate(330,515) rotate(-30) translate(-300,-515)"
             : undefined;
@@ -122,6 +137,7 @@ export default function USStateMap({ stateData }: USStateMapProps) {
                 cursor: hasData ? "pointer" : "default",
                 opacity: isHovered ? 0.85 : 1,
                 transition: "opacity 0.15s ease",
+                animation: pulsing ? "statePulse 2s ease-in-out infinite" : "none",
               }}
               onMouseMove={(e) => handleMouseMove(e, stateId)}
               onMouseLeave={handleMouseLeave}

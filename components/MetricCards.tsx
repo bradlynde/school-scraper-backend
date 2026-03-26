@@ -44,7 +44,11 @@ export default function MetricCards({ avgDurationPerCounty, avgCostPerCounty }: 
             display: "flex",
             alignItems: "center",
             gap: 16,
+            transition: "transform 0.2s ease, box-shadow 0.2s ease",
+            cursor: "default",
           }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = COLORS.cardShadowHover; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; e.currentTarget.style.boxShadow = COLORS.cardShadow; }}
         >
           <div style={{
             width: 40,
