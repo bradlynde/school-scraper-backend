@@ -301,7 +301,7 @@ const defaultForm = {
   inhInstallment2Pct:"50", inhInstallment2Label:"upon award notification",
   inhInstallment3Pct:"", inhInstallment3Label:"",
   inhOptNofo:false, inhOptStateSwitch:false, inhOptPostAwardScope:true, inhOptShortNotice:false,
-  inhEarlySigningDiscount:false, inhEarlySigningDate:"March 15, 2026", inhEarlySigningAmount:"500",
+  inhEarlySigningDiscount:false, inhEarlySigningDate:"March 15, 2026", inhEarlySigningAmount:"1,500",
   inhPostAwardFee:"1,000",
   inhCustomClause:"", inhPolishedClause:"",
   postFee:"7,000", postPmt1:"40", postPmt2:"30", postPmt3:"30", postGrantYear:String(new Date().getFullYear()), postStateProgram:"",
@@ -963,10 +963,6 @@ export default function App() {
           </div>
           {/* Fee Calculator */}
           <div style={{fontSize:10,fontWeight:700,color:"#6c7a9c",letterSpacing:1,textTransform:"uppercase",marginTop:16,marginBottom:7,borderBottom:"1px solid #2a3550",paddingBottom:5}}>Fee Calculator</div>
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:10,cursor:"pointer"}}>
-            <input type="checkbox" checked={form.engagementModel==="partial-contingency"} onChange={e=>setF("engagementModel",e.target.checked?"partial-contingency":"pre-only")} style={{accentColor:"#9aab2e"}}/>
-            Partial Contingency
-          </label>
           <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Pricing Tier</label>
           <select value={form.pricingTier} onChange={e=>setF("pricingTier",e.target.value)}
             style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,marginBottom:10,outline:"none"}}>
