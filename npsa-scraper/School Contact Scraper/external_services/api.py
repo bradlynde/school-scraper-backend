@@ -1536,7 +1536,35 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
     try:
         counties = load_counties_from_state(state)
         run_dir = RUNS_DIR / run_id
-        
+
+        # Ensure run exists in local pipeline_runs dict (may not if another replica created it)
+        if run_id not in pipeline_runs:
+            run_row = db_state.get_run(run_id)
+            if run_row:
+                pipeline_runs[run_id] = {
+                    "status": run_row.get("status", "running"),
+                    "state": run_row.get("state", state).lower(),
+                    "progress": run_row.get("progress", 0),
+                    "statusMessage": "Aggregating...",
+                    "totalContacts": run_row.get("total_contacts", 0),
+                    "totalContactsWithEmails": run_row.get("total_contacts_with_emails", 0),
+                    "schoolsFound": run_row.get("schools_found", 0),
+                    "schoolsProcessed": run_row.get("schools_processed", 0),
+                    "countiesProcessed": run_row.get("counties_processed", 0),
+                    "totalCounties": run_row.get("total_counties", len(counties)),
+                    "startTime": run_row.get("start_time", time.time()),
+                    "csvData": None,
+                    "csvFilename": run_row.get("csv_filename"),
+                    "error": None,
+                }
+            else:
+                pipeline_runs[run_id] = {
+                    "status": "running",
+                    "state": state.lower(),
+                    "statusMessage": "Aggregating...",
+                    "startTime": time.time(),
+                }
+
         pipeline_runs[run_id]["statusMessage"] = "Waiting for all counties to complete..."
         
         # Wait for all counties to complete (check that all CSV files exist)
@@ -1623,6 +1651,10 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             pipeline_runs[run_id]["status"] = "finalizing"
             pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found. Finalizing..."
             pipeline_runs[run_id]["finalizingAt"] = time.time()
+            try:
+                db_state.update_run(run_id, status="finalizing", total_contacts=0, status_message="No contacts found")
+            except Exception:
+                pass
             
             # Create restart marker for start.sh to detect restart
             try:
@@ -1772,6 +1804,19 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         pipeline_runs[run_id]["progress"] = 100
         pipeline_runs[run_id]["countiesProcessed"] = len(counties)
         pipeline_runs[run_id]["finalizingAt"] = time.time()  # Track when finalizing started
+        # Sync to db_state so other replicas and API see the update
+        try:
+            db_state.update_run(
+                run_id,
+                status="finalizing",
+                progress=100,
+                total_contacts=pipeline_runs[run_id].get("totalContacts", 0),
+                total_contacts_with_emails=pipeline_runs[run_id].get("totalContactsWithEmails", 0),
+                csv_filename=pipeline_runs[run_id].get("csvFilename"),
+                status_message=f"Finalizing: {len(counties)} counties, {len(contacts_enriched)} enriched",
+            )
+        except Exception as db_err:
+            print(f"[{run_id}] WARNING: Could not sync finalizing state to db_state: {db_err}")
         
         # Create restart marker for start.sh to detect restart
         try:
@@ -1787,7 +1832,13 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 pipeline_runs[run_id]["status"] = "completed"
                 pipeline_runs[run_id]["statusMessage"] = f"Pipeline completed! Processed {len(counties)} counties. Enriched {len(contacts_enriched)} contacts."
                 pipeline_runs[run_id]["completedAt"] = time.time()
-                
+
+                # Sync completion to db_state
+                try:
+                    db_state.update_run(run_id, status="completed", status_message="Completed")
+                except Exception:
+                    pass
+
                 # Update metadata to mark as completed (so it appears in Finished tab)
                 metadata = load_run_metadata(run_id) or {}
                 metadata.update({
@@ -1819,9 +1870,16 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         finalize_thread.start()
         
     except Exception as e:
+        if run_id not in pipeline_runs:
+            pipeline_runs[run_id] = {"status": "error", "state": state.lower()}
         pipeline_runs[run_id]["status"] = "error"
         pipeline_runs[run_id]["error"] = str(e)
         pipeline_runs[run_id]["statusMessage"] = f"Failed to aggregate results: {str(e)}"
+        # Also update db_state so the error is visible across replicas
+        try:
+            db_state.update_run(run_id, status="error", status_message=f"Aggregation failed: {str(e)}")
+        except Exception:
+            pass
         import traceback
         traceback.print_exc()
 
