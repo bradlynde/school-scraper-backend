@@ -137,7 +137,7 @@ This engagement specifically applies to the [GRANT_LABEL]. All commitments made 
 1. Pre-Award Period – This period includes all activities required from the present time through receipt of the award notification.
 2. Compliance Period – This period covers all required steps following award notification and prior to CLIENT being authorized to commit funding or begin implementation of approved security improvements.
 3. Award Implementation Period – This final period includes project execution, ongoing grant administration, and concludes with successful implementation and reimbursement.
-The scope of work under this engagement letter is limited to the Pre-Award and Compliance Periods. While NPSA offers Award Implementation support services, grant rules prohibit CLIENT from engaging NPSA for such services until all Compliance Period requirements have been completed.`},
+NPSA will utilize its in-house consulting and grant writing team to deliver the services outlined in this Engagement Letter. While NPSA provides limited Implementation Period Support, the CLIENT will not be eligible for reimbursement through grant funds for any such support under this engagement. The CLIENT may choose to engage a separate firm for Award Implementation if desired.`},
   { id:"inh_scope", title:"Scope of Work", roman:"II.",
     subsections:[{ id:"inh_scope_pre", title:"A. Pre-Award Period Consulting",
       content:`1. NPSA will complete an initial fact-finding meeting with CLIENT to determine the project goals and to obtain additional preliminary information.
@@ -559,7 +559,10 @@ export default function App() {
             const label=loc.name?`${loc.name}${parts?": ":""}`:  "";
             return `   ${li+1}. ${label}${parts||"[Address TBD]"}`;
           }).join("\n");
-          return `3. NPSA already believes, but does not guarantee, that CLIENT is likely eligible for one application of the ${pg.year||form.grantYear} ${cfg.acronym} which includes funding for target hardening and other physical security enhancements. The total maximum grant award is $${cfg.maxAward} per awarded location.\n   (a) Under current program guidelines, CLIENT may submit one application per physical address, for up to ${n} distinct location(s). Each location is scored independently and may be awarded the maximum funding amount.\n   (b) This engagement includes support for the submission of ${nWord} ${appWord} for ${n} distinct location(s), at the following address(es):\n${locLines}`;
+          const eligibilityPhrase = n === 1
+            ? `eligible for one application of the ${pg.year||form.grantYear} ${cfg.acronym}`
+            : `eligible for one application for each of the (${n}) locations for the ${pg.year||form.grantYear} ${cfg.acronym}`;
+          return `3. NPSA already believes, but does not guarantee, that CLIENT is likely ${eligibilityPhrase} which includes funding for target hardening and other physical security enhancements. The total maximum grant award is $${cfg.maxAward} per awarded location.\n   (a) Under current program guidelines, CLIENT may submit one application per physical address, for up to ${n} distinct location(s). Each location is scored independently and may be awarded the maximum funding amount.\n   (b) This engagement includes support for the submission of ${nWord} ${appWord} for ${n} distinct location(s), at the following address(es):\n${locLines}`;
         })();
     // Build GRANT_LABEL for intro (list all programs)
     const grantLabelStr = progs.map(pg => (PROGRAMS[pg.key]||PROGRAMS.federal).fullName(pg.year||form.grantYear)).join(" and the ");
@@ -673,7 +676,10 @@ export default function App() {
             const label=loc.name?`${loc.name}${parts?": ":""}`:  "";
             return `   ${li+1}. ${label}${parts||"[Address TBD]"}`;
           }).join("\n");
-          return `3. NPSA already believes, but does not guarantee, that CLIENT is likely eligible for one application of the ${pg.year||form.grantYear} ${cfg.acronym}. The total maximum grant award is $${cfg.maxAward} per awarded location.\n   (a) Under current program guidelines, CLIENT may submit one application per physical address, for up to ${n} distinct location(s).\n   (b) This engagement includes support for the submission of ${nWord} ${appWord} for ${n} distinct location(s), at the following address(es):\n${locLines}`;
+          const eligibilityPhraseInh = n === 1
+            ? `eligible for one application of the ${pg.year||form.grantYear} ${cfg.acronym}`
+            : `eligible for one application for each of the (${n}) locations for the ${pg.year||form.grantYear} ${cfg.acronym}`;
+          return `3. NPSA already believes, but does not guarantee, that CLIENT is likely ${eligibilityPhraseInh}. The total maximum grant award is $${cfg.maxAward} per awarded location.\n   (a) Under current program guidelines, CLIENT may submit one application per physical address, for up to ${n} distinct location(s).\n   (b) This engagement includes support for the submission of ${nWord} ${appWord} for ${n} distinct location(s), at the following address(es):\n${locLines}`;
         })();
     const grantLabelStrInh = progs.map(pg => (PROGRAMS[pg.key]||PROGRAMS.federal).fullName(pg.year||form.grantYear)).join(" and the ");
     const pg0inh = progs[0]||{key:"federal",year:form.grantYear};
