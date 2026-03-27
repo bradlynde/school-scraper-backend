@@ -290,9 +290,9 @@ const defaultForm = {
   installment1Pct:"50", installment1Label:"upon execution",
   installment2Pct:"50", installment2Label:"upon award notification",
   installment3Pct:"", installment3Label:"",
-  optNofo:false, optStateSwitch:false, optPostAwardScope:false, optShortNotice:false,
+  optNofo:false, optStateSwitch:false, optPostAwardScope:true, optShortNotice:false,
   earlySigningDate:"March 15, 2026", earlySigningAmount:"500",
-  postAwardFee:"1,000",
+  postAwardFee:"0",
   customClause:"", polishedClause:"",
   // In-house pre-award fields
   inhEngagementModel:"inh-pre-only", inhPricingTier:"undiscounted", inhCustomFee:"",
@@ -300,9 +300,9 @@ const defaultForm = {
   inhInstallment1Pct:"50", inhInstallment1Label:"upon execution",
   inhInstallment2Pct:"50", inhInstallment2Label:"upon award notification",
   inhInstallment3Pct:"", inhInstallment3Label:"",
-  inhOptNofo:false, inhOptStateSwitch:false, inhOptPostAwardScope:false, inhOptShortNotice:false,
+  inhOptNofo:false, inhOptStateSwitch:false, inhOptPostAwardScope:true, inhOptShortNotice:false,
   inhEarlySigningDate:"March 15, 2026", inhEarlySigningAmount:"1,500",
-  inhPostAwardFee:"1,000",
+  inhPostAwardFee:"0",
   inhCustomClause:"", inhPolishedClause:"",
   postFee:"7,000", postPmt1:"40", postPmt2:"30", postPmt3:"30", postGrantYear:String(new Date().getFullYear()), postStateProgram:"",
   postCustomClause:"", postPolishedClause:"",
@@ -396,9 +396,9 @@ function buildCompBlock(model, fees, installments, grantYear, optPostAwardScope,
 const SHARED_FIELDS = [
   { section:"Client Information" },
   { key:"clientName", label:"Organization Name", placeholder:"e.g. First Baptist Church" },
-  { key:"contactName", label:"Primary Contact Name" },
+  { key:"contactName", label:"Primary Contact Name", placeholder:"e.g. Jane Smith" },
   { key:"contactTitle", label:"Contact Title", placeholder:"Pastor, Executive Director" },
-  { key:"contactEmail", label:"Email" },
+  { key:"contactEmail", label:"Email", placeholder:"e.g. jane@organization.org" },
   { key:"contactPhone", label:"Phone", placeholder:"(xxx) xxx-xxxx", formatFn:(v)=>{const d=v.replace(/\D/g,"").slice(0,10);if(d.length<=3)return d;if(d.length<=6)return `(${d.slice(0,3)}) ${d.slice(3)}`;return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;} },
 ];
 const POST_FIELDS = [
@@ -1012,17 +1012,6 @@ export default function App() {
               <span style={{color:"#9aab2e"}}>Total</span><span style={{color:"#9aab2e"}}>{fmt(fees.total)}</span>
             </div>
           </div>
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.optPostAwardScope?4:14,cursor:"pointer"}}>
-            <input type="checkbox" checked={form.optPostAwardScope} onChange={e=>setF("optPostAwardScope",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
-            Compliance Consulting
-          </label>
-          {form.optPostAwardScope&&(
-            <div style={{marginBottom:10,marginTop:0,paddingLeft:22}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Compliance Consulting Fee ($)</label>
-              <input value={form.postAwardFee||""} onChange={e=>setF("postAwardFee",e.target.value)} placeholder="1,000"
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
-            </div>
-          )}
           {form.pricingTier==="discounted"&&(
             <div style={{background:"#201600",border:"1px solid #e8a020",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#e8a020",marginBottom:10}}>Early Signing Discount</div>
@@ -1037,6 +1026,17 @@ export default function App() {
                   style={{width:"100%",background:"#2a1e00",border:"1px solid #e8a020",borderRadius:6,padding:"6px 10px",color:"#ffe8b0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
               </div>
               {fees.discount>0&&<div style={{fontSize:11,color:"#e8a020",marginTop:8,fontWeight:700}}>Discounted fee: {fmt(fees.upfront)} (saves {fmt(fees.discount)})</div>}
+            </div>
+          )}
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.optPostAwardScope?4:10,cursor:"pointer"}}>
+            <input type="checkbox" checked={form.optPostAwardScope} onChange={e=>setF("optPostAwardScope",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
+            Compliance Consulting
+          </label>
+          {form.optPostAwardScope&&(
+            <div style={{marginBottom:10,marginTop:0,paddingLeft:22}}>
+              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Compliance Consulting Fee ($)</label>
+              <input value={form.postAwardFee||""} onChange={e=>setF("postAwardFee",e.target.value)} placeholder="0"
+                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
           <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.installments?10:14,cursor:"pointer"}}>
@@ -1181,17 +1181,6 @@ export default function App() {
               <span style={{color:"#9aab2e"}}>Total</span><span style={{color:"#9aab2e"}}>{fmt(inhFees.total)}</span>
             </div>
           </div>
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.inhOptPostAwardScope?4:14,cursor:"pointer"}}>
-            <input type="checkbox" checked={form.inhOptPostAwardScope} onChange={e=>setF("inhOptPostAwardScope",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
-            Compliance Consulting
-          </label>
-          {form.inhOptPostAwardScope&&(
-            <div style={{marginBottom:10,marginTop:0,paddingLeft:22}}>
-              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Compliance Consulting Fee ($)</label>
-              <input value={form.inhPostAwardFee||""} onChange={e=>setF("inhPostAwardFee",e.target.value)} placeholder="1,000"
-                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
-            </div>
-          )}
           {form.inhPricingTier==="discounted"&&(
             <div style={{background:"#201600",border:"1px solid #e8a020",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#e8a020",marginBottom:10}}>Early Signing Discount</div>
@@ -1206,6 +1195,17 @@ export default function App() {
                   style={{width:"100%",background:"#2a1e00",border:"1px solid #e8a020",borderRadius:6,padding:"6px 10px",color:"#ffe8b0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
               </div>
               {inhFees.discount>0&&<div style={{fontSize:11,color:"#e8a020",marginTop:8,fontWeight:700}}>Discounted fee: {fmt(inhFees.upfront)} (saves {fmt(inhFees.discount)})</div>}
+            </div>
+          )}
+          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.inhOptPostAwardScope?4:10,cursor:"pointer"}}>
+            <input type="checkbox" checked={form.inhOptPostAwardScope} onChange={e=>setF("inhOptPostAwardScope",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
+            Compliance Consulting
+          </label>
+          {form.inhOptPostAwardScope&&(
+            <div style={{marginBottom:10,marginTop:0,paddingLeft:22}}>
+              <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Compliance Consulting Fee ($)</label>
+              <input value={form.inhPostAwardFee||""} onChange={e=>setF("inhPostAwardFee",e.target.value)} placeholder="0"
+                style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
           <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.inhInstallments?10:14,cursor:"pointer"}}>
