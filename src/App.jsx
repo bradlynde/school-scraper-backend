@@ -290,7 +290,7 @@ const defaultForm = {
   installment1Pct:"50", installment1Label:"upon execution",
   installment2Pct:"50", installment2Label:"upon award notification",
   installment3Pct:"", installment3Label:"",
-  optNofo:false, optStateSwitch:false, optPostAwardScope:true, optShortNotice:false,
+  optNofo:false, optStateSwitch:false, optPostAwardScope:false, optShortNotice:false,
   earlySigningDiscount:false, earlySigningDate:"March 15, 2026", earlySigningAmount:"500",
   postAwardFee:"1,000",
   customClause:"", polishedClause:"",
@@ -300,7 +300,7 @@ const defaultForm = {
   inhInstallment1Pct:"50", inhInstallment1Label:"upon execution",
   inhInstallment2Pct:"50", inhInstallment2Label:"upon award notification",
   inhInstallment3Pct:"", inhInstallment3Label:"",
-  inhOptNofo:false, inhOptStateSwitch:false, inhOptPostAwardScope:true, inhOptShortNotice:false,
+  inhOptNofo:false, inhOptStateSwitch:false, inhOptPostAwardScope:false, inhOptShortNotice:false,
   inhEarlySigningDiscount:false, inhEarlySigningDate:"March 15, 2026", inhEarlySigningAmount:"1,500",
   inhPostAwardFee:"1,000",
   inhCustomClause:"", inhPolishedClause:"",
@@ -317,26 +317,30 @@ const defaultForm = {
   gwGuar4Deadline:"", gwNotes:"",
 };
 function calcFees(model, tier, locs, optPostAwardScope, postAwardFee, customFee, earlySigningDiscount, earlySigningAmount) {
-  const n = Math.min(parseInt(locs) || 1, 3); // cap at 3 for pricing table
+  const n = Math.max(parseInt(locs) || 1, 1); // no cap — extrapolate beyond 3
   const discountPerLoc = earlySigningDiscount ? (parseFloat(String(earlySigningAmount).replace(/,/g,"")) || 0) : 0;
   const discount = discountPerLoc * n;
   const postAward = optPostAwardScope ? (parseFloat(String(postAwardFee).replace(/,/g,"")) || 0) * n : 0;
-  const pricingKey = PRICING[model] ? model : model; // use model directly if it exists in PRICING
   const isPreOnly = model === "pre-only" || model === "inh-pre-only";
+  // Helper: look up table value, extrapolating linearly beyond 3 using the 2→3 increment
+  const lookup = (tbl) => {
+    if (n <= 3) return tbl[n] || 0;
+    return (tbl[3] || 0) + (n - 3) * ((tbl[3] || 0) - (tbl[2] || 0));
+  };
   if (tier === "custom") {
     const fee = Math.max(0, (parseFloat(String(customFee).replace(/,/g,"")) || 0) - discount);
     return { upfront: fee, baseUpfront: parseFloat(String(customFee).replace(/,/g,"")) || 0, discount, contingent: null, postAward: optPostAwardScope ? postAward : null, total: fee + postAward };
   }
   if (isPreOnly) {
     const pricing = PRICING[model] || PRICING["pre-only"];
-    const base = pricing.tiers[tier]?.[n] || 0;
+    const base = lookup(pricing.tiers[tier] || {});
     const fee = Math.max(0, base - discount);
     return { upfront: fee, baseUpfront: base, discount, contingent: null, postAward: optPostAwardScope ? postAward : null, total: fee + postAward };
   } else {
     const pricing = PRICING[model] || PRICING["partial-contingency"];
-    const base = pricing.tiers[tier]?.upfront[n] || 0;
+    const base = lookup(pricing.tiers[tier]?.upfront || {});
     const up = Math.max(0, base - discount);
-    const con = pricing.tiers[tier]?.contingent[n] || 0;
+    const con = lookup(pricing.tiers[tier]?.contingent || {});
     return { upfront: up, baseUpfront: base, discount, contingent: con, postAward: optPostAwardScope ? postAward : null, total: up + con + postAward };
   }
 }
