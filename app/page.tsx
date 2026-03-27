@@ -207,7 +207,7 @@ export default function HomePage() {
       <div className="animate-in delay-3" style={{ marginBottom: 20 }}>
         <MetricCards
           avgDurationPerCounty="~10m"
-          avgCostPerCounty="$0.79"
+          avgCostPerContact="$0.03"
         />
       </div>
     </div>

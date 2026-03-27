@@ -25,6 +25,7 @@ export default function ActivePipelineHero({ activeRuns }: ActivePipelineHeroPro
   const progress = run.progress || 0;
   const totalCounties = run.total_counties || 0;
   const countiesDone = run.counties_processed ?? (totalCounties ? Math.round((progress / 100) * totalCounties) : 0);
+  const isFinalizing = progress >= 100 && run.status === "running";
 
   const scraperType = run.scraper_type || "church";
   const href = `/${scraperType}/${run.run_id}`;
@@ -84,7 +85,7 @@ export default function ActivePipelineHero({ activeRuns }: ActivePipelineHeroPro
                 animation: "pulse 2s ease-in-out infinite",
               }} />
               <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", opacity: 0.7 }}>
-                Active Pipeline
+                {isFinalizing ? "Finalizing" : "Active Pipeline"}
               </span>
             </div>
           </div>
@@ -101,26 +102,34 @@ export default function ActivePipelineHero({ activeRuns }: ActivePipelineHeroPro
 
           {/* Progress bar */}
           <div style={{ marginBottom: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 12, opacity: 0.7 }}>
-                {countiesDone} / {run.total_counties || 0} counties
+            {isFinalizing ? (
+              <span style={{ fontSize: 13, opacity: 0.7 }}>
+                Enriching contacts & generating reports...
               </span>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>{isNaN(progress) ? 0 : progress}%</span>
-            </div>
-            <div style={{
-              height: 6,
-              borderRadius: 3,
-              background: "rgba(255,255,255,0.15)",
-              overflow: "hidden",
-            }}>
-              <div style={{
-                height: "100%",
-                borderRadius: 3,
-                background: "linear-gradient(90deg, #4ade80, #22d3ee)",
-                width: `${progress}%`,
-                transition: "width 0.5s ease",
-              }} />
-            </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontSize: 12, opacity: 0.7 }}>
+                    {countiesDone} / {run.total_counties || 0} counties
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{isNaN(progress) ? 0 : progress}%</span>
+                </div>
+                <div style={{
+                  height: 6,
+                  borderRadius: 3,
+                  background: "rgba(255,255,255,0.15)",
+                  overflow: "hidden",
+                }}>
+                  <div style={{
+                    height: "100%",
+                    borderRadius: 3,
+                    background: "linear-gradient(90deg, #4ade80, #22d3ee)",
+                    width: `${progress}%`,
+                    transition: "width 0.5s ease",
+                  }} />
+                </div>
+              </>
+            )}
           </div>
 
           {/* Bottom stats */}
