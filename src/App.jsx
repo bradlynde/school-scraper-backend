@@ -37,7 +37,7 @@ const PRICING = {
     },
   },
 };
-const TIER_LABELS = { undiscounted: "Undiscounted", discounted: "Discounted", max: "Max Discount", custom: "Custom" };
+const TIER_LABELS = { undiscounted: "Undiscounted", discounted: "Early Signing Discount", max: "Max Discount", custom: "Custom" };
 const fmt = (n) => n === 0 ? "$0" : `$${Number(n).toLocaleString()}`;
 // ─── DEFAULT TEMPLATE SECTIONS ────────────────────────────────────────────────
 const DEFAULT_PRE = [
@@ -291,7 +291,7 @@ const defaultForm = {
   installment2Pct:"50", installment2Label:"upon award notification",
   installment3Pct:"", installment3Label:"",
   optNofo:false, optStateSwitch:false, optPostAwardScope:false, optShortNotice:false,
-  earlySigningDiscount:false, earlySigningDate:"March 15, 2026", earlySigningAmount:"500",
+  earlySigningDate:"March 15, 2026", earlySigningAmount:"500",
   postAwardFee:"1,000",
   customClause:"", polishedClause:"",
   // In-house pre-award fields
@@ -301,7 +301,7 @@ const defaultForm = {
   inhInstallment2Pct:"50", inhInstallment2Label:"upon award notification",
   inhInstallment3Pct:"", inhInstallment3Label:"",
   inhOptNofo:false, inhOptStateSwitch:false, inhOptPostAwardScope:false, inhOptShortNotice:false,
-  inhEarlySigningDiscount:false, inhEarlySigningDate:"March 15, 2026", inhEarlySigningAmount:"1,500",
+  inhEarlySigningDate:"March 15, 2026", inhEarlySigningAmount:"1,500",
   inhPostAwardFee:"1,000",
   inhCustomClause:"", inhPolishedClause:"",
   postFee:"7,000", postPmt1:"40", postPmt2:"30", postPmt3:"30", postGrantYear:String(new Date().getFullYear()), postStateProgram:"",
@@ -316,9 +316,11 @@ const defaultForm = {
   gwGuar1:true, gwGuar2:false, gwGuar3:true, gwGuar4:false,
   gwGuar4Deadline:"", gwNotes:"",
 };
-function calcFees(model, tier, locs, optPostAwardScope, postAwardFee, customFee, earlySigningDiscount, earlySigningAmount) {
+function calcFees(model, tier, locs, optPostAwardScope, postAwardFee, customFee, earlySigningAmount) {
   const n = Math.max(parseInt(locs) || 1, 1); // no cap — extrapolate beyond 3
-  const discountPerLoc = earlySigningDiscount ? (parseFloat(String(earlySigningAmount).replace(/,/g,"")) || 0) : 0;
+  const isEarlySigning = tier === "discounted";
+  const effectiveTier = isEarlySigning ? "undiscounted" : tier; // use undiscounted base to apply discount cleanly
+  const discountPerLoc = isEarlySigning ? (parseFloat(String(earlySigningAmount).replace(/,/g,"")) || 0) : 0;
   const discount = discountPerLoc * n;
   const postAward = optPostAwardScope ? (parseFloat(String(postAwardFee).replace(/,/g,"")) || 0) * n : 0;
   const isPreOnly = model === "pre-only" || model === "inh-pre-only";
@@ -333,14 +335,14 @@ function calcFees(model, tier, locs, optPostAwardScope, postAwardFee, customFee,
   }
   if (isPreOnly) {
     const pricing = PRICING[model] || PRICING["pre-only"];
-    const base = lookup(pricing.tiers[tier] || {});
+    const base = lookup(pricing.tiers[effectiveTier] || {});
     const fee = Math.max(0, base - discount);
     return { upfront: fee, baseUpfront: base, discount, contingent: null, postAward: optPostAwardScope ? postAward : null, total: fee + postAward };
   } else {
     const pricing = PRICING[model] || PRICING["partial-contingency"];
-    const base = lookup(pricing.tiers[tier]?.upfront || {});
+    const base = lookup(pricing.tiers[effectiveTier]?.upfront || {});
     const up = Math.max(0, base - discount);
-    const con = lookup(pricing.tiers[tier]?.contingent || {});
+    const con = lookup(pricing.tiers[effectiveTier]?.contingent || {});
     return { upfront: up, baseUpfront: base, discount, contingent: con, postAward: optPostAwardScope ? postAward : null, total: up + con + postAward };
   }
 }
@@ -466,8 +468,8 @@ export default function App() {
   }));
   const totalApps = programApps.reduce((s,p)=>s+p.appCount,0) || 1;
   const numLocs = totalApps; // fees scale on total applications
-  const fees = calcFees(form.engagementModel, form.pricingTier, numLocs, form.optPostAwardScope, form.postAwardFee, form.customFee, form.earlySigningDiscount, form.earlySigningAmount);
-  const inhFees = calcFees(form.inhEngagementModel, form.inhPricingTier, numLocs, form.inhOptPostAwardScope, form.inhPostAwardFee, form.inhCustomFee, form.inhEarlySigningDiscount, form.inhEarlySigningAmount);
+  const fees = calcFees(form.engagementModel, form.pricingTier, numLocs, form.optPostAwardScope, form.postAwardFee, form.customFee, form.earlySigningAmount);
+  const inhFees = calcFees(form.inhEngagementModel, form.inhPricingTier, numLocs, form.inhOptPostAwardScope, form.inhPostAwardFee, form.inhCustomFee, form.inhEarlySigningAmount);
   // Load templates from server on mount; fall back to hardcoded defaults
   useEffect(() => {
     const load = async (type, setter) => {
@@ -584,7 +586,7 @@ export default function App() {
       }
     } else {
       const installmentsObjComp = form.installments ? installmentsObj : null;
-      compBlock = buildCompBlock(form.engagementModel, fees, installmentsObjComp, form.grantYear, form.optPostAwardScope, form.postAwardFee, form.installmentCount, form.installment1Pct, form.installment1Label, form.installment2Pct, form.installment2Label, form.installment3Pct, form.installment3Label, form.earlySigningDiscount, form.earlySigningDate, form.earlySigningAmount);
+      compBlock = buildCompBlock(form.engagementModel, fees, installmentsObjComp, form.grantYear, form.optPostAwardScope, form.postAwardFee, form.installmentCount, form.installment1Pct, form.installment1Label, form.installment2Pct, form.installment2Label, form.installment3Pct, form.installment3Label, form.pricingTier === "discounted", form.earlySigningDate, form.earlySigningAmount);
     }
     // NOFO clause — reference all programs
     const pg0 = progs[0]||{key:"federal",year:form.grantYear};
@@ -697,7 +699,7 @@ export default function App() {
           return `${num}. If the state government does not issue a Notice of Funding Opportunity for a ${pg.year||form.grantYear} ${cfg.acronym}, NPSA will work with CLIENT to apply for the next available ${cfg.acronym} Opportunity, and the scope of the project will apply to that opportunity.`;
         }).join("\n\n") + "\n\n"
       : "";
-    const compBlock = buildCompBlock(form.inhEngagementModel, inhFees, installmentsObj, form.grantYear, form.inhOptPostAwardScope, form.inhPostAwardFee, form.inhInstallmentCount, form.inhInstallment1Pct, form.inhInstallment1Label, form.inhInstallment2Pct, form.inhInstallment2Label, form.inhInstallment3Pct, form.inhInstallment3Label, form.inhEarlySigningDiscount, form.inhEarlySigningDate, form.inhEarlySigningAmount);
+    const compBlock = buildCompBlock(form.inhEngagementModel, inhFees, installmentsObj, form.grantYear, form.inhOptPostAwardScope, form.inhPostAwardFee, form.inhInstallmentCount, form.inhInstallment1Pct, form.inhInstallment1Label, form.inhInstallment2Pct, form.inhInstallment2Label, form.inhInstallment3Pct, form.inhInstallment3Label, form.inhPricingTier === "discounted", form.inhEarlySigningDate, form.inhEarlySigningAmount);
     return t
       .replace(/\[CLIENT_NAME\]/g, form.clientName||"[CLIENT NAME]")
       .replace(/\[GRANT_YEAR_NSGP\]/g, progs.length>1
@@ -989,9 +991,9 @@ export default function App() {
           <div style={{background:"#0f1a30",border:"1px solid #2e4060",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
             <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#5b9ec9",marginBottom:8}}>Fee Summary</div>
             <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#b0b8cc",marginBottom:4}}>
-              <span>Upfront Fee</span><span style={{color:"#fff",fontWeight:600}}>{form.earlySigningDiscount&&fees.discount>0?<><span style={{textDecoration:"line-through",color:"#666",marginRight:6}}>{fmt(fees.baseUpfront)}</span>{fmt(fees.upfront)}</>:fmt(fees.upfront)}</span>
+              <span>Upfront Fee</span><span style={{color:"#fff",fontWeight:600}}>{form.pricingTier==="discounted"&&fees.discount>0?<><span style={{textDecoration:"line-through",color:"#666",marginRight:6}}>{fmt(fees.baseUpfront)}</span>{fmt(fees.upfront)}</>:fmt(fees.upfront)}</span>
             </div>
-            {form.earlySigningDiscount&&fees.discount>0&&(
+            {form.pricingTier==="discounted"&&fees.discount>0&&(
               <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#e8a020",marginBottom:4}}>
                 <span>Early Signing Discount</span><span style={{fontWeight:600}}>−{fmt(fees.discount)}</span>
               </div>
@@ -1021,7 +1023,7 @@ export default function App() {
                 style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
-          {form.earlySigningDiscount&&(
+          {form.pricingTier==="discounted"&&(
             <div style={{background:"#201600",border:"1px solid #e8a020",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#e8a020",marginBottom:10}}>Early Signing Discount</div>
               <div style={{marginBottom:8}}>
@@ -1037,10 +1039,6 @@ export default function App() {
               {fees.discount>0&&<div style={{fontSize:11,color:"#e8a020",marginTop:8,fontWeight:700}}>Discounted fee: {fmt(fees.upfront)} (saves {fmt(fees.discount)})</div>}
             </div>
           )}
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.installments?10:14,cursor:"pointer"}}>
-            <input type="checkbox" checked={form.earlySigningDiscount} onChange={e=>setF("earlySigningDiscount",e.target.checked)} style={{accentColor:"#e8a020"}}/>
-            Early signing discount
-          </label>
           <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.installments?10:14,cursor:"pointer"}}>
             <input type="checkbox" checked={form.installments} onChange={e=>setF("installments",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
             Allow installment payments
@@ -1162,9 +1160,9 @@ export default function App() {
           <div style={{background:"#0f1a30",border:"1px solid #2e4060",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
             <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#5b9ec9",marginBottom:8}}>Fee Summary</div>
             <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#b0b8cc",marginBottom:4}}>
-              <span>Upfront Fee</span><span style={{color:"#fff",fontWeight:600}}>{form.inhEarlySigningDiscount&&inhFees.discount>0?<><span style={{textDecoration:"line-through",color:"#666",marginRight:6}}>{fmt(inhFees.baseUpfront)}</span>{fmt(inhFees.upfront)}</>:fmt(inhFees.upfront)}</span>
+              <span>Upfront Fee</span><span style={{color:"#fff",fontWeight:600}}>{form.inhPricingTier==="discounted"&&inhFees.discount>0?<><span style={{textDecoration:"line-through",color:"#666",marginRight:6}}>{fmt(inhFees.baseUpfront)}</span>{fmt(inhFees.upfront)}</>:fmt(inhFees.upfront)}</span>
             </div>
-            {form.inhEarlySigningDiscount&&inhFees.discount>0&&(
+            {form.inhPricingTier==="discounted"&&inhFees.discount>0&&(
               <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#e8a020",marginBottom:4}}>
                 <span>Early Signing Discount</span><span style={{fontWeight:600}}>−{fmt(inhFees.discount)}</span>
               </div>
@@ -1194,7 +1192,7 @@ export default function App() {
                 style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
-          {form.inhEarlySigningDiscount&&(
+          {form.inhPricingTier==="discounted"&&(
             <div style={{background:"#201600",border:"1px solid #e8a020",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
               <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#e8a020",marginBottom:10}}>Early Signing Discount</div>
               <div style={{marginBottom:8}}>
@@ -1204,16 +1202,12 @@ export default function App() {
               </div>
               <div>
                 <label style={{fontSize:11,color:"#c8a060",display:"block",marginBottom:2}}>Discount Amount ($)</label>
-                <input value={form.inhEarlySigningAmount} onChange={e=>setF("inhEarlySigningAmount",e.target.value)} placeholder="500"
+                <input value={form.inhEarlySigningAmount} onChange={e=>setF("inhEarlySigningAmount",e.target.value)} placeholder="1,500"
                   style={{width:"100%",background:"#2a1e00",border:"1px solid #e8a020",borderRadius:6,padding:"6px 10px",color:"#ffe8b0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
               </div>
               {inhFees.discount>0&&<div style={{fontSize:11,color:"#e8a020",marginTop:8,fontWeight:700}}>Discounted fee: {fmt(inhFees.upfront)} (saves {fmt(inhFees.discount)})</div>}
             </div>
           )}
-          <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.inhEarlySigningDiscount?10:14,cursor:"pointer"}}>
-            <input type="checkbox" checked={form.inhEarlySigningDiscount} onChange={e=>setF("inhEarlySigningDiscount",e.target.checked)} style={{accentColor:"#e8a020"}}/>
-            Early signing discount
-          </label>
           <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#b0b8cc",marginBottom:form.inhInstallments?10:14,cursor:"pointer"}}>
             <input type="checkbox" checked={form.inhInstallments} onChange={e=>setF("inhInstallments",e.target.checked)} style={{accentColor:"#9aab2e"}}/>
             Allow installment payments
