@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { COLORS } from "../lib/constants";
 import { fetchRuns } from "../lib/api";
+import MetricCards from "../components/MetricCards";
 import ActivePipelineHero from "../components/ActivePipelineHero";
 import type { RunMetadata } from "../lib/types";
 
@@ -202,6 +203,13 @@ export default function HomePage() {
         <USStateMap stateData={stateData} />
       </div>
 
+      {/* Metric Cards */}
+      <div className="animate-in delay-3" style={{ marginBottom: 20 }}>
+        <MetricCards
+          avgDurationPerCounty="~10m"
+          avgCostPerCounty="$0.79"
+        />
+      </div>
     </div>
   );
 }
