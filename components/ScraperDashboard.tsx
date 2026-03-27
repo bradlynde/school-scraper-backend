@@ -275,10 +275,9 @@ export default function ScraperDashboard({ scraperType }: { scraperType: Scraper
       )}
 
       {/* Aggregated Stats */}
-      <div className="animate-in delay-2 grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
+      <div className="animate-in delay-2 grid-responsive" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 24 }}>
         <StatCard label="Total Contacts" value={totalContacts} />
         <StatCard label="States Scraped" value={statesScraped} />
-        <StatCard label="Completed Runs" value={completedRuns.length} />
       </div>
 
       {/* Previous Runs */}
