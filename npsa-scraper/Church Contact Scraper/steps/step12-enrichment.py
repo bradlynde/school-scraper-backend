@@ -17,7 +17,7 @@ from typing import Optional, Dict, List
 from urllib.parse import urlparse
 import re
 from assets.shared.models import Contact
-from church_run_log import log_warn, log_err
+from church_run_log import log_warn, log_err, _emit, _sym
 
 # ANSI escape codes for bold text
 BOLD = '\033[1m'
@@ -197,6 +197,26 @@ class HunterIOEnricher:
             self.stats['errors'] += 1
             return None
     
+    def _log_hunter_result(self, idx: int, total: int, name: str, domain: str, result: str, email: str = None):
+        """Log a single Hunter.io lookup with its result."""
+        mark_found = _sym("\u2713", "+")
+        mark_miss = _sym("\u00b7", ".")
+        mark_err = _sym("\u2717", "X")
+
+        counter = f"[{idx}/{total}]"
+        search_str = f"{name} @ {domain}"
+
+        if email:
+            _emit(f"  {mark_found} {counter} {search_str} -> {email}")
+        elif result == "not_found":
+            _emit(f"  {mark_miss} {counter} {search_str} -> no email found")
+        elif result == "skip_no_domain":
+            _emit(f"  {mark_miss} {counter} {name} -> no domain")
+        elif result == "skip_no_name":
+            _emit(f"  {mark_miss} {counter} {name} -> missing name")
+        else:
+            _emit(f"  {mark_err} {counter} {search_str} -> {result}")
+
     def enrich_contact_objects(
         self,
         contacts: List[Contact],
@@ -205,59 +225,67 @@ class HunterIOEnricher:
     ) -> List[Contact]:
         """
         Enrich Contact objects without emails using Hunter.io API.
-        
+
         Args:
             contacts: List of Contact objects without emails
             batch_size: Number of contacts to process per batch
             delay_between_batches: Delay in seconds between batches
-        
+
         Returns:
             List of Contact objects with emails added where found
             (Only returns contacts that successfully got emails - skips failed contacts)
         """
-        log_warn(f"Hunter enrichment: {len(contacts)} contacts")
+        log_warn(f"Hunter enrichment: {len(contacts)} contacts to search")
 
         if not contacts:
             log_warn("Hunter: no contacts to enrich")
             return []
-        
+
         enriched_contacts = []
-        total_batches = (len(contacts) + batch_size - 1) // batch_size
-        
+        total = len(contacts)
+        contact_idx = 0
+
         for batch_idx in range(0, len(contacts), batch_size):
             batch = contacts[batch_idx:batch_idx + batch_size]
-            batch_num = (batch_idx // batch_size) + 1
-            
+
             for contact in batch:
+                contact_idx += 1
+                name = f"{contact.first_name or ''} {contact.last_name or ''}".strip()
+
                 if not contact.first_name or not contact.last_name:
+                    self._log_hunter_result(contact_idx, total, name or "(unknown)", "", "skip_no_name")
                     continue
 
                 domain = self.extract_domain_from_url(contact.source_url)
                 if not domain:
+                    self._log_hunter_result(contact_idx, total, name, "", "skip_no_domain")
                     continue
-                
+
                 email_result = self.find_email_via_hunter_io(
                     contact.first_name,
                     contact.last_name,
                     domain
                 )
                 self.stats['contacts_processed'] += 1
-                
+
                 if email_result:
                     contact.email = email_result['email']
                     enriched_contacts.append(contact)
                     self.stats['emails_found'] += 1
-                
+                    self._log_hunter_result(contact_idx, total, name, domain, "found", email_result['email'])
+                else:
+                    self._log_hunter_result(contact_idx, total, name, domain, "not_found")
+
                 # Small delay between requests to respect rate limits
                 time.sleep(0.5)
-            
+
             # Delay between batches
             if batch_idx + batch_size < len(contacts):
                 time.sleep(delay_between_batches)
-        
+
         pct = (100.0 * self.stats['emails_found'] / self.stats['contacts_processed']) if self.stats['contacts_processed'] else 0.0
         log_warn(f"Hunter done: {self.stats['emails_found']}/{self.stats['contacts_processed']} found ({pct:.0f}%), {self.stats['api_calls']} calls, {self.stats['errors']} errors")
-        
+
         return enriched_contacts
     
     def enrich_contacts_with_hunter_io(
