@@ -5,9 +5,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { COLORS } from "../lib/constants";
 import { fetchRuns } from "../lib/api";
-import MetricCards from "../components/MetricCards";
 import ActivePipelineHero from "../components/ActivePipelineHero";
-import ActivityTimeline from "../components/ActivityTimeline";
 import type { RunMetadata } from "../lib/types";
 
 // Lazy-load USStateMap (large SVG component)
@@ -23,14 +21,6 @@ export default function HomePage() {
   const [schoolRuns, setSchoolRuns] = useState<RunMetadata[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Seed runs for previously completed states (pre-volume-wipe) — archived
-  const SEED_CHURCH_RUNS: RunMetadata[] = [
-    { run_id: "seed-delaware", state: "delaware", status: "done", scraper_type: "church", total_counties: 3, completed_counties: 3, total_contacts: 148, total_contacts_with_emails: 148, created_at: "2026-03-18T00:36:14Z", completed_at: "2026-03-18T00:36:14Z", display_name: "Delaware", archived: true },
-    { run_id: "seed-arizona", state: "arizona", status: "done", scraper_type: "church", total_counties: 15, completed_counties: 15, total_contacts: 512, total_contacts_with_emails: 512, created_at: "2026-03-19T14:20:00Z", completed_at: "2026-03-19T14:20:00Z", display_name: "Arizona", archived: true },
-    { run_id: "seed-alabama", state: "alabama", status: "done", scraper_type: "church", total_counties: 67, completed_counties: 67, total_contacts: 733, total_contacts_with_emails: 733, created_at: "2026-03-20T10:34:11Z", completed_at: "2026-03-20T10:34:11Z", display_name: "Alabama", archived: true },
-    { run_id: "seed-nevada", state: "nevada", status: "done", scraper_type: "church", total_counties: 17, completed_counties: 17, total_contacts: 213, total_contacts_with_emails: 213, created_at: "2026-03-24T22:55:54Z", completed_at: "2026-03-24T22:55:54Z", display_name: "Nevada", archived: true },
-  ];
-
   useEffect(() => {
     async function load() {
       try {
@@ -38,17 +28,10 @@ export default function HomePage() {
           fetchRuns("church"),
           fetchRuns("school"),
         ]);
-        if (cr.status === "fulfilled") {
-          // Merge seed runs that aren't already in API results
-          const apiStates = new Set(cr.value.map(r => r.state?.toLowerCase()));
-          const missing = SEED_CHURCH_RUNS.filter(s => !apiStates.has(s.state));
-          setChurchRuns([...cr.value, ...missing]);
-        } else {
-          setChurchRuns(SEED_CHURCH_RUNS);
-        }
+        if (cr.status === "fulfilled") setChurchRuns(cr.value);
         if (sr.status === "fulfilled") setSchoolRuns(sr.value);
       } catch {
-        setChurchRuns(prev => prev.length > 0 ? prev : SEED_CHURCH_RUNS);
+        // ignore
       }
       setLoading(false);
     }
@@ -60,13 +43,8 @@ export default function HomePage() {
     (r) => r.status === "running" || r.status === "finalizing"
   );
 
-  // Build state data for the map — seed with known completed runs
-  const stateData: Record<string, any> = {
-    delaware: { state: "delaware", churchRun: { total_contacts: 148, total_counties: 3, completed_at: "2026-03-18T00:36:14Z", display_name: "Delaware" } },
-    alabama: { state: "alabama", churchRun: { total_contacts: 733, total_counties: 67, completed_at: "2026-03-20T10:34:11Z", display_name: "Alabama" } },
-    nevada: { state: "nevada", churchRun: { total_contacts: 213, total_counties: 17, completed_at: "2026-03-24T22:55:54Z", display_name: "Nevada" } },
-    arizona: { state: "arizona", churchRun: { total_contacts: 512, total_counties: 15, completed_at: "2026-03-19T14:20:00Z", display_name: "Arizona" } },
-  };
+  // Build state data for the map from API results
+  const stateData: Record<string, any> = {};
   const completedRuns = allRuns.filter(
     (r) => r.status === "done" || r.status === "completed"
   );
@@ -116,11 +94,6 @@ export default function HomePage() {
       };
     }
   }
-
-  // Avg duration per county — based on observed scraper performance across completed runs
-  const totalCountiesDone = completedRuns.reduce((s, r) => s + (r.total_counties || 0), 0);
-  const avgDuration = totalCountiesDone > 0 ? "~10m" : "-";
-  const avgCost = totalCountiesDone > 0 ? "$0.79" : "-";
 
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long",
@@ -229,114 +202,6 @@ export default function HomePage() {
         <USStateMap stateData={stateData} />
       </div>
 
-      {/* Metric Cards */}
-      <div className="animate-in delay-3" style={{ marginBottom: 20 }}>
-        <MetricCards
-          avgDurationPerCounty={avgDuration}
-          avgCostPerCounty={avgCost}
-        />
-      </div>
-
-      {/* Two-column: Recent Runs + Activity Timeline */}
-      <div className="animate-in delay-4 grid-responsive grid-2col-responsive" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-        {/* Recent Runs */}
-        <div style={{
-          background: COLORS.cardBg,
-          borderRadius: 12,
-          padding: "20px 24px",
-          border: `1px solid ${COLORS.cardBorder}`,
-          boxShadow: COLORS.cardShadow,
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: COLORS.textPrimary }}>
-              Recent Runs
-            </h3>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Link href="/church" style={{ fontSize: 11, color: COLORS.accent, textDecoration: "none", fontWeight: 500 }}>
-                Churches
-              </Link>
-              <span style={{ color: COLORS.textMuted, fontSize: 11 }}>|</span>
-              <Link href="/school" style={{ fontSize: 11, color: COLORS.green, textDecoration: "none", fontWeight: 500 }}>
-                Schools
-              </Link>
-            </div>
-          </div>
-          {allRuns.length === 0 ? (
-            <div style={{ fontSize: 13, color: COLORS.textMuted, padding: "20px 0", textAlign: "center" }}>
-              No runs yet
-            </div>
-          ) : (
-            allRuns.slice(0, 6).map((run) => {
-              const type = run.scraper_type || "church";
-              return (
-                <Link
-                  key={run.run_id}
-                  href={`/${type}/${run.run_id}`}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "10px 0",
-                    borderBottom: `1px solid ${COLORS.cardBorder}`,
-                    textDecoration: "none",
-                    color: COLORS.textPrimary,
-                    fontSize: 13,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: type === "church" ? COLORS.accent : COLORS.green,
-                      flexShrink: 0,
-                    }} />
-                    <span style={{ fontWeight: 500 }}>
-                      {run.display_name || formatState(run.state)}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontSize: 11, color: COLORS.textMuted }}>
-                      {(run.total_contacts || 0).toLocaleString()}
-                    </span>
-                    <span style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      padding: "2px 8px",
-                      borderRadius: 4,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.04em",
-                      ...(run.status === "done" || run.status === "completed"
-                        ? { background: COLORS.successBg, color: COLORS.success }
-                        : run.status === "running" || run.status === "finalizing"
-                        ? { background: COLORS.runningBg, color: COLORS.running }
-                        : run.status === "failed"
-                        ? { background: COLORS.errorBg, color: COLORS.error }
-                        : { background: "#f3f4f6", color: COLORS.textMuted }),
-                    }}>
-                      {run.status}
-                    </span>
-                  </div>
-                </Link>
-              );
-            })
-          )}
-        </div>
-
-        {/* Activity Timeline */}
-        <div style={{
-          background: COLORS.cardBg,
-          borderRadius: 12,
-          padding: "20px 24px",
-          border: `1px solid ${COLORS.cardBorder}`,
-          boxShadow: COLORS.cardShadow,
-        }}>
-          <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 700, color: COLORS.textPrimary }}>
-            Activity
-          </h3>
-          <ActivityTimeline runs={allRuns} />
-        </div>
-      </div>
     </div>
   );
 }
