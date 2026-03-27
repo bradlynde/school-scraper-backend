@@ -1575,7 +1575,8 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
     try:
         counties = load_counties_from_state(state)
         run_dir = RUNS_DIR / run_id
-        
+        run_dir.mkdir(parents=True, exist_ok=True)
+
         pipeline_runs[run_id]["statusMessage"] = "Waiting for all counties to complete..."
         
         # Wait for all counties to complete (check that all CSV files exist)
