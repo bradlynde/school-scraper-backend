@@ -292,7 +292,7 @@ const defaultForm = {
   installment3Pct:"", installment3Label:"",
   optNofo:false, optStateSwitch:false, optPostAwardScope:true, optShortNotice:false,
   earlySigningDiscount:false, earlySigningDate:"March 15, 2026", earlySigningAmount:"500",
-  postAwardFee:"10,000",
+  postAwardFee:"1,000",
   customClause:"", polishedClause:"",
   // In-house pre-award fields
   inhEngagementModel:"inh-pre-only", inhPricingTier:"undiscounted", inhCustomFee:"",
@@ -300,9 +300,9 @@ const defaultForm = {
   inhInstallment1Pct:"50", inhInstallment1Label:"upon execution",
   inhInstallment2Pct:"50", inhInstallment2Label:"upon award notification",
   inhInstallment3Pct:"", inhInstallment3Label:"",
-  inhOptNofo:false, inhOptStateSwitch:false, inhOptPostAwardScope:false, inhOptShortNotice:false,
+  inhOptNofo:false, inhOptStateSwitch:false, inhOptPostAwardScope:true, inhOptShortNotice:false,
   inhEarlySigningDiscount:false, inhEarlySigningDate:"March 15, 2026", inhEarlySigningAmount:"1,500",
-  inhPostAwardFee:"10,000",
+  inhPostAwardFee:"1,000",
   inhCustomClause:"", inhPolishedClause:"",
   postFee:"7,000", postPmt1:"40", postPmt2:"30", postPmt3:"30", postGrantYear:String(new Date().getFullYear()), postStateProgram:"",
   postCustomClause:"", postPolishedClause:"",
@@ -1007,7 +1007,7 @@ export default function App() {
           {form.optPostAwardScope&&(
             <div style={{marginBottom:10,marginTop:0,paddingLeft:22}}>
               <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Compliance Consulting Fee ($)</label>
-              <input value={form.postAwardFee||""} onChange={e=>setF("postAwardFee",e.target.value)} placeholder="10,000"
+              <input value={form.postAwardFee||""} onChange={e=>setF("postAwardFee",e.target.value)} placeholder="1,000"
                 style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
@@ -1180,7 +1180,7 @@ export default function App() {
           {form.inhOptPostAwardScope&&(
             <div style={{marginBottom:10,marginTop:0,paddingLeft:22}}>
               <label style={{fontSize:11,color:"#9aa3b8",display:"block",marginBottom:2}}>Compliance Consulting Fee ($)</label>
-              <input value={form.inhPostAwardFee||""} onChange={e=>setF("inhPostAwardFee",e.target.value)} placeholder="10,000"
+              <input value={form.inhPostAwardFee||""} onChange={e=>setF("inhPostAwardFee",e.target.value)} placeholder="1,000"
                 style={{width:"100%",background:"#222e4a",border:"1px solid #2e3d60",borderRadius:6,padding:"6px 10px",color:"#e8eaf0",fontSize:12,boxSizing:"border-box",outline:"none"}}/>
             </div>
           )}
