@@ -21,13 +21,10 @@ export default function ActivePipelineHero({ activeRuns }: ActivePipelineHeroPro
   // Collapse when no active runs
   if (!activeRuns || activeRuns.length === 0) return null;
 
-  // completed_counties may be a number OR an array of county names from the API
-  const rawCounties = run.completed_counties;
-  const countiesDone = Array.isArray(rawCounties) ? rawCounties.length : (typeof rawCounties === "number" ? rawCounties : 0);
-  const countyNames = Array.isArray(rawCounties) ? rawCounties.join(", ") : "";
-  const progress = (run.total_counties && countiesDone)
-    ? Math.round((countiesDone / run.total_counties) * 100)
-    : 0;
+  // Use progress % from API (pipeline_state), derive counties done from it
+  const progress = run.progress || 0;
+  const totalCounties = run.total_counties || 0;
+  const countiesDone = run.counties_processed ?? (totalCounties ? Math.round((progress / 100) * totalCounties) : 0);
 
   const scraperType = run.scraper_type || "church";
   const href = `/${scraperType}/${run.run_id}`;
