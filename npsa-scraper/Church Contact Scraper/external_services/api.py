@@ -439,8 +439,8 @@ def _county_processor_worker_loop(worker_tag: str) -> None:
                 log_err(f"{county} County: {err}")
                 queue_store.mark_county_failed(run_id, county, str(err))
             else:
-                queue_store.mark_county_done(run_id, county, result)
-                # In Postgres mode, store county CSV rows in DB so any service can aggregate
+                # Store CSV BEFORE marking done — prevents the manager from
+                # starting aggregation before all county data is in the DB.
                 if db.is_postgres():
                     csv_path = result.get("csv_path")
                     if csv_path and os.path.exists(csv_path):
@@ -451,6 +451,7 @@ def _county_processor_worker_loop(worker_tag: str) -> None:
                             queue_store.store_county_results(run_id, county, csv_text, row_count)
                         except Exception as e:
                             log_warn(f"Could not store county CSV in Postgres: {e}")
+                queue_store.mark_county_done(run_id, county, result)
             _merge_county_result_into_pipeline_runs(
                 run_id, county, result, idx, total, elapsed
             )

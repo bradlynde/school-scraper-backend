@@ -648,114 +648,158 @@ def seed_county_tasks(
 
 
 def claim_next_county_task(worker_id: str, scraper_type: str) -> Optional[dict[str, Any]]:
-    """Atomically claim one pending task across all active dispatches."""
+    """Atomically claim one pending task across all active dispatches.
+
+    Uses retry with fresh connection on failure to avoid silent worker death
+    when Postgres connections go stale.
+    """
     if not is_enabled():
         return None
     p = _p()
-    now = datetime.now().isoformat()
-    with _lock:
-        conn = _conn()
-        try:
-            if db.is_postgres():
-                # Postgres: SELECT ... FOR UPDATE SKIP LOCKED for true row-level locking
-                row = conn.execute(
-                    f"""
-                    SELECT ct.id FROM county_tasks ct
-                    INNER JOIN county_dispatch cd ON cd.run_id = ct.run_id
-                    WHERE ct.scraper_type = {p}
-                      AND ct.status = 'pending'
-                      AND cd.scraper_type = {p}
-                      AND cd.cancelled = 0
-                      AND cd.aggregation_done = 0
-                    ORDER BY cd.created_at ASC, ct.county_index ASC
-                    LIMIT 1
-                    FOR UPDATE OF ct SKIP LOCKED
-                    """,
-                    (scraper_type, scraper_type),
-                ).fetchone()
-            else:
-                # SQLite: BEGIN IMMEDIATE for file-level locking
-                conn.execute("BEGIN IMMEDIATE")
-                row = conn.execute(
-                    f"""
-                    SELECT ct.id FROM county_tasks ct
-                    INNER JOIN county_dispatch cd ON cd.run_id = ct.run_id
-                    WHERE ct.scraper_type = {p}
-                      AND ct.status = 'pending'
-                      AND cd.scraper_type = {p}
-                      AND cd.cancelled = 0
-                      AND cd.aggregation_done = 0
-                    ORDER BY cd.created_at ASC, ct.county_index ASC
-                    LIMIT 1
-                    """,
-                    (scraper_type, scraper_type),
-                ).fetchone()
+    for attempt in range(2):
+        now = datetime.now().isoformat()
+        with _lock:
+            conn = _conn()
+            try:
+                if db.is_postgres():
+                    # Postgres: SELECT ... FOR UPDATE SKIP LOCKED for true row-level locking
+                    row = conn.execute(
+                        f"""
+                        SELECT ct.id FROM county_tasks ct
+                        INNER JOIN county_dispatch cd ON cd.run_id = ct.run_id
+                        WHERE ct.scraper_type = {p}
+                          AND ct.status = 'pending'
+                          AND cd.scraper_type = {p}
+                          AND cd.cancelled = 0
+                          AND cd.aggregation_done = 0
+                        ORDER BY cd.created_at ASC, ct.county_index ASC
+                        LIMIT 1
+                        FOR UPDATE OF ct SKIP LOCKED
+                        """,
+                        (scraper_type, scraper_type),
+                    ).fetchone()
+                else:
+                    # SQLite: BEGIN IMMEDIATE for file-level locking
+                    conn.execute("BEGIN IMMEDIATE")
+                    row = conn.execute(
+                        f"""
+                        SELECT ct.id FROM county_tasks ct
+                        INNER JOIN county_dispatch cd ON cd.run_id = ct.run_id
+                        WHERE ct.scraper_type = {p}
+                          AND ct.status = 'pending'
+                          AND cd.scraper_type = {p}
+                          AND cd.cancelled = 0
+                          AND cd.aggregation_done = 0
+                        ORDER BY cd.created_at ASC, ct.county_index ASC
+                        LIMIT 1
+                        """,
+                        (scraper_type, scraper_type),
+                    ).fetchone()
 
-            if not row:
+                if not row:
+                    conn.commit()
+                    return None
+                tid = int(row["id"])
+                cur = conn.execute(
+                    f"""
+                    UPDATE county_tasks
+                    SET status = 'processing', claimed_by = {p}, claimed_at = {p}
+                    WHERE id = {p} AND status = 'pending'
+                    """,
+                    (worker_id, now, tid),
+                )
+                if cur.rowcount == 0:
+                    conn.commit()
+                    return None
+                out = conn.execute(
+                    f"SELECT id, run_id, state, county, county_index, total_counties FROM county_tasks WHERE id = {p}",
+                    (tid,),
+                ).fetchone()
                 conn.commit()
-                return None
-            tid = int(row["id"])
-            cur = conn.execute(
-                f"""
-                UPDATE county_tasks
-                SET status = 'processing', claimed_by = {p}, claimed_at = {p}
-                WHERE id = {p} AND status = 'pending'
-                """,
-                (worker_id, now, tid),
-            )
-            if cur.rowcount == 0:
-                conn.commit()
-                return None
-            out = conn.execute(
-                f"SELECT id, run_id, state, county, county_index, total_counties FROM county_tasks WHERE id = {p}",
-                (tid,),
-            ).fetchone()
-            conn.commit()
-            return dict(out) if out else None
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+                return dict(out) if out else None
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                if attempt == 0:
+                    # First failure — close stale connection and retry with a fresh one
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    continue
+                raise
+            finally:
+                conn.close()
+    return None
 
 
 def mark_county_done(run_id: str, county: str, result: dict[str, Any]) -> None:
     p = _p()
-    now = datetime.now().isoformat()
     payload = json.dumps(result, default=str)
-    with _lock:
-        conn = _conn()
-        try:
-            conn.execute(
-                f"""
-                UPDATE county_tasks
-                SET status = 'done', completed_at = {p}, result_json = {p}, error = NULL
-                WHERE run_id = {p} AND county = {p}
-                """,
-                (now, payload, run_id, county),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+    for attempt in range(2):
+        now = datetime.now().isoformat()
+        with _lock:
+            conn = _conn()
+            try:
+                conn.execute(
+                    f"""
+                    UPDATE county_tasks
+                    SET status = 'done', completed_at = {p}, result_json = {p}, error = NULL
+                    WHERE run_id = {p} AND county = {p}
+                    """,
+                    (now, payload, run_id, county),
+                )
+                conn.commit()
+                return
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                if attempt == 0:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    continue
+                raise
+            finally:
+                conn.close()
 
 
 def mark_county_failed(run_id: str, county: str, error: str) -> None:
     p = _p()
-    now = datetime.now().isoformat()
-    with _lock:
-        conn = _conn()
-        try:
-            conn.execute(
-                f"""
-                UPDATE county_tasks
-                SET status = 'failed', completed_at = {p}, error = {p}, result_json = NULL
-                WHERE run_id = {p} AND county = {p}
-                """,
-                (now, error[:4000], run_id, county),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+    for attempt in range(2):
+        now = datetime.now().isoformat()
+        with _lock:
+            conn = _conn()
+            try:
+                conn.execute(
+                    f"""
+                    UPDATE county_tasks
+                    SET status = 'failed', completed_at = {p}, error = {p}, result_json = NULL
+                    WHERE run_id = {p} AND county = {p}
+                    """,
+                    (now, error[:4000], run_id, county),
+                )
+                conn.commit()
+                return
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                if attempt == 0:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    continue
+                raise
+            finally:
+                conn.close()
 
 
 def reclaim_stale_county_tasks(stale_seconds: int = 7200) -> int:
