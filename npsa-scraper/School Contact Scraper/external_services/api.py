@@ -52,7 +52,6 @@ from external_services.auth import require_auth, verify_password, generate_token
 from external_services.notify import send_run_complete_email, send_test_notification_email
 from external_services import queue_store
 from external_services import db
-from external_services import db_state
 from school_run_log import (
     log_startup, log_county_header, log_school_success, log_school_skip,
     log_warn, log_err, log_county_done, log_progress_counties,
@@ -129,27 +128,27 @@ running_threads = {}
 
 def _unique_running_states_after_stale_cleanup() -> set:
     """Expire stale 'running' / old 'finalizing' entries in Postgres; return set of state slugs still running."""
-    return db_state.cleanup_stale_runs(SCRAPER_TYPE)
+    return queue_store.cleanup_stale_runs(SCRAPER_TYPE)
 
 
 def _same_state_running(state: str) -> bool:
-    return db_state.is_state_running(state, SCRAPER_TYPE)
+    return queue_store.is_state_running(state, SCRAPER_TYPE)
 
 
 def _state_finalizing(state: str) -> bool:
-    return db_state.is_state_finalizing(state, SCRAPER_TYPE)
+    return queue_store.is_state_finalizing(state, SCRAPER_TYPE)
 
 
 def _school_queue_worker_loop():
     while True:
         time.sleep(2.5)
         try:
-            if not db_state.try_acquire_queue_leader():
+            if not queue_store.try_acquire_queue_leader():
                 continue
             active = _unique_running_states_after_stale_cleanup()
             if len(active) >= 2:
                 continue
-            nxt = db_state.queue_peek_next(SCRAPER_TYPE)
+            nxt = queue_store.queue_peek_next(SCRAPER_TYPE)
             if not nxt:
                 continue
             job_id, st = nxt
@@ -160,7 +159,7 @@ def _school_queue_worker_loop():
             if len(active) >= 2:
                 continue
             run_id = str(uuid.uuid4())
-            if not db_state.queue_mark_running(job_id, run_id, SCRAPER_TYPE):
+            if not queue_store.queue_mark_running(job_id, run_id, SCRAPER_TYPE):
                 continue
             run_streaming_pipeline(st, run_id, False, job_id)
         except Exception as e:
@@ -184,12 +183,12 @@ def _hydrate_pipeline_run_from_dispatch(run_id: str) -> bool:
     if run_id in pipeline_runs:
         return True
     # Try db_state run record first
-    run_row = db_state.get_run(run_id)
+    run_row = queue_store.get_run(run_id)
     if run_row:
-        pipeline_runs[run_id] = db_state.row_to_pipeline_format(run_row)
+        pipeline_runs[run_id] = queue_store.row_to_pipeline_format(run_row)
         return True
     # Fall back to dispatch table
-    row = db_state._execute(
+    row = queue_store._execute(
         "SELECT * FROM county_dispatch WHERE run_id = %s",
         (run_id,), fetch="one"
     )
@@ -246,7 +245,7 @@ def _merge_county_result_into_pipeline_runs(
     """Apply one county result to in-memory progress (starter replica only)."""
     if run_id not in pipeline_runs:
         return
-    progress = db_state.get_dispatch_progress(run_id)
+    progress = queue_store.get_dispatch_progress(run_id)
     done = progress["completed"] + progress["failed"]
     with progress_lock:
         pr = pipeline_runs[run_id]
@@ -283,7 +282,7 @@ def _merge_county_result_into_pipeline_runs(
     tc = sum(pipeline_runs[run_id].get("countyContacts") or [])
     log_progress_counties(done, total_counties, tc)
     if done % CHECKPOINT_BATCH_SIZE == 0 or done == total_counties:
-        completed_tasks = db_state.get_completed_county_tasks(run_id)
+        completed_tasks = queue_store.get_completed_county_tasks(run_id)
         names = [t["county"] for t in completed_tasks]
         st = pipeline_runs[run_id]["state"]
         next_index = 0
@@ -323,7 +322,7 @@ def _county_processor_worker_loop(worker_tag: str) -> None:
     while True:
         time.sleep(0.35 + random.random() * 0.4)
         try:
-            task = db_state.claim_county_task(SCRAPER_TYPE)
+            task = queue_store.claim_county_task(SCRAPER_TYPE)
             if not task:
                 continue
             run_id = task["run_id"]
@@ -332,12 +331,12 @@ def _county_processor_worker_loop(worker_tag: str) -> None:
             idx = int(task["county_index"])
             total = int(task["total_counties"])
             # Check if dispatch was cancelled
-            run_row = db_state.get_run(run_id)
+            run_row = queue_store.get_run(run_id)
             if run_row and run_row.get("status") == "cancelled":
-                db_state.fail_county_task(task["id"], "cancelled")
+                queue_store.fail_county_task(task["id"], "cancelled")
                 continue
             if run_id in running_threads and running_threads[run_id].get("cancelled"):
-                db_state.fail_county_task(task["id"], "cancelled")
+                queue_store.fail_county_task(task["id"], "cancelled")
                 continue
             start_time = time.time()
             run_dir = RUNS_DIR / run_id
@@ -365,7 +364,7 @@ def _county_processor_worker_loop(worker_tag: str) -> None:
             if not result.get("success"):
                 err = result.get("error", "Unknown error")
                 log_err(f"{county} County: {err}")
-                db_state.fail_county_task(task["id"], str(err))
+                queue_store.fail_county_task(task["id"], str(err))
             else:
                 csv_data = None
                 row_count = 0
@@ -377,33 +376,24 @@ def _county_processor_worker_loop(worker_tag: str) -> None:
                         row_count = max(0, csv_data.count("\n") - 1)
                     except Exception as e:
                         log_warn(f"Could not read county CSV: {e}")
-                db_state.complete_county_task(task["id"], result, csv_data, row_count)
+                queue_store.complete_county_task(task["id"], result, csv_data, row_count)
             # Update pipeline_runs progress via db_state
-            progress = db_state.get_dispatch_progress(run_id)
+            progress = queue_store.get_dispatch_progress(run_id)
             completed_count = progress["completed"] + progress["failed"]
             total_ct = progress["total"]
             progress_pct = int((completed_count / total_ct) * 100) if total_ct > 0 else 0
-            db_state.update_run(run_id,
+            queue_store.update_run(run_id,
                 progress=progress_pct,
                 counties_processed=completed_count,
                 status_message=f"Processing {completed_count}/{total_ct} counties (distributed queue)...",
             )
             if result.get("success", False):
-                db_state.increment_run(run_id,
+                queue_store.increment_run(run_id,
                     schools_found=result.get("schools", 0),
                     schools_processed=result.get("schools", 0),
                 )
-            db_state.heartbeat(run_id)
-            # Check if all counties done — try aggregation
-            if progress["done"]:
-                if db_state.try_claim_aggregation(run_id):
-                    try:
-                        aggregate_final_results(run_id, task["state"], skip_wait=True)
-                        db_state.mark_aggregation_done(run_id)
-                    except Exception as e:
-                        print(f"[WORKER] Aggregation failed: {e}")
-                        import traceback
-                        traceback.print_exc()
+            queue_store.heartbeat(run_id)
+            # Aggregation is handled by the manager via _watch_county_queue_until_aggregated
             _merge_county_result_into_pipeline_runs(
                 run_id, county, result, idx, total, elapsed
             )
@@ -428,15 +418,15 @@ def _watch_county_queue_until_aggregated(
         time.sleep(3.0)
 
         # Check cancellation
-        run_row = db_state.get_run(run_id)
+        run_row = queue_store.get_run(run_id)
         if running_threads.get(run_id, {}).get("cancelled") or (run_row and run_row.get("status") == "cancelled"):
             pipeline_runs[run_id]["status"] = "cancelled"
             pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
-            db_state.cancel_dispatch(run_id)
-            db_state.update_run(run_id, status="cancelled", status_message="Pipeline cancelled by user")
+            queue_store.cancel_dispatch(run_id)
+            queue_store.update_run(run_id, status="cancelled", status_message="Pipeline cancelled by user")
             return
 
-        progress = db_state.get_dispatch_progress(run_id)
+        progress = queue_store.get_dispatch_progress(run_id)
         total = len(counties)
         terminal = progress["completed"] + progress["failed"]
         progress_pct = int((terminal / max(1, total)) * 100)
@@ -451,22 +441,22 @@ def _watch_county_queue_until_aggregated(
                 pipeline_runs[run_id]["statusMessage"] = "All counties finished; aggregating..."
 
         # Also update db_state so other replicas can see progress
-        db_state.update_run(run_id,
+        queue_store.update_run(run_id,
             progress=progress_pct,
             counties_processed=terminal,
             status_message=pipeline_runs[run_id]["statusMessage"],
         )
-        db_state.heartbeat(run_id)
+        queue_store.heartbeat(run_id)
 
         if not progress["done"]:
             wait_loops = 0
             continue
 
         # All county rows terminal (done or failed)
-        if db_state.try_claim_aggregation(run_id):
+        if queue_store.try_claim_aggregation(run_id):
             try:
                 aggregate_final_results(run_id, state, skip_wait=True)
-                db_state.mark_aggregation_done(run_id)
+                queue_store.mark_aggregation_done(run_id)
             except Exception as e:
                 log_err(f"Aggregation after county queue: {e}")
                 if run_id in pipeline_runs:
@@ -476,9 +466,9 @@ def _watch_county_queue_until_aggregated(
             return
 
         # Another replica holds the lease or will run recovery — wait for completion
-        disp_progress = db_state.get_dispatch_progress(run_id)
+        disp_progress = queue_store.get_dispatch_progress(run_id)
         # Check if aggregation is done by looking at county_dispatch table
-        disp_row = db_state._execute(
+        disp_row = queue_store._execute(
             "SELECT aggregation_done FROM county_dispatch WHERE run_id = %s",
             (run_id,), fetch="one"
         )
@@ -496,24 +486,24 @@ def _school_aggregation_recovery_loop() -> None:
         time.sleep(45.0)
         try:
             # Find dispatches where all counties are done but aggregation not yet complete
-            rows = db_state._execute("""
+            rows = queue_store._execute("""
                 SELECT cd.run_id, cd.state FROM county_dispatch cd
                 WHERE cd.scraper_type = %s AND cd.aggregation_done = 0 AND cd.cancelled = 0
                   AND cd.aggregation_owner IS NULL
             """, (SCRAPER_TYPE,), fetch="all")
             for row in (rows or []):
                 rid = row["run_id"]
-                progress = db_state.get_dispatch_progress(rid)
+                progress = queue_store.get_dispatch_progress(rid)
                 if not progress["done"]:
                     continue
-                if not db_state.try_claim_aggregation(rid):
+                if not queue_store.try_claim_aggregation(rid):
                     continue
                 st = (row["state"] or "").lower()
                 try:
                     if not _hydrate_pipeline_run_from_dispatch(rid):
                         continue
                     aggregate_final_results(rid, st, skip_wait=True)
-                    db_state.mark_aggregation_done(rid)
+                    queue_store.mark_aggregation_done(rid)
                 except Exception as e:
                     log_err(f"[RECOVER] aggregation {rid}: {e}")
         except Exception as e:
@@ -523,21 +513,21 @@ def _school_aggregation_recovery_loop() -> None:
 
 
 def _synthetic_pipeline_status_from_dispatch(run_id: str) -> Optional[dict]:
-    """When polling hits a replica that did not start the run, rebuild status from db_state."""
+    """When polling hits a replica that did not start the run, rebuild status from queue_store."""
     if not validate_run_id(run_id):
         return None
     # Try db_state first for the authoritative run record
-    run_row = db_state.get_run(run_id)
+    run_row = queue_store.get_run(run_id)
     if run_row:
-        return db_state.row_to_pipeline_format(run_row)
+        return queue_store.row_to_pipeline_format(run_row)
     # Fall back to dispatch tables for runs that may not have a pipeline_runs row yet
-    disp_row = db_state._execute(
+    disp_row = queue_store._execute(
         "SELECT * FROM county_dispatch WHERE run_id = %s",
         (run_id,), fetch="one"
     )
     if not disp_row:
         return None
-    progress = db_state.get_dispatch_progress(run_id)
+    progress = queue_store.get_dispatch_progress(run_id)
     total = int(disp_row.get("total_counties") or 0)
     terminal = progress["completed"] + progress["failed"]
     st = (disp_row.get("state") or "").lower()
@@ -1539,7 +1529,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
 
         # Ensure run exists in local pipeline_runs dict (may not if another replica created it)
         if run_id not in pipeline_runs:
-            run_row = db_state.get_run(run_id)
+            run_row = queue_store.get_run(run_id)
             if run_row:
                 pipeline_runs[run_id] = {
                     "status": run_row.get("status", "running"),
@@ -1652,7 +1642,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found. Finalizing..."
             pipeline_runs[run_id]["finalizingAt"] = time.time()
             try:
-                db_state.update_run(run_id, status="finalizing", total_contacts=0, status_message="No contacts found")
+                queue_store.update_run(run_id, status="finalizing", total_contacts=0, status_message="No contacts found")
             except Exception:
                 pass
             
@@ -1806,7 +1796,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         pipeline_runs[run_id]["finalizingAt"] = time.time()  # Track when finalizing started
         # Sync to db_state so other replicas and API see the update
         try:
-            db_state.update_run(
+            queue_store.update_run(
                 run_id,
                 status="finalizing",
                 progress=100,
@@ -1835,7 +1825,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
 
                 # Sync completion to db_state
                 try:
-                    db_state.update_run(run_id, status="completed", status_message="Completed")
+                    queue_store.update_run(run_id, status="completed", status_message="Completed")
                 except Exception:
                     pass
 
@@ -1877,7 +1867,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
         pipeline_runs[run_id]["statusMessage"] = f"Failed to aggregate results: {str(e)}"
         # Also update db_state so the error is visible across replicas
         try:
-            db_state.update_run(run_id, status="error", status_message=f"Aggregation failed: {str(e)}")
+            queue_store.update_run(run_id, status="error", status_message=f"Aggregation failed: {str(e)}")
         except Exception:
             pass
         import traceback
@@ -1941,7 +1931,7 @@ def run_streaming_pipeline(
 
     # Create authoritative run record in Postgres
     display_name = _run_display_name(state, SCRAPER_TYPE)
-    db_state.create_run(run_id, state, SCRAPER_TYPE, display_name, queue_job_id)
+    queue_store.create_run(run_id, state, SCRAPER_TYPE, display_name, queue_job_id)
 
     def process_all_counties():
         """
@@ -2037,8 +2027,8 @@ def run_streaming_pipeline(
                 # Multi-replica: county_tasks in Postgres; Process workers on each replica claim tasks.
                 remaining_county_names = [c for _, c in remaining_counties]
                 if remaining_county_names:
-                    db_state.dispatch_counties(run_id, state, remaining_county_names, SCRAPER_TYPE)
-                db_state.update_run(run_id,
+                    queue_store.dispatch_counties(run_id, state, remaining_county_names, SCRAPER_TYPE)
+                queue_store.update_run(run_id,
                     total_counties=total_counties,
                     counties_processed=len(completed_counties),
                     initial_estimated_time_remaining=pipeline_runs[run_id].get("initialEstimatedTimeRemaining"),
@@ -2346,7 +2336,7 @@ def run_streaming_pipeline(
                 pst = pipeline_runs.get(run_id, {}).get("status", "error")
                 perr = pipeline_runs.get(run_id, {}).get("error")
                 try:
-                    db_state.queue_finalize(run_id, SCRAPER_TYPE, str(pst), perr)
+                    queue_store.queue_finalize(run_id, SCRAPER_TYPE, str(pst), perr)
                 except Exception as qe:
                     print(f"[{run_id}] queue finalize error: {qe}")
             # Always clean up thread tracking
@@ -2681,7 +2671,7 @@ def run_pipeline():
         if state.lower() not in unique_active_states and len(unique_active_states) >= 2:
             if db.is_postgres():
                 dn = _run_display_name(state, SCRAPER_TYPE)
-                q = db_state.queue_enqueue(state, SCRAPER_TYPE, dn)
+                q = queue_store.queue_enqueue(state, SCRAPER_TYPE, dn)
                 resp = jsonify({
                     "status": "queued",
                     "jobId": q["job_id"],
@@ -2734,7 +2724,7 @@ def school_queue_list():
         r.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         r.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
         return r, 200
-    jobs = db_state.queue_list_jobs(SCRAPER_TYPE)
+    jobs = queue_store.queue_list_jobs(SCRAPER_TYPE)
     resp = jsonify({"status": "ok", "jobs": jobs, "count": len(jobs)})
     resp.headers.add("Access-Control-Allow-Origin", "*")
     return resp, 200
@@ -2750,7 +2740,7 @@ def school_queue_cancel(job_id: int):
         r.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
         r.headers.add("Access-Control-Allow-Methods", "DELETE, OPTIONS")
         return r, 200
-    ok = db_state.queue_cancel_job(job_id, SCRAPER_TYPE)
+    ok = queue_store.queue_cancel_job(job_id, SCRAPER_TYPE)
     if not ok:
         return jsonify({
             "status": "error",
@@ -2890,13 +2880,13 @@ def list_runs():
         runs = list_all_runs()
         # Merge in runs from Postgres that may not have filesystem metadata
         try:
-            db_runs = db_state.list_runs(SCRAPER_TYPE, include_archived=True)
+            db_runs = queue_store.list_runs(SCRAPER_TYPE, include_archived=True)
             existing_ids = {r.get("run_id") for r in runs}
             for db_row in db_runs:
                 if db_row["run_id"] not in existing_ids:
-                    runs.append(db_state.row_to_list_format(db_row))
+                    runs.append(queue_store.row_to_list_format(db_row))
         except Exception as e:
-            print(f"[RUNS] db_state.list_runs fallback error: {e}")
+            print(f"[RUNS] queue_store.list_runs fallback error: {e}")
 
         # Sort by created_at (newest first)
         runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -2965,9 +2955,9 @@ def stop_run(run_id: str):
             pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
 
         # Update Postgres state
-        db_state.update_run(run_id, status="cancelled", status_message="Pipeline cancelled by user",
+        queue_store.update_run(run_id, status="cancelled", status_message="Pipeline cancelled by user",
                            cancelled_at=datetime.now().isoformat())
-        db_state.cancel_dispatch(run_id)
+        queue_store.cancel_dispatch(run_id)
 
         # Update metadata
         metadata.update({
@@ -3254,9 +3244,9 @@ def delete_run(run_id: str):
                 pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
             
             # Update Postgres state
-            db_state.update_run(run_id, status="cancelled", status_message="Cancelled for deletion",
+            queue_store.update_run(run_id, status="cancelled", status_message="Cancelled for deletion",
                                cancelled_at=datetime.now().isoformat())
-            db_state.cancel_dispatch(run_id)
+            queue_store.cancel_dispatch(run_id)
 
             # Update metadata to cancelled first
             metadata["status"] = "cancelled"
@@ -3295,7 +3285,7 @@ def delete_run(run_id: str):
         save_run_metadata(run_id, metadata)
 
         # Mark as deleted in Postgres
-        db_state.delete_run(run_id)
+        queue_store.delete_run(run_id)
 
         # Remove from in-memory storage if present
         pipeline_runs.pop(run_id, None)
@@ -3356,7 +3346,7 @@ def archive_run(run_id: str):
         save_run_metadata(run_id, metadata)
 
         # Update Postgres
-        db_state.update_run(run_id, archived=True)
+        queue_store.update_run(run_id, archived=True)
 
         print(f"[{run_id}] Run archived")
         
@@ -3413,7 +3403,7 @@ def unarchive_run(run_id: str):
         save_run_metadata(run_id, metadata)
 
         # Update Postgres
-        db_state.update_run(run_id, archived=False)
+        queue_store.update_run(run_id, archived=False)
 
         print(f"[{run_id}] Run unarchived")
         
@@ -3496,7 +3486,7 @@ def not_found(e):
 print("[STARTUP] Running cleanup of old runs...")
 cleanup_old_runs()
 
-db_state.init_tables()
+queue_store.init_tables()
 if True:  # Always start worker threads with Postgres
     _school_q_thread = threading.Thread(target=_school_queue_worker_loop, daemon=True)
     _school_q_thread.start()
