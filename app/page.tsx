@@ -4,7 +4,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { COLORS } from "../lib/constants";
-import { fetchRuns, fetchPipelineStatus } from "../lib/api";
+import { fetchRuns } from "../lib/api";
 import MetricCards from "../components/MetricCards";
 import ActivePipelineHero from "../components/ActivePipelineHero";
 import type { RunMetadata } from "../lib/types";
@@ -29,32 +29,8 @@ export default function HomePage() {
           fetchRuns("church"),
           fetchRuns("school"),
         ]);
-        const churchData = cr.status === "fulfilled" ? cr.value : [];
-        const schoolData = sr.status === "fulfilled" ? sr.value : [];
-
-        // Enrich active runs with pipeline-status data (has real county counts)
-        const enrichRuns = async (runs: RunMetadata[], type: "church" | "school") => {
-          const enriched = await Promise.all(
-            runs.map(async (run) => {
-              if (run.status !== "running" && run.status !== "finalizing") return run;
-              try {
-                const ps = await fetchPipelineStatus(type, run.run_id);
-                return {
-                  ...run,
-                  total_counties: ps.totalCounties ?? ps.total_counties ?? run.total_counties,
-                  counties_processed: ps.countiesProcessed ?? ps.counties_processed ?? run.counties_processed,
-                  progress: ps.progress ?? run.progress,
-                };
-              } catch {
-                return run;
-              }
-            })
-          );
-          return enriched;
-        };
-
-        setChurchRuns(await enrichRuns(churchData, "church"));
-        setSchoolRuns(await enrichRuns(schoolData, "school"));
+        if (cr.status === "fulfilled") setChurchRuns(cr.value);
+        if (sr.status === "fulfilled") setSchoolRuns(sr.value);
       } catch {
         // ignore
       }
