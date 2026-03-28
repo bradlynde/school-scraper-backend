@@ -24,16 +24,30 @@ export default function HomePage() {
 
   useEffect(() => {
     async function load() {
+      // Load runs first — always show data even if enrichment fails
+      let churchData: RunMetadata[] = [];
+      let schoolData: RunMetadata[] = [];
       try {
         const [cr, sr] = await Promise.allSettled([
           fetchRuns("church"),
           fetchRuns("school"),
         ]);
-        const churchData = cr.status === "fulfilled" ? cr.value : [];
-        const schoolData = sr.status === "fulfilled" ? sr.value : [];
+        if (cr.status === "fulfilled") churchData = cr.value;
+        if (sr.status === "fulfilled") schoolData = sr.value;
+      } catch {}
 
-        // Enrich active runs with pipeline-status data (has real county counts)
-        const enrichRuns = async (runs: RunMetadata[], type: "church" | "school") => {
+      setChurchRuns(churchData);
+      setSchoolRuns(schoolData);
+      setLoading(false);
+
+      // Then enrich active runs with pipeline-status (real county counts)
+      for (const [runs, setRuns, type] of [
+        [churchData, setChurchRuns, "church"],
+        [schoolData, setSchoolRuns, "school"],
+      ] as const) {
+        const activeRuns = runs.filter(r => r.status === "running" || r.status === "finalizing");
+        if (activeRuns.length === 0) continue;
+        try {
           const enriched = await Promise.all(
             runs.map(async (run) => {
               if (run.status !== "running" && run.status !== "finalizing") return run;
@@ -50,15 +64,9 @@ export default function HomePage() {
               }
             })
           );
-          return enriched;
-        };
-
-        setChurchRuns(await enrichRuns(churchData, "church"));
-        setSchoolRuns(await enrichRuns(schoolData, "school"));
-      } catch {
-        // ignore
+          setRuns(enriched);
+        } catch {}
       }
-      setLoading(false);
     }
     load();
   }, []);
