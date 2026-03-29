@@ -2086,6 +2086,7 @@ def run_streaming_pipeline(
             
             # Update progress tracking with county info
             pipeline_runs[run_id]["totalCounties"] = total_counties
+            queue_store.upsert_pipeline_state(run_id, total_counties=total_counties)
             pipeline_runs[run_id]["statusMessage"] = f"Processing {state} ({len(completed_counties)}/{total_counties} counties completed)..."
             pipeline_runs[run_id]["currentCounty"] = "Starting..." if not completed_counties else f"Resuming from {len(completed_counties)}/{total_counties}"
             pipeline_runs[run_id]["countiesProcessed"] = len(completed_counties)
