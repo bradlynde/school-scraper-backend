@@ -3513,6 +3513,9 @@ def delete_run(run_id: str):
         pipeline_runs.pop(run_id, None)
         running_threads.pop(run_id, None)
 
+        # Remove from Postgres pipeline_state table
+        queue_store.delete_pipeline_state(run_id)
+
         log_warn(f"Run deleted: {run_id}")
         
         response = jsonify({

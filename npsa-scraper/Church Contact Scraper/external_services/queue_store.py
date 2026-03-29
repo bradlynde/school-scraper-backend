@@ -1241,6 +1241,21 @@ def list_pipeline_states(scraper_type: str, limit: int = 100) -> list[dict[str, 
             conn.close()
 
 
+def delete_pipeline_state(run_id: str) -> bool:
+    """Delete a pipeline_state row by run_id."""
+    if not is_enabled():
+        return False
+    p = _p()
+    with _lock:
+        conn = _conn()
+        try:
+            conn.execute(f"DELETE FROM pipeline_state WHERE run_id = {p}", (run_id,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Final CSV storage (Postgres — durable source of truth for downloads)
 # ---------------------------------------------------------------------------
