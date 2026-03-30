@@ -777,12 +777,15 @@ export default function App() {
       // Engagement letter tabs: direct PDF download, no dialog
       const el = previewRef.current;
       html2pdf().set({
-        margin: [0, 0, 0, 0],
+        margin: [0.75, 0.75, 0.75, 0.75],
         filename,
         image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
+        html2canvas: {
+          scale: 2, useCORS: true, logging: false,
+          onclone: (_doc, el) => { el.style.padding = "0"; el.style.boxShadow = "none"; }
+        },
         jsPDF: { unit: "in", format: "letter", orientation: "portrait" },
-        pagebreak: { mode: ["avoid-all", "css", "legacy"] },
+        pagebreak: { mode: ["css", "legacy"] },
       }).from(el).save();
     }
   };
@@ -856,13 +859,13 @@ export default function App() {
     });
   };
   const SH = ({id}) => { const s=sections.find(x=>x.id===id); if(!s||!s.roman) return null;
-    return <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:2,color:"#1a4a6e",borderBottom:"2px solid #1a4a6e",paddingBottom:4,marginTop:30,marginBottom:10,pageBreakAfter:"avoid",breakAfter:"avoid"}}>{s.roman} {s.title}</div>; };
-  const SubH = ({label}) => <div style={{fontSize:13,fontWeight:700,fontStyle:"italic",marginTop:14,marginBottom:6,color:"#333",pageBreakAfter:"avoid",breakAfter:"avoid"}}>{label}</div>;
+    return <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:2,color:"#1a4a6e",borderBottom:"2px solid #1a4a6e",paddingBottom:4,marginTop:30,marginBottom:10,pageBreakAfter:"avoid",breakAfter:"avoid",pageBreakInside:"avoid",breakInside:"avoid"}}>{s.roman} {s.title}</div>; };
+  const SubH = ({label}) => <div style={{fontSize:13,fontWeight:700,fontStyle:"italic",marginTop:14,marginBottom:6,color:"#333",pageBreakAfter:"avoid",breakAfter:"avoid",pageBreakInside:"avoid",breakInside:"avoid"}}>{label}</div>;
   const Body = ({id,subId}) => {
     const raw = gc(id,subId);
     const tokenRe = /\[EARLY_SIGNING_DISCOUNT:([^:]+):([^:]+):([^\]]+)\]/;
     const match = raw.match(tokenRe);
-    if (!match) return <div style={{marginBottom:8}}>{renderLines(raw)}</div>;
+    if (!match) return <div style={{marginBottom:8,pageBreakBefore:"avoid",breakBefore:"avoid"}}>{renderLines(raw)}</div>;
     const [full, date, discAmt, baseFee] = match;
     const parts = raw.split(full);
     return <>
