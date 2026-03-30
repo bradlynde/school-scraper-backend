@@ -774,19 +774,21 @@ export default function App() {
       const win = window.open("", "_blank");
       if(win){ win.document.write(printHtml); win.document.close(); }
     } else {
-      // Engagement letter tabs: direct PDF download, no dialog
-      const el = previewRef.current;
-      html2pdf().set({
-        margin: [0.75, 0.75, 0.75, 0.75],
-        filename,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: {
-          scale: 2, useCORS: true, logging: false,
-          onclone: (_doc, el) => { el.style.padding = "0"; el.style.boxShadow = "none"; }
-        },
-        jsPDF: { unit: "in", format: "letter", orientation: "portrait" },
-        pagebreak: { mode: ["css", "legacy"] },
-      }).from(el).save();
+      // Engagement letter tabs: native browser print for perfect page breaks + margins
+      const bodyHtml = previewRef.current.innerHTML;
+      const printHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle + clientLabel}</title><style>
+        *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}
+        @page{margin:0.75in;size:letter}
+        body{margin:0;padding:0;font-family:Georgia,serif}
+        button,.no-print{display:none!important}
+        h1,h2,h3,h4{page-break-after:avoid;break-after:avoid}
+        p,li{orphans:3;widows:3}
+        table,figure{page-break-inside:avoid;break-inside:avoid}
+      </style></head><body><div style="font-family:Georgia,serif">${bodyHtml}</div><script>
+        document.fonts.ready.then(function(){ window.print(); });
+      <\/script></body></html>`;
+      const win = window.open("", "_blank");
+      if(win){ win.document.write(printHtml); win.document.close(); }
     }
   };
     // ── DOCUMENT MODE ──────────────────────────────────────────────────────────
@@ -859,13 +861,13 @@ export default function App() {
     });
   };
   const SH = ({id}) => { const s=sections.find(x=>x.id===id); if(!s||!s.roman) return null;
-    return <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:2,color:"#1a4a6e",borderBottom:"2px solid #1a4a6e",paddingBottom:4,marginTop:30,marginBottom:10,pageBreakAfter:"avoid",breakAfter:"avoid",pageBreakInside:"avoid",breakInside:"avoid"}}>{s.roman} {s.title}</div>; };
-  const SubH = ({label}) => <div style={{fontSize:13,fontWeight:700,fontStyle:"italic",marginTop:14,marginBottom:6,color:"#333",pageBreakAfter:"avoid",breakAfter:"avoid",pageBreakInside:"avoid",breakInside:"avoid"}}>{label}</div>;
+    return <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:2,color:"#1a4a6e",borderBottom:"2px solid #1a4a6e",paddingBottom:4,marginTop:30,marginBottom:10,pageBreakAfter:"avoid",breakAfter:"avoid"}}>{s.roman} {s.title}</div>; };
+  const SubH = ({label}) => <div style={{fontSize:13,fontWeight:700,fontStyle:"italic",marginTop:14,marginBottom:6,color:"#333",pageBreakAfter:"avoid",breakAfter:"avoid"}}>{label}</div>;
   const Body = ({id,subId}) => {
     const raw = gc(id,subId);
     const tokenRe = /\[EARLY_SIGNING_DISCOUNT:([^:]+):([^:]+):([^\]]+)\]/;
     const match = raw.match(tokenRe);
-    if (!match) return <div style={{marginBottom:8,pageBreakBefore:"avoid",breakBefore:"avoid"}}>{renderLines(raw)}</div>;
+    if (!match) return <div style={{marginBottom:8}}>{renderLines(raw)}</div>;
     const [full, date, discAmt, baseFee] = match;
     const parts = raw.split(full);
     return <>
