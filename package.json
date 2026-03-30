@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "postinstall": "node node_modules/puppeteer/install.mjs || true"
   },
   "dependencies": {
     "express": "^4.21.0",
