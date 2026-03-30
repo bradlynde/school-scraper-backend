@@ -774,21 +774,28 @@ export default function App() {
       const win = window.open("", "_blank");
       if(win){ win.document.write(printHtml); win.document.close(); }
     } else {
-      // Engagement letter tabs: native browser print for perfect page breaks + margins
+      // Engagement letter tabs: Puppeteer server-side PDF for perfect page breaks + margins
       const bodyHtml = previewRef.current.innerHTML;
-      const printHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle + clientLabel}</title><style>
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle + clientLabel}</title><style>
         *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}
-        @page{margin:0.75in;size:letter}
         body{margin:0;padding:0;font-family:Georgia,serif}
         button,.no-print{display:none!important}
         h1,h2,h3,h4{page-break-after:avoid;break-after:avoid}
         p,li{orphans:3;widows:3}
-        table,figure{page-break-inside:avoid;break-inside:avoid}
-      </style></head><body><div style="font-family:Georgia,serif">${bodyHtml}</div><script>
-        document.fonts.ready.then(function(){ window.print(); });
-      <\/script></body></html>`;
-      const win = window.open("", "_blank");
-      if(win){ win.document.write(printHtml); win.document.close(); }
+      </style></head><body><div style="font-family:Georgia,serif">${bodyHtml}</div></html>`;
+      fetch('/api/generate-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html, filename }),
+      })
+        .then(r => r.blob())
+        .then(blob => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = filename; a.click();
+          URL.revokeObjectURL(url);
+        })
+        .catch(err => { console.error('PDF error:', err); alert('PDF generation failed. Please try again.'); });
     }
   };
     // ── DOCUMENT MODE ──────────────────────────────────────────────────────────

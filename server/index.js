@@ -1,5 +1,6 @@
 import express from 'express';
 import { OpenAI } from 'openai';
+import puppeteer from 'puppeteer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { readFileSync } from 'fs';
@@ -19,7 +20,8 @@ function getOpenAI() {
   return openai;
 }
 
-app.use(express.json());
+// Increase limit to handle base64-encoded logo in HTML payload
+app.use(express.json({ limit: '10mb' }));
 
 // Serve static Vite build
 app.use(express.static(path.join(__dirname, '..', 'dist')));
@@ -65,6 +67,38 @@ app.get('/api/templates/:type', (req, res) => {
     res.type('json').send(data);
   } catch (err) {
     res.status(500).json({ error: 'Could not load template' });
+  }
+});
+
+// PDF generation endpoint — uses Puppeteer (headless Chromium) for perfect page breaks
+app.post('/api/generate-pdf', async (req, res) => {
+  const { html, filename } = req.body;
+  if (!html) return res.status(400).json({ error: 'No HTML provided' });
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      headless: true,
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdf = await page.pdf({
+      format: 'Letter',
+      margin: { top: '0.75in', right: '0.75in', bottom: '0.75in', left: '0.75in' },
+      printBackground: true,
+    });
+    await browser.close();
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename || 'engagement-letter.pdf'}"`,
+      'Content-Length': pdf.length,
+    });
+    res.end(pdf);
+  } catch (err) {
+    if (browser) await browser.close().catch(() => {});
+    console.error('PDF generation error:', err.message);
+    res.status(500).json({ error: 'PDF generation failed' });
   }
 });
 
