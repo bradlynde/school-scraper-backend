@@ -777,7 +777,7 @@ export default function App() {
       // Engagement letter tabs: direct PDF download, no dialog
       const el = previewRef.current;
       html2pdf().set({
-        margin: [0.75, 0.75, 0.75, 0.75],
+        margin: [0, 0, 0, 0],
         filename,
         image: { type: "jpeg", quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, logging: false },
@@ -856,8 +856,8 @@ export default function App() {
     });
   };
   const SH = ({id}) => { const s=sections.find(x=>x.id===id); if(!s||!s.roman) return null;
-    return <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:2,color:"#1a4a6e",borderBottom:"2px solid #1a4a6e",paddingBottom:4,marginTop:30,marginBottom:10}}>{s.roman} {s.title}</div>; };
-  const SubH = ({label}) => <div style={{fontSize:13,fontWeight:700,fontStyle:"italic",marginTop:14,marginBottom:6,color:"#333"}}>{label}</div>;
+    return <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:2,color:"#1a4a6e",borderBottom:"2px solid #1a4a6e",paddingBottom:4,marginTop:30,marginBottom:10,pageBreakAfter:"avoid",breakAfter:"avoid"}}>{s.roman} {s.title}</div>; };
+  const SubH = ({label}) => <div style={{fontSize:13,fontWeight:700,fontStyle:"italic",marginTop:14,marginBottom:6,color:"#333",pageBreakAfter:"avoid",breakAfter:"avoid"}}>{label}</div>;
   const Body = ({id,subId}) => {
     const raw = gc(id,subId);
     const tokenRe = /\[EARLY_SIGNING_DISCOUNT:([^:]+):([^:]+):([^\]]+)\]/;
@@ -869,7 +869,7 @@ export default function App() {
       <div style={{marginBottom:8}}>{renderLines(parts[0].trimEnd())}</div>
       <div style={{border:"1px solid #c0cfe8",borderRadius:4,background:"#f7f9fd",padding:"12px 16px",margin:"10px 0 8px",fontFamily:"Georgia,serif",fontSize:12,lineHeight:1.7,color:"#222"}}>
         <span style={{fontWeight:700,color:"#1a4a6e",fontSize:11,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:5}}>Early Signing Discount</span>
-        {`If this Agreement is executed on or before ${date}, a ${discAmt} discount will be applied to the above-mentioned ${baseFee} fee.`}
+        {`A ${discAmt} early signing discount has been applied to the standard ${baseFee} consulting fee. To retain this discount, this Agreement must be executed on or before ${date}.`}
       </div>
       {parts[1]&&<div style={{marginBottom:8}}>{renderLines(parts[1].trimStart())}</div>}
     </>;
@@ -1758,30 +1758,25 @@ ${form.npsa1Name||"NPSA"}`
           {/* Body sections */}
           {isPre&&<>
             <Body id="pre_intro"/>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="pre_periods"/><Body id="pre_periods"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}>
-              <SH id="pre_scope"/>
-              <SubH label={preSections.find(s=>s.id==="pre_scope")?.subsections?.[0]?.title||"A. Pre-Award Period Consulting"} />
-              <Body id="pre_scope" subId="pre_scope_pre"/>
-            </div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}>
-              <SubH label={preSections.find(s=>s.id==="pre_scope")?.subsections?.[1]?.title||"B. Compliance Period Consulting"}/>
-              <Body id="pre_scope" subId="pre_scope_post"/>
-            </div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="pre_liability"/><Body id="pre_liability"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="pre_conf"/><Body id="pre_conf"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="pre_resp"/><Body id="pre_resp"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="pre_comp"/><Body id="pre_comp"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="pre_guar"/><Body id="pre_guar"/>
+            <SH id="pre_periods"/><Body id="pre_periods"/>
+            <SH id="pre_scope"/>
+            <SubH label={preSections.find(s=>s.id==="pre_scope")?.subsections?.[0]?.title||"A. Pre-Award Period Consulting"} />
+            <Body id="pre_scope" subId="pre_scope_pre"/>
+            <SubH label={preSections.find(s=>s.id==="pre_scope")?.subsections?.[1]?.title||"B. Compliance Period Consulting"}/>
+            <Body id="pre_scope" subId="pre_scope_post"/>
+            <SH id="pre_liability"/><Body id="pre_liability"/>
+            <SH id="pre_conf"/><Body id="pre_conf"/>
+            <SH id="pre_resp"/><Body id="pre_resp"/>
+            <SH id="pre_comp"/><Body id="pre_comp"/>
+            <SH id="pre_guar"/><Body id="pre_guar"/>
             {form.optStateSwitch&&(
               <div style={{border:"1px solid #c5d16a",borderRadius:4,background:"#f9fbf2",padding:"14px 18px",margin:"16px 0"}}>
                 <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#5a6800",marginBottom:8}}>Additional Optional Guarantees</div>
                 <p style={{fontSize:13,fontFamily:"Georgia,serif",lineHeight:1.7,margin:"4px 0"}}>• If CLIENT elects to transition from a Federal NSGP application to a State NSGP application, NPSA will accommodate such a change and apply all fees and services to the State NSGP opportunity.</p>
               </div>
             )}
-            </div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="pre_cancel"/><Body id="pre_cancel"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="pre_other"/><Body id="pre_other"/></div>
+            <SH id="pre_cancel"/><Body id="pre_cancel"/>
+            <SH id="pre_other"/><Body id="pre_other"/>
             {form.optShortNotice&&(
               <>
                 <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:2,color:"#1a4a6e",borderBottom:"2px solid #1a4a6e",paddingBottom:4,marginTop:30,marginBottom:10}}>IX. Short-Notice Application Circumstances</div>
@@ -1806,30 +1801,25 @@ ${form.npsa1Name||"NPSA"}`
           {/* In-House Pre-Award body sections */}
           {isInh&&<>
             <Body id="inh_intro"/>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="inh_periods"/><Body id="inh_periods"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}>
-              <SH id="inh_scope"/>
-              <SubH label={inhSections.find(s=>s.id==="inh_scope")?.subsections?.[0]?.title||"A. Pre-Award Period Consulting"} />
-              <Body id="inh_scope" subId="inh_scope_pre"/>
-            </div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}>
-              <SubH label={inhSections.find(s=>s.id==="inh_scope")?.subsections?.[1]?.title||"B. Compliance Period Consulting"}/>
-              <Body id="inh_scope" subId="inh_scope_post"/>
-            </div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="inh_liability"/><Body id="inh_liability"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="inh_conf"/><Body id="inh_conf"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="inh_resp"/><Body id="inh_resp"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="inh_comp"/><Body id="inh_comp"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="inh_guar"/><Body id="inh_guar"/>
+            <SH id="inh_periods"/><Body id="inh_periods"/>
+            <SH id="inh_scope"/>
+            <SubH label={inhSections.find(s=>s.id==="inh_scope")?.subsections?.[0]?.title||"A. Pre-Award Period Consulting"} />
+            <Body id="inh_scope" subId="inh_scope_pre"/>
+            <SubH label={inhSections.find(s=>s.id==="inh_scope")?.subsections?.[1]?.title||"B. Compliance Period Consulting"}/>
+            <Body id="inh_scope" subId="inh_scope_post"/>
+            <SH id="inh_liability"/><Body id="inh_liability"/>
+            <SH id="inh_conf"/><Body id="inh_conf"/>
+            <SH id="inh_resp"/><Body id="inh_resp"/>
+            <SH id="inh_comp"/><Body id="inh_comp"/>
+            <SH id="inh_guar"/><Body id="inh_guar"/>
             {form.inhOptStateSwitch&&(
               <div style={{border:"1px solid #c5d16a",borderRadius:4,background:"#f9fbf2",padding:"14px 18px",margin:"16px 0"}}>
                 <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1,color:"#5a6800",marginBottom:8}}>Additional Optional Guarantees</div>
                 <p style={{fontSize:13,fontFamily:"Georgia,serif",lineHeight:1.7,margin:"4px 0"}}>• If CLIENT elects to transition from a Federal NSGP application to a State NSGP application, NPSA will accommodate such a change and apply all fees and services to the State NSGP opportunity.</p>
               </div>
             )}
-            </div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="inh_cancel"/><Body id="inh_cancel"/></div>
-            <div style={{pageBreakInside:"avoid",breakInside:"avoid"}}><SH id="inh_other"/><Body id="inh_other"/></div>
+            <SH id="inh_cancel"/><Body id="inh_cancel"/>
+            <SH id="inh_other"/><Body id="inh_other"/>
             {form.inhOptShortNotice&&(
               <>
                 <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:2,color:"#1a4a6e",borderBottom:"2px solid #1a4a6e",paddingBottom:4,marginTop:30,marginBottom:10}}>IX. Short-Notice Application Circumstances</div>
