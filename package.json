@@ -8,14 +8,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server/index.js",
-    "start": "node server/index.js",
-    "postinstall": "node node_modules/puppeteer/install.mjs || true"
+    "start": "node server/index.js"
   },
   "dependencies": {
     "express": "^4.21.0",
     "html2pdf.js": "^0.14.0",
     "openai": "^4.73.0",
-    "puppeteer": "^24.40.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
