@@ -814,7 +814,7 @@ export default function App() {
       const sectionHeaderMatch = trimmed.match(/^([A-Z])\.\s+(.+)$/);
       if (sectionHeaderMatch && sectionHeaderMatch[1].length === 1) {
         return (
-          <div key={i} style={{fontFamily:"Georgia,serif",fontSize:13,lineHeight:1.75,color:"#1a1a1a",fontWeight:700,marginTop:6,marginBottom:2}}>
+          <div key={i} style={{fontFamily:"Georgia,serif",fontSize:12,lineHeight:1.75,color:"#1a1a1a",fontWeight:700,marginTop:6,marginBottom:2}}>
             {trimmed}
           </div>
         );
@@ -835,7 +835,7 @@ export default function App() {
         const hangEm = isTopLevel ? (digitCount >= 2 ? 2.8 : 2.2) : isSubLetter ? 2.0 : isRoman ? 1.8 : prefix.length * 0.6;
         return (
           <div key={i} style={{
-            fontFamily:"Georgia,serif", fontSize:13, lineHeight:1.75, color:"#222",
+            fontFamily:"Georgia,serif", fontSize:12, lineHeight:1.75, color:"#222",
             display:"flex", alignItems:"flex-start",
             marginLeft:`${baseIndent}em`, marginBottom:2,
           }}>
@@ -849,7 +849,7 @@ export default function App() {
       const isCostLine = trimmed.includes("×") || trimmed.match(/^[A-Za-z].+:\s+\d/);
       return (
         <div key={i} style={{
-          fontFamily:"Georgia,serif", fontSize:13, lineHeight:1.75, color:"#222",
+          fontFamily:"Georgia,serif", fontSize:12, lineHeight:1.75, color:"#222",
           marginLeft: isCostLine ? `3.5em` : `${leadSpaces * 0.55}em`, marginBottom:2,
         }}>{trimmed}</div>
       );
@@ -867,7 +867,7 @@ export default function App() {
     const parts = raw.split(full);
     return <>
       <div style={{marginBottom:8}}>{renderLines(parts[0].trimEnd())}</div>
-      <div style={{border:"1px solid #c0cfe8",borderRadius:4,background:"#f7f9fd",padding:"12px 16px",margin:"10px 0 8px",fontFamily:"Georgia,serif",fontSize:13,lineHeight:1.7,color:"#222"}}>
+      <div style={{border:"1px solid #c0cfe8",borderRadius:4,background:"#f7f9fd",padding:"12px 16px",margin:"10px 0 8px",fontFamily:"Georgia,serif",fontSize:12,lineHeight:1.7,color:"#222"}}>
         <span style={{fontWeight:700,color:"#1a4a6e",fontSize:11,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:5}}>Early Signing Discount</span>
         {`If this Agreement is executed on or before ${date}, a ${discAmt} discount will be applied to the above-mentioned ${baseFee} fee.`}
       </div>
