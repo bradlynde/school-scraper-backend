@@ -869,7 +869,7 @@ export default function App() {
       <div style={{marginBottom:8}}>{renderLines(parts[0].trimEnd())}</div>
       <div style={{border:"1px solid #c0cfe8",borderRadius:4,background:"#f7f9fd",padding:"12px 16px",margin:"10px 0 8px",fontFamily:"Georgia,serif",fontSize:12,lineHeight:1.7,color:"#222"}}>
         <span style={{fontWeight:700,color:"#1a4a6e",fontSize:11,textTransform:"uppercase",letterSpacing:1,display:"block",marginBottom:5}}>Early Signing Discount</span>
-        {`If this Agreement is executed on or before ${date}, a ${discAmt} discount will be applied to the above-mentioned ${baseFee} fee.`}
+        {`A ${discAmt} early signing discount has been applied to the standard ${baseFee} consulting fee. To retain this discount, this Agreement must be executed on or before ${date}.`}
       </div>
       {parts[1]&&<div style={{marginBottom:8}}>{renderLines(parts[1].trimStart())}</div>}
     </>;
