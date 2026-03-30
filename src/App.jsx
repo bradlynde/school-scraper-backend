@@ -788,14 +788,20 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ html, filename }),
       })
-        .then(r => r.blob())
+        .then(async r => {
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(err.detail || err.error || `HTTP ${r.status}`);
+          }
+          return r.blob();
+        })
         .then(blob => {
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url; a.download = filename; a.click();
           URL.revokeObjectURL(url);
         })
-        .catch(err => { console.error('PDF error:', err); alert('PDF generation failed. Please try again.'); });
+        .catch(err => { console.error('PDF error:', err); alert(`PDF generation failed: ${err.message}`); });
     }
   };
     // ── DOCUMENT MODE ──────────────────────────────────────────────────────────
