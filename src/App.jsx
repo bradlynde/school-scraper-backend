@@ -776,7 +776,7 @@ export default function App() {
     } else {
       // Engagement letter tabs: native browser print for perfect page breaks + margins
       const bodyHtml = previewRef.current.innerHTML;
-      const printHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle + clientLabel}</title><style>
+      const printHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${docTitle + clientLabel}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Ms+Madi&display=swap" rel="stylesheet"><style>
         *{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}
         @page{margin:0.75in;size:letter}
         body{margin:0;padding:0;font-family:Georgia,serif}
