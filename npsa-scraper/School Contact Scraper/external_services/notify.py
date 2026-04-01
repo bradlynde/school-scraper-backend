@@ -101,10 +101,8 @@ def send_run_complete_email(
     Call only when transitioning a run to "completed"; use notify_sent at the call site.
     """
     if not _is_enabled():
-        print(
-            f"[NOTIFY] Email notifications disabled (Run ID: {run_id}, State: {state}) — "
-            "check NOTIFY_ON_RUN_COMPLETE, RESEND_API_KEY, NOTIFY_EMAIL"
-        )
+        from school_run_log import log_warn
+        log_warn(f"Notify disabled for {state}")
         return
     try:
         lines = [
@@ -121,9 +119,8 @@ def send_run_complete_email(
         body_text = "\n".join(lines)
         subject = f"[{SCRAPER_SUBJECT_TAG}] Run complete: {state}"
         _send_resend_html(subject, _text_to_html(body_text))
-        print(
-            f"[NOTIFY] Run completion email sent: {state} (Run ID: {run_id}, "
-            f"Counties: {counties_processed}/{total_counties}, Contacts: {total_contacts})"
-        )
+        from school_run_log import log_warn
+        log_warn(f"Email sent: {state} ({run_id})")
     except Exception as e:
-        print(f"[NOTIFY] Run completion email failed: {e} (Run ID: {run_id}, State: {state})")
+        from school_run_log import log_err
+        log_err(f"Email failed: {state}: {e}")

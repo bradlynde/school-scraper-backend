@@ -53,9 +53,8 @@ from external_services.notify import send_run_complete_email, send_test_notifica
 from external_services import queue_store
 from external_services import db
 from school_run_log import (
-    log_startup, log_county_header, log_school_success, log_school_skip,
-    log_warn, log_err, log_county_done, log_progress_counties,
-    log_aggregation, log_cost_estimate, log_state_complete,
+    log_boot, log_run_start, log_county, log_county_fail, log_progress,
+    log_complete, log_cost, log_warn, log_err,
     configure_worker_log_queue, clear_worker_log_queue, start_stdout_drain_thread,
 )
 
@@ -79,29 +78,11 @@ step13_final_compiler = load_module_with_hyphen('step13-compiler.py', 'step13_co
 
 app = Flask(__name__)
 
-# Verify dumb-init is PID 1 on startup (will only log once when app initializes)
-# Only log success, not warnings (warnings are handled in __main__ block)
-if HAS_PSUTIL:
-    try:
-        pid1 = psutil.Process(1)
-        pid1_name = pid1.name().lower()
-        if 'dumb-init' in pid1_name or 'init' in pid1_name:
-            print(f"[INIT] Verified: dumb-init is PID 1 - process reaping enabled")
-    except:
-        pass  # Can't verify, but continue
-
-# CORS configuration - restrict to allowed origin (REQUIRED in production)
+# CORS configuration
 ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN")
 if ALLOWED_ORIGIN:
-    # Normalize origin - remove trailing slashes to prevent CORS mismatch
     ALLOWED_ORIGIN = ALLOWED_ORIGIN.rstrip('/')
-    print(f"CORS: Using ALLOWED_ORIGIN = {ALLOWED_ORIGIN}")
 else:
-    # Allow wildcard only if explicitly set to "*" for development
-    # In production, ALLOWED_ORIGIN must be set to your frontend URL
-    import sys
-    print("WARNING: ALLOWED_ORIGIN not set. Defaulting to '*' for development.")
-    print("SECURITY: Set ALLOWED_ORIGIN environment variable in production to your frontend URL.")
     ALLOWED_ORIGIN = "*"
 
 # Configure CORS to automatically handle OPTIONS preflight requests
@@ -116,6 +97,12 @@ CORS(app,
      }},
      automatic_options=True  # Automatically handle OPTIONS requests
 )
+
+# Boot log — emitted once per container startup
+ROLE = os.getenv("ROLE", "worker").lower().strip()
+IS_MANAGER = ROLE == "manager"
+IS_WORKER = ROLE == "worker"
+log_boot(ROLE)
 
 # Legacy in-memory dict — kept as local cache for backward compat
 # Authoritative state is now in Postgres via db_state
@@ -146,7 +133,7 @@ def _school_queue_worker_loop():
             if not queue_store.try_acquire_queue_leader():
                 continue
             active = _unique_running_states_after_stale_cleanup()
-            if len(active) >= 2:
+            if len(active) >= 1:
                 continue
             nxt = queue_store.queue_peek_next(SCRAPER_TYPE)
             if not nxt:
@@ -156,16 +143,14 @@ def _school_queue_worker_loop():
                 continue
             if _state_finalizing(st):
                 continue
-            if len(active) >= 2:
+            if len(active) >= 1:
                 continue
             run_id = str(uuid.uuid4())
             if not queue_store.queue_mark_running(job_id, run_id, SCRAPER_TYPE):
                 continue
             run_streaming_pipeline(st, run_id, False, job_id)
         except Exception as e:
-            print(f"[QUEUE] worker error: {e}")
-            import traceback
-            traceback.print_exc()
+            log_err(f"Queue: {e}")
 
 
 def _effective_school_parallelism() -> float:
@@ -280,7 +265,7 @@ def _merge_county_result_into_pipeline_runs(
                 result.get("openai_completion_tokens") or 0
             )
     tc = sum(pipeline_runs[run_id].get("countyContacts") or [])
-    log_progress_counties(done, total_counties, tc)
+    log_progress(done, total_counties, tc)
     if done % CHECKPOINT_BATCH_SIZE == 0 or done == total_counties:
         completed_tasks = queue_store.get_completed_county_tasks(run_id)
         names = [t["county"] for t in completed_tasks]
@@ -398,7 +383,7 @@ def _county_processor_worker_loop(worker_tag: str) -> None:
                 run_id, county, result, idx, total, elapsed
             )
         except Exception as e:
-            print(f"[COUNTY-Q] worker {worker_tag}: {e}")
+            log_err(f"County worker {worker_tag}: {e}")
             import traceback
             traceback.print_exc()
 
@@ -507,7 +492,7 @@ def _school_aggregation_recovery_loop() -> None:
                 except Exception as e:
                     log_err(f"[RECOVER] aggregation {rid}: {e}")
         except Exception as e:
-            print(f"[RECOVER] loop error: {e}")
+            log_err(f"Recovery: {e}")
             import traceback
             traceback.print_exc()
 
@@ -586,15 +571,15 @@ EPHEMERAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 RUNS_DIR = EPHEMERAL_DATA_DIR / "runs"
 CHECKPOINTS_DIR = EPHEMERAL_DATA_DIR / "checkpoints"
-METADATA_DIR = EPHEMERAL_DATA_DIR / "metadata"
 
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
 CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
-METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Volume: only the final state CSV is persisted here
+# Volume: final CSVs + metadata persisted here (survives container restarts)
 VOLUME_DIR = Path(os.getenv("PERSISTENT_DATA_DIR", "/data"))
 VOLUME_DIR.mkdir(parents=True, exist_ok=True)
+METADATA_DIR = VOLUME_DIR / "metadata"
+METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Automatic cleanup configuration
 # Delete runs older than this many days (default: 7 days)
@@ -667,7 +652,6 @@ def cleanup_old_runs():
                             except Exception:
                                 pass
                     except Exception as e:
-                        print(f"[CLEANUP] Error deleting files for {run_id}: {e}")
                         continue
 
                     # Mark as deleted in metadata
@@ -677,20 +661,51 @@ def cleanup_old_runs():
                     save_run_metadata(run_id, metadata)
 
                     deleted_count += 1
-                    print(f"[CLEANUP] Auto-deleted old run {run_id} (created: {created_at_str})")
             except Exception as e:
-                print(f"[CLEANUP] Error processing metadata file {metadata_file}: {e}")
                 continue
 
         if deleted_count > 0:
             freed_mb = freed_space / (1024 * 1024)
-            print(f"[CLEANUP] Cleaned up {deleted_count} old runs, freed ~{freed_mb:.2f} MB")
         else:
-            print(f"[CLEANUP] No old runs to clean up (cutoff: {cutoff_date.isoformat()})")
-    except Exception as e:
-        print(f"[CLEANUP] Error during cleanup: {e}")
-        import traceback
-        traceback.print_exc()
+    except Exception:
+        pass
+
+
+def _repair_stuck_metadata() -> None:
+    """Fix runs stuck in 'finalizing' or 'running' that have a final CSV on the volume."""
+    repaired = 0
+    for metadata_file in METADATA_DIR.glob("*.json"):
+        try:
+            with open(metadata_file, 'r') as f:
+                metadata = json.load(f)
+            status = metadata.get("status", "")
+            if status not in ("finalizing", "running"):
+                continue
+            if metadata.get("deleted"):
+                continue
+            run_id = metadata_file.stem
+            csv_path = metadata.get("final_csv_path")
+            has_csv = csv_path and Path(csv_path).exists()
+            if not has_csv:
+                for f in VOLUME_DIR.glob(f"*_{run_id}_*.csv"):
+                    has_csv = True
+                    csv_path = str(f)
+                    break
+            if has_csv:
+                metadata["status"] = "completed"
+                if not metadata.get("completed_at"):
+                    metadata["completed_at"] = datetime.now().isoformat()
+                if not metadata.get("completion_time"):
+                    metadata["completion_time"] = time.time()
+                if csv_path:
+                    metadata["final_csv_path"] = csv_path
+                save_run_metadata(run_id, metadata)
+                repaired += 1
+                log_warn(f"Repair: fixed stuck run {run_id}: {status} -> completed")
+        except Exception:
+            continue
+    if repaired:
+        log_warn(f"Repair: fixed {repaired} stuck run(s)")
 
 
 def cleanup_ephemeral_run(run_id: str):
@@ -703,14 +718,12 @@ def cleanup_ephemeral_run(run_id: str):
         checkpoint_file = CHECKPOINTS_DIR / f"{run_id}.json"
         if run_dir.exists():
             shutil.rmtree(run_dir, ignore_errors=True)
-            print(f"[{run_id}] Cleaned up ephemeral run data")
         if checkpoint_file.exists():
             try:
                 checkpoint_file.unlink()
             except Exception:
                 pass
     except Exception as e:
-        print(f"[{run_id}] Error during ephemeral cleanup: {e}")
 
 
 # Batch size for checkpointing (save checkpoint every N counties)
@@ -877,7 +890,6 @@ def kill_chrome_processes_bottom_up(current_pid: int = None):
     
     # Monitor processes before cleanup
     before_zombies, before_orphaned, before_active = get_chrome_process_counts()
-    print(f"{bold('[CLEANUP]')} BEFORE kill_chrome_processes_bottom_up: Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
     
     killed_count = 0
     try:
@@ -978,14 +990,11 @@ def kill_chrome_processes_bottom_up(current_pid: int = None):
                     continue
         
         if killed_count > 0:
-            print(f"{bold('[CLEANUP]')} Killed {killed_count} Chrome processes (bottom-up)")
         
         # Monitor processes after cleanup
         after_zombies, after_orphaned, after_active = get_chrome_process_counts()
-        print(f"{bold('[CLEANUP]')} AFTER kill_chrome_processes_bottom_up: Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}, Killed: {killed_count}")
         
     except Exception as e:
-        print(f"{bold('[CLEANUP]')} Error in bottom-up Chrome cleanup: {e}")
     
     return killed_count
 
@@ -1117,9 +1126,7 @@ def log_resource_usage():
         rusage = resource.getrusage(resource.RUSAGE_SELF)
         memory_mb = rusage.ru_maxrss / 1024  # Convert KB to MB (on Linux)
         logging.info(f"Memory: {memory_mb:.1f}MB")
-        print(f"{bold('[RESOURCE]')} Memory: {memory_mb:.1f}MB")
     except Exception as e:
-        print(f"{bold('[RESOURCE]')} Error logging resource usage: {e}")
 
 
 
@@ -1142,10 +1149,8 @@ def save_checkpoint(run_id: str, state: str, completed_counties: list, next_coun
     try:
         with open(checkpoint_path, 'w') as f:
             json.dump(checkpoint_data, f, indent=2)
-        print(f"[{run_id}] Checkpoint saved: {len(completed_counties)}/{total_counties} counties completed")
         return True
     except Exception as e:
-        print(f"[{run_id}] Error saving checkpoint: {e}")
         return False
 
 
@@ -1160,10 +1165,8 @@ def load_checkpoint(run_id: str) -> dict:
     try:
         with open(checkpoint_path, 'r') as f:
             checkpoint_data = json.load(f)
-        print(f"[{run_id}] Checkpoint loaded: {len(checkpoint_data.get('completed_counties', []))}/{checkpoint_data.get('total_counties', 0)} counties completed")
         return checkpoint_data
     except Exception as e:
-        print(f"[{run_id}] Error loading checkpoint: {e}")
         return None
 
 
@@ -1183,7 +1186,6 @@ def save_run_metadata(run_id: str, metadata: dict):
             json.dump(metadata, f, indent=2)
         return True
     except Exception as e:
-        print(f"[{run_id}] Error saving metadata: {e}")
         return False
 
 
@@ -1199,7 +1201,6 @@ def load_run_metadata(run_id: str) -> dict:
         with open(metadata_path, 'r') as f:
             return json.load(f)
     except Exception as e:
-        print(f"[{run_id}] Error loading metadata: {e}")
         return None
 
 
@@ -1244,14 +1245,12 @@ def list_all_runs() -> list:
                     _backfill_run_list_fields(metadata, "school")
                     runs.append(metadata)
             except Exception as e:
-                print(f"Error reading metadata file {metadata_file}: {e}")
                 continue
         
         # Sort by created_at (newest first)
         runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
         return runs
     except Exception as e:
-        print(f"Error listing runs: {e}")
         return []
 
 
@@ -1265,7 +1264,6 @@ def load_counties_from_state(state: str) -> list:
     if state_normalized == 'texas':
         top50_file = repo_root / 'assets' / 'data' / 'state_counties' / 'texas_top50.txt'
         if top50_file.exists():
-            print(f"Using top 50 counties file for faster processing")
             state_file = top50_file
         else:
             state_file = repo_root / 'assets' / 'data' / 'state_counties' / f'{state_normalized}.txt'
@@ -1300,7 +1298,6 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
     """
     try:
         # Update progress for this county
-        print(f"[{run_id}] {county} County ({county_index + 1}/{total_counties})")
         
         # Create persistent output directory for this run
         run_dir = RUNS_DIR / run_id
@@ -1335,7 +1332,6 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         # Pipeline.run() already handles all compilation and writes to output_csv
         # Just verify the file was created
         all_contacts = pipeline.all_contacts
-        print(f"[{run_id}] SUCCESS {county}: {len(all_contacts)} contacts")
         
         # Count contacts with and without emails
         contacts_with_emails = [c for c in all_contacts if c.has_email()]
@@ -1360,7 +1356,7 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
     except Exception as e:
         import traceback
         error_msg = str(e)[:500]
-        print(f"Error processing {county}: {error_msg}")
+        log_county_fail(county, error_msg)
         traceback.print_exc()
         
         results = {'success': False, 'error': error_msg}
@@ -1378,7 +1374,6 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         
         # Monitor processes before cleanup
         before_zombies, before_orphaned, before_active = get_chrome_process_counts()
-        print(f"[{run_id}] [{county}] CLEANUP BEFORE: Chrome processes - Active: {before_active}, Zombies: {before_zombies}, Orphaned: {before_orphaned}")
         
         try:
             # First, try to quit the driver properly
@@ -1410,7 +1405,6 @@ def _county_worker(state: str, county: str, run_id: str, county_index: int, tota
         
         # Monitor processes after cleanup
         after_zombies, after_orphaned, after_active = get_chrome_process_counts()
-        print(f"[{run_id}] [{county}] CLEANUP AFTER: Chrome processes - Active: {after_active}, Zombies: {after_zombies}, Orphaned: {after_orphaned}")
 
 
 def process_single_county(state: str, county: str, run_id: str, county_index: int, total_counties: int):
@@ -1504,12 +1498,12 @@ def process_county_worker_multiprocessing(args):
         processing_time = time.time() - start_time
         
         if not result.get('success'):
-            print(f"[{run_id}] ERROR {county}: {result.get('error', 'Unknown error')}")
+            log_county_fail(county, result.get("error", "Unknown error"))
         
         return (idx, county, result, processing_time)
     except Exception as e:
         processing_time = time.time() - start_time
-        print(f"[{run_id}] County {county} generated an exception: {e}")
+        log_county_fail(county, str(e))
         import traceback
         traceback.print_exc()
         return (idx, county, {'success': False, 'error': str(e)}, processing_time)
@@ -1581,20 +1575,17 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                         # Skip empty files - they'll be handled during aggregation
                 
                 if all_complete:
-                    print(f"[{run_id}] All {len(counties)} counties completed, proceeding with aggregation...")
                     break
                 
                 if elapsed_time % 30 == 0:  # Log every 30 seconds
-                    print(f"[{run_id}] Waiting for {len(missing_counties)} counties to complete: {', '.join(missing_counties[:3])}...")
                 
                 time.sleep(wait_interval)
                 elapsed_time += wait_interval
             
             if not all_complete:
-                print(f"[{run_id}] WARNING: Some counties did not complete within timeout. Proceeding with available data...")
+                log_warn(f"Some counties did not complete within timeout")
         else:
             # Skip wait - proceed immediately with available data
-            print(f"[{run_id}] Skipping wait - proceeding with available county data...")
         
         pipeline_runs[run_id]["statusMessage"] = "Aggregating results from all counties..."
         
@@ -1629,14 +1620,11 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                                 source_url=sval(row.get('source_url', '') or row.get('Source URL', ''))
                             )
                             all_contacts.append(contact)
-                        print(f"[{run_id}] Loaded {len(df)} contacts from {county} County")
                 except Exception as e:
-                    print(f"[{run_id}] Error reading {county_csv}: {e}")
                     import traceback
                     traceback.print_exc()
         
         if not all_contacts:
-            print(f"[{run_id}] No contacts found in any county")
             # Set to finalizing for 2-minute cooldown
             pipeline_runs[run_id]["status"] = "finalizing"
             pipeline_runs[run_id]["statusMessage"] = "Pipeline completed but no contacts found. Finalizing..."
@@ -1675,21 +1663,18 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             pipeline_runs[run_id]["completedAt"] = time.time()
             return
         
-        print(f"[{run_id}] Total contacts collected: {len(all_contacts)}")
         
         # STEP 11: Split contacts into with/without emails
         pipeline_runs[run_id]["statusMessage"] = "Step 11: Splitting contacts..."
         splitter = step11_contact_splitter.ContactSplitter()
         contacts_with_emails, contacts_without_emails = splitter.split_contacts(all_contacts)
         
-        print(f"[{run_id}] Step 11 complete: {len(contacts_with_emails)} with emails, {len(contacts_without_emails)} without emails")
         
         # Deduplicate BEFORE enrichment (saves Hunter credits)
         compiler = step13_final_compiler.FinalCompiler()
         deduplicated = compiler.deduplicate_contacts_only(contacts_with_emails, contacts_without_emails)
         contacts_with_emails_deduped = [c for c in deduplicated if c.has_email()]
         contacts_without_emails_deduped = [c for c in deduplicated if not c.has_email()]
-        print(f"[{run_id}] Deduplication: {len(contacts_with_emails) + len(contacts_without_emails)} -> {len(deduplicated)} (before Hunter)")
         
         # STEP 12: Email Enrichment with Hunter.io (optional, on deduplicated contacts only)
         contacts_enriched = []
@@ -1708,16 +1693,11 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                     batch_size=10,
                     delay_between_batches=1.0
                 )
-                print(f"[{run_id}] Step 12 complete: Enriched {len(contacts_enriched)} contacts with emails")
             except Exception as e:
-                print(f"[{run_id}] WARNING Email enrichment failed: {e}")
-                print(f"[{run_id}]    Continuing without enriched contacts...")
                 import traceback
                 traceback.print_exc()
         elif not hunter_io_enabled:
-            print(f"[{run_id}] Step 12 skipped: HUNTER_IO_API_KEY not set")
         elif not contacts_without_emails_deduped:
-            print(f"[{run_id}] Step 12 skipped: No contacts without emails to enrich")
         
         # STEP 13: Compile final CSV (already deduplicated)
         pipeline_runs[run_id]["statusMessage"] = "Step 13: Compiling final CSV..."
@@ -1731,7 +1711,6 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
             already_deduplicated=True
         )
         
-        print(f"[{run_id}] Step 13 complete: Final CSV saved to {final_csv_path}")
         
         # Read final CSV and copy to volume (only persistent storage)
         final_data_saved_to_volume = False
@@ -1750,9 +1729,7 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 shutil.copy2(final_csv_path, volume_csv_path)
                 volume_saved = True
                 final_data_saved_to_volume = True
-                print(f"[{run_id}] Final CSV saved to volume: {volume_csv_path}")
             except Exception as e:
-                print(f"[{run_id}] WARNING: Could not copy final CSV to volume: {e}")
         
             # Count final contacts
             final_df = pd.read_csv(final_csv_path)
@@ -1782,7 +1759,6 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 metadata["display_name"] = _run_display_name(state, "school")
             save_run_metadata(run_id, metadata)
         else:
-            print(f"[{run_id}] ERROR: Final CSV not created at {final_csv_path}")
             pipeline_runs[run_id]["totalContacts"] = len(deduplicated)
             pipeline_runs[run_id]["totalContactsWithEmails"] = len(contacts_with_emails_deduped) + len(contacts_enriched)
             pipeline_runs[run_id]["totalContactsWithoutEmails"] = len(contacts_without_emails_deduped) - len(contacts_enriched)
@@ -1806,7 +1782,6 @@ def aggregate_final_results(run_id: str, state: str, skip_wait: bool = False):
                 status_message=f"Finalizing: {len(counties)} counties, {len(contacts_enriched)} enriched",
             )
         except Exception as db_err:
-            print(f"[{run_id}] WARNING: Could not sync finalizing state to db_state: {db_err}")
         
         # Create restart marker for start.sh to detect restart
         try:
@@ -1959,7 +1934,6 @@ def run_streaming_pipeline(
                 if checkpoint:
                     completed_counties = checkpoint.get('completed_counties', [])
                     start_index = checkpoint.get('next_county_index', 0)
-                    print(f"[{run_id}] Resuming from checkpoint: {len(completed_counties)}/{total_counties} counties already completed")
                 
                 # Also check data files to catch counties that completed but didn't checkpoint
                 # (e.g., Prince George's that completed but hung during cleanup)
@@ -1969,7 +1943,6 @@ def run_streaming_pipeline(
                         county_dir = run_dir / county.replace(' ', '_')
                         county_csv = county_dir / "final_contacts.csv"
                         if county_csv.exists() and county not in completed_counties:
-                            print(f"[{run_id}] Found completed county (data file exists): {county}")
                             completed_counties.append(county)
                     
                     # Recalculate start_index based on actual completed counties
@@ -1981,7 +1954,6 @@ def run_streaming_pipeline(
                             break
                     
                     if completed_counties:
-                        print(f"[{run_id}] Resuming: {len(completed_counties)}/{total_counties} counties completed, starting from index {start_index}")
             
             # Save initial metadata for new run or resume
             initial_metadata = {
@@ -1998,9 +1970,7 @@ def run_streaming_pipeline(
             save_run_metadata(run_id, initial_metadata)
             
             if resume_from_checkpoint and completed_counties:
-                print(f"[{run_id}] Resuming run: {len(completed_counties)}/{total_counties} counties already completed")
             else:
-                print(f"[{run_id}] New run started: {total_counties} counties to process")
             
             # Update progress tracking with county info
             pipeline_runs[run_id]["totalCounties"] = total_counties
@@ -2039,19 +2009,16 @@ def run_streaming_pipeline(
                     pipeline_runs[run_id]["statusMessage"] = (
                         f"All {total_counties} counties already completed"
                     )
-                log_startup(run_id, state, total_counties, _school_log_worker_count())
+                log_run_start(state, total_counties, _school_log_worker_count())
                 _watch_county_queue_until_aggregated(run_id, state, counties, completed_counties)
                 return  # dispatch path handles aggregation internally
 
             # Determine processing mode message
             remaining_count = total_counties - len(completed_counties)
             if MAX_WORKERS == 1:
-                print(f"[{run_id}] Processing {remaining_count} remaining counties sequentially...")
             else:
-                print(f"[{run_id}] Processing {remaining_count} remaining counties with {MAX_WORKERS} parallel workers...")
             
             if not remaining_counties:
-                print(f"[{run_id}] All counties already completed!")
                 # Update progress to show all complete
                 pipeline_runs[run_id]["progress"] = 100
                 pipeline_runs[run_id]["countiesProcessed"] = total_counties
@@ -2076,13 +2043,12 @@ def run_streaming_pipeline(
                                 pool.join()
                                 pipeline_runs[run_id]["status"] = "cancelled"
                                 pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
-                                print(f"[{run_id}] Pipeline cancelled during processing")
                                 return
                             
                             # Handle worker failures gracefully - continue processing other counties
                             if not result.get('success', False):
                                 error_msg = result.get('error', 'Unknown error')
-                                print(f"[{run_id}] WARNING: {county} County failed: {error_msg}")
+                                log_county_fail(county, error_msg)
                                 failed_counties.append(county)
                                 # Still mark as completed to avoid infinite retry, but log the failure
                                 with checkpoint_lock:
@@ -2126,8 +2092,6 @@ def run_streaming_pipeline(
                                 pipeline_runs[run_id]["countyContacts"].append(result.get('contacts', 0))
                                 pipeline_runs[run_id]["countySchools"].append(result.get('schools', 0))
                             
-                            print(f"[{run_id}] Completed {county} County in {processing_time:.1f} seconds")
-                            print(f"[{run_id}] Progress: {completed}/{total_counties} counties completed")
                             
                             # Save checkpoint after every county (CHECKPOINT_BATCH_SIZE=1) or at completion
                             # This is for progress tracking only - runs always start fresh, no resume logic
@@ -2157,7 +2121,6 @@ def run_streaming_pipeline(
                                     metadata["display_name"] = _run_display_name(state, "school")
                                 save_run_metadata(run_id, metadata)
                                 
-                                print(f"[{run_id}] Checkpoint saved after {completed} counties")
                             
                             # Health check after each county (lists remaining processes)
                             check_health()
@@ -2173,7 +2136,6 @@ def run_streaming_pipeline(
                                 time.sleep(2.0)
                     
                     except KeyboardInterrupt:
-                        print(f"[{run_id}] Interrupted by user, cleaning up...")
                         pool.terminate()
                         pool.join()
                         # Save checkpoint before exiting
@@ -2182,7 +2144,6 @@ def run_streaming_pipeline(
                         pipeline_runs[run_id]["statusMessage"] = "Pipeline cancelled by user"
                         return
                     except Exception as e:
-                        print(f"[{run_id}] Error in pool processing: {e}")
                         import traceback
                         traceback.print_exc()
                         # Save checkpoint before terminating
@@ -2191,7 +2152,6 @@ def run_streaming_pipeline(
                         pool.join()
                         # Don't crash - try to continue to aggregation if we have some results
                         if len(completed_counties) > 0:
-                            print(f"[{run_id}] Continuing to aggregation with {len(completed_counties)} completed counties despite error")
                         else:
                             # No progress made, mark as error
                             if run_id in pipeline_runs:
@@ -2201,17 +2161,15 @@ def run_streaming_pipeline(
                     
                     # Log any failed counties after all processing completes
                     if failed_counties:
-                        print(f"[{run_id}] WARNING: {len(failed_counties)} counties failed: {', '.join(failed_counties)}")
+                        log_warn(f"{len(failed_counties)} counties failed: {', '.join(failed_counties[:5])}")
                         if run_id in pipeline_runs:
                             pipeline_runs[run_id]["statusMessage"] = f"Completed with {len(failed_counties)} failures"
                             return
             
             # All counties completed, aggregate results
-            print(f"[{run_id}] All counties completed ({len(completed_counties)}/{total_counties}), starting aggregation...")
             try:
                 aggregate_final_results(run_id, state)
             except Exception as e:
-                print(f"[{run_id}] Error during aggregation: {e}")
                 import traceback
                 traceback.print_exc()
                 # Still mark as completed if we have results
@@ -2277,11 +2235,8 @@ def run_streaming_pipeline(
                     # Pipeline completed successfully - no container reset needed
                     # The backup branch doesn't force container restarts, allowing the container to stay running
                     # This prevents Railway from logging crashes and allows the container to handle multiple runs
-                    print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
-                    print(f"[{run_id}] Container will remain running and ready for next run")
                     pipeline_runs[run_id]["progress"] = 100
             else:
-                print(f"[{run_id}] Pipeline run complete: {len(completed_counties)}/{total_counties} counties processed")
         
         except FileNotFoundError as e:
             # State file not found
@@ -2296,7 +2251,6 @@ def run_streaming_pipeline(
         except Exception as e:
             # Any other error - save checkpoint before exiting
             error_msg = str(e)[:500]  # Limit error message length
-            print(f"[{run_id}] Fatal error in pipeline: {error_msg}")
             import traceback
             traceback.print_exc()
             
@@ -2308,9 +2262,7 @@ def run_streaming_pipeline(
                     total_counties = checkpoint.get("total_counties", 0)
                     if len(completed_counties) > 0:
                         save_checkpoint(run_id, state, completed_counties, len(completed_counties), total_counties)
-                        print(f"[{run_id}] Checkpoint saved after fatal error: {len(completed_counties)}/{total_counties} counties")
             except Exception as checkpoint_error:
-                print(f"[{run_id}] Failed to save checkpoint after error: {checkpoint_error}")
             
             # Only update pipeline_runs if run_id still exists (may have been cleaned up)
             if run_id in pipeline_runs:
@@ -2323,7 +2275,6 @@ def run_streaming_pipeline(
         try:
             process_all_counties()
         except Exception as e:
-            print(f"[{run_id}] Unhandled exception in process_all_counties: {e}")
             import traceback
             traceback.print_exc()
             # Ensure status is updated even on unhandled exceptions
@@ -2338,12 +2289,10 @@ def run_streaming_pipeline(
                 try:
                     queue_store.queue_finalize(run_id, SCRAPER_TYPE, str(pst), perr)
                 except Exception as qe:
-                    print(f"[{run_id}] queue finalize error: {qe}")
             # Always clean up thread tracking
             if run_id in running_threads:
                 # Don't remove, just mark as not running
                 running_threads[run_id]['cancelled'] = True
-            print(f"[{run_id}] Pipeline thread completed")
     
     # Start processing in a background thread
     # Note: daemon=True means thread dies if main process exits, but we save checkpoints
@@ -2668,7 +2617,7 @@ def run_pipeline():
                 "state": state
             }), 409  # Conflict status code
         
-        if state.lower() not in unique_active_states and len(unique_active_states) >= 2:
+        if state.lower() not in unique_active_states and len(unique_active_states) >= 1:
             if db.is_postgres():
                 dn = _run_display_name(state, SCRAPER_TYPE)
                 q = queue_store.queue_enqueue(state, SCRAPER_TYPE, dn)
@@ -2886,7 +2835,6 @@ def list_runs():
                 if db_row["run_id"] not in existing_ids:
                     runs.append(queue_store.row_to_list_format(db_row))
         except Exception as e:
-            print(f"[RUNS] queue_store.list_runs fallback error: {e}")
 
         # Sort by created_at (newest first)
         runs.sort(key=lambda x: x.get("created_at", ""), reverse=True)
@@ -2966,7 +2914,6 @@ def stop_run(run_id: str):
         })
         save_run_metadata(run_id, metadata)
 
-        print(f"[{run_id}] Pipeline stop requested")
         
         response = jsonify({
             "status": "success",
@@ -3173,7 +3120,6 @@ def aggregate_run(run_id: str):
             try:
                 aggregate_final_results(run_id, state, skip_wait=True)
             except Exception as e:
-                print(f"[{run_id}] Error during manual aggregation: {e}")
                 import traceback
                 traceback.print_exc()
                 if run_id in pipeline_runs:
@@ -3251,7 +3197,6 @@ def delete_run(run_id: str):
             # Update metadata to cancelled first
             metadata["status"] = "cancelled"
             metadata["cancelled_at"] = datetime.now().isoformat()
-            print(f"[{run_id}] Run stopped for deletion")
         
         # Actually delete files (ephemeral + volume final CSV)
         run_dir = RUNS_DIR / run_id
@@ -3261,23 +3206,19 @@ def delete_run(run_id: str):
             # Delete ephemeral run directory
             if run_dir.exists():
                 shutil.rmtree(run_dir)
-                print(f"[{run_id}] Deleted ephemeral run directory: {run_dir}")
 
             # Delete checkpoint file if it exists
             if checkpoint_file.exists():
                 checkpoint_file.unlink()
-                print(f"[{run_id}] Deleted checkpoint file: {checkpoint_file}")
 
             # Delete final CSV from volume if it exists
             final_csv_path = metadata.get("final_csv_path")
             if final_csv_path and Path(final_csv_path).exists():
                 try:
                     Path(final_csv_path).unlink()
-                    print(f"[{run_id}] Deleted final CSV from volume: {final_csv_path}")
                 except Exception:
                     pass
         except Exception as e:
-            print(f"[{run_id}] Warning: Error deleting files: {e}")
 
         # Mark as deleted in metadata
         metadata["deleted"] = True
@@ -3291,7 +3232,6 @@ def delete_run(run_id: str):
         pipeline_runs.pop(run_id, None)
         running_threads.pop(run_id, None)
 
-        print(f"[{run_id}] Run deleted and files removed")
         
         response = jsonify({
             "status": "success",
@@ -3348,7 +3288,6 @@ def archive_run(run_id: str):
         # Update Postgres
         queue_store.update_run(run_id, archived=True)
 
-        print(f"[{run_id}] Run archived")
         
         response = jsonify({
             "status": "success",
@@ -3405,7 +3344,6 @@ def unarchive_run(run_id: str):
         # Update Postgres
         queue_store.update_run(run_id, archived=False)
 
-        print(f"[{run_id}] Run unarchived")
         
         response = jsonify({
             "status": "success",
@@ -3420,6 +3358,27 @@ def unarchive_run(run_id: str):
         })
         error_response.headers.add("Access-Control-Allow-Origin", "*")
         return error_response, 500
+
+
+@app.route("/admin/upload-csv", methods=["POST"])
+@require_auth
+def admin_upload_csv():
+    """Upload a CSV file to the persistent volume (for recovery/restore)."""
+    try:
+        data = request.get_json(force=True)
+        filename = data.get("filename", "").strip()
+        content = data.get("content", "")
+        if not filename or not content:
+            return jsonify({"status": "error", "error": "filename and content required"}), 400
+        safe_name = Path(filename).name
+        if not safe_name.endswith(".csv"):
+            return jsonify({"status": "error", "error": "filename must end with .csv"}), 400
+        dest = VOLUME_DIR / safe_name
+        with open(dest, "w") as f:
+            f.write(content)
+        return jsonify({"status": "ok", "path": str(dest), "size": len(content)}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 
 @app.route("/runs/<run_id>/download", methods=["GET"])
@@ -3482,26 +3441,41 @@ def not_found(e):
         "available_endpoints": ["/", "/health", "/debug/volume", "/notify/test-email", "/run-pipeline", "/queue", "/queue/<job_id>", "/pipeline-status/<run_id>", "/runs", "/runs/<run_id>/download", "/runs/<run_id>/stop", "/runs/<run_id>/delete", "/runs/<run_id>/resume", "/runs/<run_id>/archive", "/runs/<run_id>/unarchive"]
     }), 404
 
-# Cleanup old runs on startup to prevent storage exhaustion
-print("[STARTUP] Running cleanup of old runs...")
-cleanup_old_runs()
+# --- Bootstrap: role-based startup ---
+_bootstrap_lock = threading.Lock()
+_bootstrap_done = False
 
-queue_store.init_tables()
-if True:  # Always start worker threads with Postgres
-    _school_q_thread = threading.Thread(target=_school_queue_worker_loop, daemon=True)
-    _school_q_thread.start()
-    # Launch county processor worker threads (one per WORKERS_PER_REPLICA)
-    n_proc = max(1, WORKERS_PER_REPLICA)
-    for _i in range(n_proc):
-        _tag = f"{_SCHOOL_PROCESS_ID}-w{_i}"
-        threading.Thread(
-            target=_county_processor_worker_loop,
-            args=(_tag,),
-            daemon=True,
-        ).start()
-    # Launch aggregation recovery thread
-    threading.Thread(target=_school_aggregation_recovery_loop, daemon=True).start()
-    print(f"[STARTUP] Queue worker + {n_proc} county processors + aggregation recovery started")
+
+def _ensure_api_bootstrap() -> None:
+    global _bootstrap_done
+    with _bootstrap_lock:
+        if _bootstrap_done:
+            return
+        _bootstrap_done = True
+        log_warn(f"Bootstrap: ROLE={ROLE} PID={os.getpid()} HOST={socket.gethostname()}")
+        _repair_stuck_metadata()
+        cleanup_old_runs()
+        queue_store.init_tables()
+        if IS_MANAGER:
+            log_warn("Manager mode: starting queue worker (0 county workers)")
+            threading.Thread(target=_school_queue_worker_loop, daemon=True).start()
+        elif IS_WORKER:
+            n_proc = max(1, WORKERS_PER_REPLICA)
+            log_warn(f"Worker mode: starting {n_proc} county processor(s)")
+            try:
+                queue_store.release_stale_claims(socket.gethostname())
+            except Exception as e:
+                log_warn(f"Crash recovery failed: {e}")
+            for _i in range(n_proc):
+                _tag = f"{_SCHOOL_PROCESS_ID}-w{_i}"
+                threading.Thread(
+                    target=_county_processor_worker_loop,
+                    args=(_tag,),
+                    daemon=True,
+                ).start()
+
+
+_ensure_api_bootstrap()
 
 # Production: Use Waitress server
 # NOTE: If Railway runs this file directly (bypassing Dockerfile ENTRYPOINT),

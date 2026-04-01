@@ -26,13 +26,7 @@ def _maybe_traceback():
 
 # Import shared models
 from assets.shared.models import School, Page, PageContent, Contact
-from school_run_log import (
-    log_school_skip,
-    log_school_success,
-    log_county_done,
-    log_err,
-    log_warn,
-)
+from school_run_log import log_err, log_warn
 
 # Import streaming steps
 # Handle hyphens in filenames using importlib.util
@@ -133,9 +127,6 @@ class StreamingPipeline:
         self.max_schools = max_schools
         
         # Initialize step processors
-        # Debug: Verify API key is being passed
-        if not google_api_key or len(google_api_key) < 10:
-            print(f"WARNING: Google API key appears invalid in Pipeline (length: {len(google_api_key) if google_api_key else 0})")
         self.school_searcher = SchoolSearcher(google_api_key, global_max_api_calls, max_schools=max_schools, target_state=state)
         
         # Initialize LLM school filter if OpenAI key provided
@@ -163,7 +154,7 @@ class StreamingPipeline:
         self.llm_parser = step7.LLMParser(openai_api_key, model="gpt-4o-mini")
         self.csv_parser = step8.CSVParser()
         self.deduplicator = step9.ContactDeduplicator(email_cleaner=self.csv_parser.clean_email)
-        self.title_filter = step10.TitleFilter(openai_api_key, model="gpt-4o-mini")
+        self.title_filter = step10.TitleFilter(openai_api_key, model="gpt-4o-mini", batch_size=10)
         self.contact_splitter = step11_contact_splitter.ContactSplitter()
         self.final_compiler = step13_final_compiler.FinalCompiler()
         self.enable_hunter_io = os.getenv('HUNTER_IO_API_KEY') is not None
@@ -180,6 +171,10 @@ class StreamingPipeline:
             'pages_collected': 0,
             'contacts_extracted': 0,
             'contacts_with_emails': 0,
+            'places_api_calls': 0,
+            'openai_calls': 0,
+            'openai_prompt_tokens': 0,
+            'openai_completion_tokens': 0,
         }
     
     def _get_contact_key(self, contact: Contact) -> str:
@@ -224,18 +219,10 @@ class StreamingPipeline:
             filtered_school, filter_reason = filter_result, None
 
         if not filtered_school:
-            reason = filter_reason or "unknown"
-            if "LLM rejected" in reason:
-                log_school_skip(school.name, "filtered (LLM)")
-            elif "failed pre-filters" in reason:
-                log_school_skip(school.name, "filtered (pre-filter)")
-            else:
-                log_school_skip(school.name, f"filtered ({reason[:40]})")
             self.stats['schools_filtered_out'] += 1
             return []
 
         if not filtered_school.website:
-            log_school_skip(school.name, "no website")
             return []
 
         # Step 3: Discover pages
@@ -244,7 +231,6 @@ class StreamingPipeline:
             self.stats['pages_discovered'] += len(pages)
 
             if not pages:
-                log_school_skip(school.name, "no pages found")
                 return []
         except Exception as e:
             log_err(f"Page discovery: {school.name}: {e}")
@@ -263,7 +249,6 @@ class StreamingPipeline:
                 continue
         
         if not page_contents:
-            log_school_skip(school.name, "no content collected")
             return []
         
         # Step 5: Parse content with LLM
@@ -274,11 +259,6 @@ class StreamingPipeline:
                 all_contacts.extend(contacts)
             except Exception as e:
                 continue
-        
-        if all_contacts:
-            log_school_success(school.name, len(all_contacts))
-        else:
-            log_school_skip(school.name, "no contacts")
         
         self.stats['schools_processed'] += 1
         return all_contacts
@@ -315,8 +295,6 @@ class StreamingPipeline:
         except Exception as e:
             log_err(f"Page discovery inner: {e}")
             _maybe_traceback()
-            import traceback
-            traceback.print_exc()
         
         return pages
     
@@ -347,8 +325,6 @@ class StreamingPipeline:
         except Exception as e:
             log_err(f"Content collection: {e}")
             _maybe_traceback()
-            import traceback
-            traceback.print_exc()
             return None
     
     def _parse_content_with_llm(self, page_content: PageContent, school: School) -> List[Contact]:
@@ -393,18 +369,21 @@ class StreamingPipeline:
             # Step 9: Deduplicate contacts from this page
             deduped_contacts = self.deduplicator.deduplicate_contacts(page_contacts_dicts)
             
-            # Step 10 (previously Step 11): Filter contacts by title
-            filtered_contacts = []
-            for contact_dict in deduped_contacts:
-                filter_payload = {
-                    'first_name': contact_dict.get('first_name', ''),
-                    'last_name': contact_dict.get('last_name', ''),
-                    'title': contact_dict.get('title', ''),
-                    'email': contact_dict.get('email', ''),
-                    'phone': contact_dict.get('phone', '')
+            # Step 10: Batch filter contacts by title (~8x faster)
+            filter_payloads = [
+                {
+                    'first_name': cd.get('first_name', ''),
+                    'last_name': cd.get('last_name', ''),
+                    'title': cd.get('title', ''),
+                    'email': cd.get('email', ''),
+                    'phone': cd.get('phone', '')
                 }
-                
-                should_keep = self.title_filter.filter_contact(filter_payload, max_retries=1)
+                for cd in deduped_contacts
+            ]
+            batch_results = self.title_filter.filter_contacts_batch(filter_payloads, max_retries=1)
+
+            filtered_contacts = []
+            for contact_dict, should_keep in zip(deduped_contacts, batch_results):
                 if should_keep:
                     contact = Contact(
                         first_name=contact_dict.get('first_name', '').strip(),
@@ -421,8 +400,6 @@ class StreamingPipeline:
         except Exception as e:
             log_err(f"LLM parsing: {e}")
             _maybe_traceback()
-            import traceback
-            traceback.print_exc()
             return []
     
     def run(
@@ -435,91 +412,58 @@ class StreamingPipeline:
         Run the streaming pipeline.
         Processes schools one at a time through all steps.
         """
-        print(f"\nPipeline started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Output: {output_csv}\n")
-        
-        # Step 1: Discover schools (generator - yields one at a time)
-        print("Discovering schools...")
         schools_discovered = 0
-        
-        # Load counties from state file if not provided
+
         if not counties:
             if not hasattr(self, '_state') or not self._state:
                 raise ValueError("--state parameter is required for county-based search")
             counties = load_counties_from_state(self._state)
-        
-        # Use 6 search terms per county (original 5 + Episcopal)
+
         max_search_terms_per_county = 6
-        
+
         school_generator = self.school_searcher.discover_schools(
             counties=counties,
             state=self._state or 'Texas',
             batch_size=batch_size,
             max_search_terms=max_search_terms_per_county
         )
-        
-        first_school = True
+
         for school in school_generator:
             schools_discovered += 1
             self.stats['schools_discovered'] = schools_discovered
-            
-            # Add blank line between schools (except before first)
-            if not first_school:
-                print()
-            first_school = False
-            
-            # Process this school through all steps
+
             contacts = self.process_single_lead(school)
-            
-            # Track unique contacts as we add them
-            unique_before = len(self.unique_contacts_set)
-            new_unique_count = 0
+
             for contact in contacts:
                 contact_key = self._get_contact_key(contact)
                 if contact_key not in self.unique_contacts_set:
                     self.unique_contacts_set.add(contact_key)
-                    new_unique_count += 1
-            
-            # Accumulate contacts (keep full list for final deduplication)
+
             self.all_contacts.extend(contacts)
-            
-            # Print progress with unique count (standardized format)
-            total_contacts = len(self.all_contacts)
-            unique_contacts = len(self.unique_contacts_set)
-            processed = self.stats['schools_processed']
-            delta_str = f" (+{new_unique_count})" if new_unique_count > 0 else ""
-            print(f"Progress: {schools_discovered} schools | {processed}/{schools_discovered} processed | {unique_contacts} contacts{delta_str}")
-        
-        # Flush any pending LLM filter batches
+
         if self.llm_school_filter:
             self.llm_school_filter.flush()
-        
-        # Blank line before final summary
-        print()
-        
-        # Generate filename for county-level output (will be aggregated later)
+
         if not output_csv or output_csv == "final_contacts.csv":
             output_csv = "final_contacts.csv"
-        
-        # Write raw contacts to CSV (Steps 11, 12, 13 will run globally after all counties complete)
-        # This is per-county output that will be aggregated and enriched later
+
         if self.all_contacts:
             self._write_final_csv(self.all_contacts, output_csv)
-        else:
-            print(f"No contacts to write to {output_csv}")
-        
+
         # Update stats
         self.stats['contacts_extracted'] = len(self.all_contacts)
         self.stats['unique_contacts'] = len(self.unique_contacts_set)
-        
-        # Count contacts with/without emails for stats (but don't process them yet)
+
         contacts_with_emails = [c for c in self.all_contacts if c.has_email()]
         contacts_without_emails = [c for c in self.all_contacts if not c.has_email()]
         self.stats['contacts_with_emails'] = len(contacts_with_emails)
         self.stats['contacts_without_emails'] = len(contacts_without_emails)
-        
-        # Print final summary
-        self._print_summary()
+
+        # Cost tracking
+        self.stats["places_api_calls"] = self.school_searcher.stats.get("total_api_calls", 0)
+        self.stats["openai_calls"] = getattr(self.llm_parser, "total_api_calls", 0) + getattr(self.title_filter, "total_api_calls", 0)
+        self.stats["openai_prompt_tokens"] = getattr(self.llm_parser, "total_prompt_tokens", 0) + getattr(self.title_filter, "total_prompt_tokens", 0)
+        self.stats["openai_completion_tokens"] = getattr(self.llm_parser, "total_completion_tokens", 0) + getattr(self.title_filter, "total_completion_tokens", 0)
     
     def cleanup(self):
         """
@@ -544,31 +488,16 @@ class StreamingPipeline:
     def _write_final_csv(self, contacts: List[Contact], filename: str):
         """Write contacts to final CSV file"""
         if not contacts:
-            print(f"No contacts to write to {filename}")
             return
-        
-        fieldnames = ['first_name', 'last_name', 'title', 'email', 'phone', 
+
+        fieldnames = ['first_name', 'last_name', 'title', 'email', 'phone',
                      'school_name', 'source_url']
-        
+
         with open(filename, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for contact in contacts:
                 writer.writerow(contact.to_dict())
-        
-        from pathlib import Path
-        filename_only = Path(filename).name
-        print(f"[SAVE] Wrote {len(contacts)} contacts -> \"{filename_only}\"")
-    
-    
-    def _print_summary(self):
-        """Print final pipeline summary"""
-        print(f"\n[COMPLETE] Pipeline complete: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"  Schools: {self.stats['schools_discovered']} discovered, {self.stats['schools_processed']} processed")
-        if self.stats['contacts_extracted'] > 0:
-            print(f"  Contacts: {self.stats['unique_contacts']} unique ({self.stats['contacts_with_emails']} with emails)")
-        else:
-            print("  Contacts: 0")
 
 
 if __name__ == "__main__":
@@ -587,14 +516,10 @@ if __name__ == "__main__":
     google_api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
     openai_api_key = os.getenv("OPENAI_API_KEY", "")
     
-    # Validate API keys
     if not google_api_key or len(google_api_key) < 10:
-        print(f"ERROR: GOOGLE_PLACES_API_KEY environment variable not set or invalid")
-        sys.exit(1)
-    
+        sys.exit("GOOGLE_PLACES_API_KEY not set or invalid")
     if not openai_api_key or len(openai_api_key) < 10:
-        print(f"ERROR: OPENAI_API_KEY environment variable not set or invalid")
-        sys.exit(1)
+        sys.exit("OPENAI_API_KEY not set or invalid")
     
     # Create pipeline
     pipeline = StreamingPipeline(
@@ -609,11 +534,7 @@ if __name__ == "__main__":
     # Determine counties to process
     counties_to_process = None
     if args.county:
-        counties_to_process = args.county  # Already a list from action='append'
-        if len(counties_to_process) == 1:
-            print(f"Processing single county: {counties_to_process[0]}")
-        else:
-            print(f"Processing {len(counties_to_process)} counties: {', '.join(counties_to_process)}")
+        counties_to_process = args.county
     
     # Run pipeline
     try:
@@ -623,16 +544,9 @@ if __name__ == "__main__":
             output_csv=args.output
         )
     except KeyboardInterrupt:
-        print("\n\nPipeline interrupted by user.")
-        print(f"Partial results: {len(pipeline.all_contacts)} contacts extracted")
         if pipeline.all_contacts:
             partial_output = args.output or f"partial_{pipeline._state or 'Texas'}_leads.csv"
-            pipeline._write_final_csv(
-                pipeline.all_contacts,
-                partial_output
-            )
+            pipeline._write_final_csv(pipeline.all_contacts, partial_output)
     except Exception as e:
-        print(f"\n\nPipeline failed: {e}")
-        traceback.print_exc()
-        sys.exit(1)
+        sys.exit(f"Pipeline failed: {e}")
 
